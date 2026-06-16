@@ -254,6 +254,37 @@ func TestAgentDefinitionCreateSession(t *testing.T) {
 	testAgentDefinitionCreateSession(t)
 }
 
+func TestAgentSessionMessageUsesDefinitionProvider(t *testing.T) {
+	ctx := context.Background()
+	service, runtime, _ := newTestServiceAPIHarness(t)
+	created, err := service.CreateAgentDefinition(ctx, connect.NewRequest(&agentcomposev1.CreateAgentDefinitionRequest{
+		Name:     "Claude Runner",
+		Enabled:  true,
+		Provider: "claude",
+	}))
+	if err != nil {
+		t.Fatalf("CreateAgentDefinition returned error: %v", err)
+	}
+	sessionResp, err := service.CreateAgentSession(ctx, connect.NewRequest(&agentcomposev1.CreateAgentSessionRequest{
+		AgentId: created.Msg.GetAgent().GetAgentId(),
+	}))
+	if err != nil {
+		t.Fatalf("CreateAgentSession returned error: %v", err)
+	}
+	sessionID := sessionResp.Msg.GetSession().GetSummary().GetSessionId()
+	_, err = service.SendAgentMessage(ctx, connect.NewRequest(&agentcomposev1.SendAgentMessageRequest{
+		SessionId: sessionID,
+		Agent:     "codex",
+		Message:   "summarize",
+	}))
+	if err != nil {
+		t.Fatalf("SendAgentMessage returned error: %v", err)
+	}
+	if len(runtime.providers) != 1 || runtime.providers[0] != "claude" {
+		t.Fatalf("runtime providers = %v, want [claude]", runtime.providers)
+	}
+}
+
 func testAgentDefinitionCreateSession(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()

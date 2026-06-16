@@ -697,7 +697,8 @@ func (s *Service) SendAgentMessage(ctx context.Context, req *connect.Request[age
 	if message == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("message is required"))
 	}
-	cell, userEvent, assistantEvent, err := s.executor.ExecuteAgent(ctx, session, req.Msg.GetAgent(), message)
+	agent := s.resolveSessionAgentProvider(ctx, session, req.Msg.GetAgent())
+	cell, userEvent, assistantEvent, err := s.executor.ExecuteAgent(ctx, session, agent, message)
 	_ = cell
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -719,6 +720,7 @@ func (s *Service) SendAgentMessageStream(ctx context.Context, req *connect.Reque
 	if message == "" {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("message is required"))
 	}
+	agent := s.resolveSessionAgentProvider(ctx, session, req.Msg.GetAgent())
 
 	streamErr := func(sendErr error) error {
 		if sendErr == nil {
@@ -727,7 +729,7 @@ func (s *Service) SendAgentMessageStream(ctx context.Context, req *connect.Reque
 		return connect.NewError(connect.CodeUnknown, sendErr)
 	}
 
-	cell, userEvent, assistantEvent, err := s.executor.ExecuteAgentStream(ctx, session, req.Msg.GetAgent(), message, AgentExecutionStream{
+	cell, userEvent, assistantEvent, err := s.executor.ExecuteAgentStream(ctx, session, agent, message, AgentExecutionStream{
 		OnStart: func(cell NotebookCell) error {
 			return streamErr(stream.Send(&agentcomposev1.SendAgentMessageStreamResponse{
 				EventType: agentcomposev1.SendAgentMessageStreamEventType_SEND_AGENT_MESSAGE_STREAM_EVENT_TYPE_STARTED,
@@ -761,6 +763,34 @@ func (s *Service) SendAgentMessageStream(ctx context.Context, req *connect.Reque
 		UserEvent:      toProtoEvent(userEvent),
 		AssistantEvent: toProtoEvent(assistantEvent),
 	}))
+}
+
+func (s *Service) resolveSessionAgentProvider(ctx context.Context, session *Session, requested string) string {
+	provider := normalizeAgentKind(requested)
+	if session == nil {
+		return provider
+	}
+	agentID := sessionTagValue(session.Summary.Tags, agentSessionTagID)
+	if agentID == "" || !sessionHasAgentTag(session, agentID) {
+		return provider
+	}
+	agent, err := s.configDB.GetAgentDefinition(ctx, agentID)
+	if err != nil {
+		return provider
+	}
+	if saved := normalizeAgentKind(agent.Provider); saved != "" {
+		return saved
+	}
+	return provider
+}
+
+func sessionTagValue(tags []SessionTag, name string) string {
+	for _, tag := range tags {
+		if strings.TrimSpace(tag.Name) == name {
+			return strings.TrimSpace(tag.Value)
+		}
+	}
+	return ""
 }
 
 func prepareStreamingHeaders(headers http.Header) {
