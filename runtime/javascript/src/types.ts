@@ -16,7 +16,7 @@ export interface RunnerOptions {
   workspace: string;
   home: string;
   runtimeRoot: string;
-  mpiContext: string;
+  systemContext: string;
   outputSchema?: RuntimeJsonSchema;
 }
 

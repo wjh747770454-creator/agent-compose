@@ -847,6 +847,7 @@ func (h *loaderRunHost) Agent(ctx context.Context, prompt string, request Loader
 	}
 
 	agent := normalizeAgentKind(request.Agent)
+	var agentDefinitionID string
 	if agent == "" {
 		agentDefinition, err := h.manager.loaderAgentDefinition(ctx, h.loader)
 		if err != nil {
@@ -854,7 +855,11 @@ func (h *loaderRunHost) Agent(ctx context.Context, prompt string, request Loader
 		}
 		if agentDefinition != nil {
 			agent = normalizeAgentKind(agentDefinition.Provider)
+			agentDefinitionID = strings.TrimSpace(agentDefinition.ID)
 		}
+	}
+	if agentDefinitionID == "" {
+		agentDefinitionID = strings.TrimSpace(h.loader.Summary.AgentID)
 	}
 	if agent == "" {
 		agent = normalizeAgentKind(h.loader.Summary.DefaultAgent)
@@ -864,10 +869,11 @@ func (h *loaderRunHost) Agent(ctx context.Context, prompt string, request Loader
 	}
 
 	cell, _, _, execErr := h.manager.executor.ExecuteAgentRequest(ctx, session, ExecuteAgentRequest{
-		Agent:            agent,
-		Message:          prompt,
-		Timeout:          request.Timeout,
-		OutputSchemaJSON: request.OutputSchema,
+		Agent:             agent,
+		AgentDefinitionID: agentDefinitionID,
+		Message:           prompt,
+		Timeout:           request.Timeout,
+		OutputSchemaJSON:  request.OutputSchema,
 	})
 	finalText := firstNonEmpty(cell.Output, cell.Stdout, cell.Stderr)
 	jsonValue, jsonErr := loaderJSONResult(finalText, request.OutputSchema, "agent finalText")

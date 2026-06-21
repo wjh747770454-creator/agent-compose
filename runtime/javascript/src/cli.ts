@@ -22,6 +22,7 @@ export function createProgram(options: { exitOverride?: boolean } = {}): Command
     .command("prompt")
     .requiredOption("--provider <provider>", "agent provider: codex, claude, or gemini")
     .requiredOption("--message-file <path>", "prompt file path")
+    .option("--system-prompt-file <path>", "agent identity instructions file")
     .option("--state-root <path>", "agent-compose runtime state root")
     .option("--workspace <path>", "agent working directory")
     .option("--home <path>", "agent HOME directory")
@@ -29,6 +30,7 @@ export function createProgram(options: { exitOverride?: boolean } = {}): Command
     .action(async (options: {
       provider: string;
       messageFile: string;
+      systemPromptFile?: string;
       stateRoot?: string;
       workspace?: string;
       home?: string;

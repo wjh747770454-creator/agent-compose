@@ -38,16 +38,18 @@ type AgentExecutionStream struct {
 }
 
 type ExecuteAgentRequest struct {
-	Agent            string
-	Message          string
-	Timeout          time.Duration
-	OutputSchemaJSON string
-	Stream           AgentExecutionStream
+	Agent             string
+	AgentDefinitionID string
+	Message           string
+	Timeout           time.Duration
+	OutputSchemaJSON  string
+	Stream            AgentExecutionStream
 }
 
 type Executor struct {
 	config   *appconfig.Config
 	store    *Store
+	configDB *ConfigStore
 	runtimes RuntimeProvider
 	streams  *SessionStreamBroker
 }
@@ -56,6 +58,7 @@ func NewExecutor(di do.Injector) (*Executor, error) {
 	return &Executor{
 		config:   do.MustInvoke[*appconfig.Config](di),
 		store:    do.MustInvoke[*Store](di),
+		configDB: do.MustInvoke[*ConfigStore](di),
 		runtimes: do.MustInvoke[RuntimeProvider](di),
 		streams:  do.MustInvoke[*SessionStreamBroker](di),
 	}, nil
@@ -845,7 +848,7 @@ func (e *Executor) executeAgent(ctx context.Context, session *Session, request E
 		}
 	}
 
-	execResult, result, err := e.executeAgentRun(execCtx, session, agent, message, request.OutputSchemaJSON, streamWriter)
+	execResult, result, err := e.executeAgentRun(execCtx, session, agent, request.AgentDefinitionID, message, request.OutputSchemaJSON, streamWriter)
 	streamErrMu.Lock()
 	deferredStreamErr := streamErr
 	streamErrMu.Unlock()

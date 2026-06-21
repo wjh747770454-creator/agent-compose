@@ -23,8 +23,12 @@ export class GeminiRunner {
       stderr: "",
     };
 
+    const userPrompt = this.options.systemContext
+      ? `${this.options.systemContext}\n\n${promptText}`
+      : promptText;
+
     const child = spawn("gemini", [
-      "-p", promptText,
+      "-p", userPrompt,
       "--output-format", "stream-json",
       "--approval-mode", "yolo",
     ], {

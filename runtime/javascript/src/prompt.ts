@@ -7,11 +7,13 @@ import { normalizeProvider } from "./provider.js";
 import { ClaudeRunner } from "./runners/claude.js";
 import { CodexRunner } from "./runners/codex.js";
 import { GeminiRunner } from "./runners/gemini.js";
+import { buildSystemContext, readSystemPromptFile } from "./system-context.js";
 import type { AgentResult, RuntimeJsonSchema } from "./types.js";
 
 export interface PromptCommandOptions {
   provider?: string;
   messageFile?: string;
+  systemPromptFile?: string;
   stateRoot?: string;
   workspace?: string;
   home?: string;
@@ -35,8 +37,20 @@ export async function runPromptCommand(commandOptions: PromptCommandOptions): Pr
   const outputSchema = commandOptions.outputSchemaFile
     ? parseOutputSchema(await readText(path.resolve(commandOptions.outputSchemaFile)))
     : undefined;
+  const systemPromptFile = commandOptions.systemPromptFile
+    ? path.resolve(commandOptions.systemPromptFile)
+    : undefined;
+  const systemPrompt = await readSystemPromptFile(systemPromptFile);
   const mpi = await readMpiContext(stateRoot);
-  const options = { provider, stateRoot, workspace, home, runtimeRoot: mpi.runtimeRoot, mpiContext: mpi.context, outputSchema };
+  const options = {
+    provider,
+    stateRoot,
+    workspace,
+    home,
+    runtimeRoot: mpi.runtimeRoot,
+    systemContext: buildSystemContext(systemPrompt, mpi.context),
+    outputSchema,
+  };
   if (provider === "codex") {
     return await new CodexRunner(options).runPrompt(promptText);
   }
