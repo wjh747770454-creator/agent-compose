@@ -673,7 +673,10 @@ func microsandboxPullPolicyForImageRef(imageRef string) microsandbox.PullPolicy 
 
 func (r *microsandboxRuntime) launchJupyter(ctx context.Context, sandbox *microsandbox.Sandbox, proxyState ProxyState) error {
 	command := jupyterLaunchCommand(r.config, proxyState, true)
-	handle, err := sandbox.ExecStream(ctx, "/bin/bash", []string{"-lc", command}, r.execOptions(ctx, ExecSpec{Cwd: r.config.GuestWorkspacePath})...)
+	// Run from "/" (not GuestWorkspacePath): /workspace is created by the bootstrap
+	// inside command itself, so cwd=/workspace would fail chdir before the script runs.
+	// Matches the boxlite driver; jupyter still serves /workspace via --ServerApp.root_dir.
+	handle, err := sandbox.ExecStream(ctx, "/bin/bash", []string{"-lc", command}, r.execOptions(ctx, ExecSpec{Cwd: "/"})...)
 	if err != nil {
 		return err
 	}
