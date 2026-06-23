@@ -16,6 +16,13 @@ vars:
   BUILD_ALL_PROXY: '{{default "" .ALL_PROXY}}'
   BUILD_REGISTRY_MIRROR: '{{default "docker.io" .REGISTRY_MIRROR}}'
   BUILD_GOPROXY: '{{default "https://goproxy.cn,direct" .GOPROXY}}'
+  GOOS:
+    sh: |
+      if [ -n "${GOOS:-}" ]; then
+        printf '%s\n' "$GOOS"
+      else
+        ./scripts/with-go-toolchain.sh go env GOOS
+      fi
   GOARCH:
     sh: |
       if [ -n "${GOARCH:-}" ]; then
@@ -196,7 +203,7 @@ tasks:
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - mkdir -p ./build/
-      - CGO_ENABLED=0 GOOS=linux GOARCH={{.GOARCH}} {{.GO_TOOLCHAIN_ENV}} go build -v -ldflags '{{.GO_LDFLAGS}}' -tags netgo,osusergo -o ./build/agent-compose ./cmd/agent-compose/
+      - CGO_ENABLED=0 GOOS={{.GOOS}} GOARCH={{.GOARCH}} {{.GO_TOOLCHAIN_ENV}} go build -v -ldflags '{{.GO_LDFLAGS}}' -tags netgo,osusergo -o ./build/agent-compose ./cmd/agent-compose/
       - GOCACHE={{.GO_BUILD_CACHE_DIR}} {{.GO_TOOLCHAIN_ENV}} go build ./proto/agentcompose/v2 ./proto/agentcompose/v2/agentcomposev2connect
 
   build:agent-compose:boxlite:
