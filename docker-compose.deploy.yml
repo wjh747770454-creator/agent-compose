@@ -6,6 +6,8 @@ services:
     restart: always
     privileged: true
     command: ["/app/agent-compose", "daemon"]
+    devices:
+      - /dev/kvm:/dev/kvm
     environment:
       DATA_ROOT: /data
       SESSION_ROOT: /data/sessions

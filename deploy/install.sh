@@ -6,9 +6,8 @@
 # multi-arch container images from the registry (ghcr.io by default; Docker
 # selects the right architecture automatically).
 #
-# Run it from an extracted installer archive, from the self-extracting
-# installer, or via `curl ... | bash`. On first run it generates an admin
-# password and prints it to the terminal.
+# Run it from an extracted installer archive or via `curl ... | bash`. On first
+# run it generates an admin password and prints it to the terminal.
 
 set -euo pipefail
 
@@ -22,6 +21,7 @@ IMAGE_PREFIX=""
 PORT=""
 NO_START=0
 UPGRADE=0
+YES="${AGENT_COMPOSE_YES:-0}"
 
 log()  { printf '\033[0;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[0;33mwarn:\033[0m %s\n' "$*" >&2; }
@@ -42,11 +42,13 @@ Options:
                          instead of the default registry
   --upgrade              Update existing image refs to this installer version
   --no-start             Lay down files but do not pull images or start
+  -y, --yes              Run without the interactive confirmation prompt
   -h, --help             Show this help
 
 Environment:
   AGENT_COMPOSE_REPO          GitHub repo for downloads (owner/name)
   AGENT_COMPOSE_INSTALL_DIR   Same as --dir
+  AGENT_COMPOSE_YES=1         Same as --yes
 EOF
 }
 
@@ -61,6 +63,7 @@ while [ $# -gt 0 ]; do
     --image-prefix) IMAGE_PREFIX="${2:?--image-prefix needs a value}"; shift 2 ;;
     --upgrade)      UPGRADE=1; shift ;;
     --no-start)     NO_START=1; shift ;;
+    -y|--yes)       YES=1; shift ;;
     -h|--help)      usage; exit 0 ;;
     *)              die "unknown option: $1 (try --help)" ;;
   esac
@@ -102,6 +105,13 @@ set_env() { # $1=file $2=key $3=value
 
 get_env() { # $1=file $2=key -> value (may be empty)
   grep "^$2=" "$1" 2>/dev/null | head -n1 | cut -d= -f2- || true
+}
+
+truthy() {
+  case "${1:-}" in
+    1|yes|YES|true|TRUE|y|Y) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 apply_image_refs() { # $1=file $2=mode(set-missing|overwrite)
@@ -193,6 +203,49 @@ else
   die "docker compose (v2) is required"
 fi
 [ -e /dev/kvm ] || warn "/dev/kvm not present; the boxlite/microsandbox drivers need it (the default docker driver does not)"
+
+# --------------------------------------------------------------------------
+# Explicit confirmation before changing the installation directory
+# --------------------------------------------------------------------------
+if [ -f "$INSTALL_DIR/.env" ]; then
+  ENV_STATE="existing .env will be preserved"
+else
+  ENV_STATE="new .env will be created with generated credentials"
+fi
+if [ "$UPGRADE" -eq 1 ]; then
+  IMAGE_STATE="image refs in .env will be updated to this installer version"
+else
+  IMAGE_STATE="existing image refs in .env will be kept"
+fi
+if [ "$NO_START" -eq 1 ]; then
+  START_STATE="stack will not be started (--no-start)"
+else
+  START_STATE="images will be pulled and the stack will be started"
+fi
+
+cat <<EOF
+
+agent-compose deployment plan
+  Source:       $BUNDLE_SRC
+  Target dir:   $INSTALL_DIR
+  Data dir:     $INSTALL_DIR/data/agent-compose
+  Config:       $ENV_STATE
+  Images:       $IMAGE_STATE
+  Start:        $START_STATE
+
+EOF
+
+if ! truthy "$YES"; then
+  if [ ! -r /dev/tty ]; then
+    die "confirmation requires a TTY; rerun with --yes or AGENT_COMPOSE_YES=1"
+  fi
+  printf 'Continue? [y/N] ' > /dev/tty
+  read -r answer < /dev/tty
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *) die "installation cancelled" ;;
+  esac
+fi
 
 # --------------------------------------------------------------------------
 # Lay down files

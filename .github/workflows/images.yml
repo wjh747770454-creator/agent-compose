@@ -196,67 +196,12 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ steps.meta.outputs.version }}
 
-  binary:
-    name: Build binary (${{ matrix.goos }}/${{ matrix.goarch }})
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
-            version="$(git describe --always --tags --long 2>/dev/null || git rev-parse --short=12 HEAD)"
-          fi
-          package="agent-compose-${version}-${GOOS}-${GOARCH}"
-          mkdir -p "dist/${package}"
-          go build \
-            -trimpath \
-            -tags netgo,osusergo \
-            -ldflags "-s -w -X agent-compose/pkg/config.BuildVersion=${version}" \
-            -o "dist/${package}/agent-compose" \
-            ./cmd/agent-compose
-          go version -m "dist/${package}/agent-compose"
-          tar -C dist -czf "dist/${package}.tar.gz" "${package}"
-          sha256sum "dist/${package}.tar.gz" > "dist/${package}.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: agent-compose-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            dist/*.tar.gz
-            dist/*.sha256
-          if-no-files-found: error
-
   # Publish the installer assets. The stack pulls its multi-arch images from the
-  # registry at install time, so no per-arch image artifacts are shipped here.
+  # registry at install time, so no per-arch binary artifacts are shipped here.
   release:
     name: Publish GitHub release
     if: github.ref_type == 'tag'
     needs:
-      - binary
       - merge
     runs-on: ubuntu-latest
     permissions:
@@ -264,21 +209,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Download binary artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          pattern: agent-compose-*
-          merge-multiple: true
       - name: Build installer assets
         env:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq makeself
           out="${PWD}/upload"
           mkdir -p "${out}"
-          find release-assets -type f \( -name '*.tar.gz' -o -name '*.sha256' \) -exec cp {} "${out}/" \;
 
           # Standalone installer script for the `curl ... | bash` one-liner.
           cp deploy/install.sh "${out}/install.sh"
@@ -298,13 +235,10 @@ jobs:
             echo "DEFAULT_IMAGE=${IMAGE_PREFIX}/agent-compose-guest:${VERSION}"
           } > "${payload}/images/manifest.env"
 
-          # Tar archive (used by `curl | bash` remote mode) and a single-file
-          # self-extracting installer.
+          # Tar archive used by `curl | bash` remote mode and manual installs.
           tar -C "$(dirname "${payload}")" -czf "${out}/agent-compose-installer.tar.gz" agent-compose-installer
-          makeself --gzip "${payload}" "${out}/agent-compose-installer.run" \
-            "agent-compose installer ${VERSION}" ./install.sh
 
-          ( cd "${out}" && sha256sum ./*.tar.gz ./*.run > SHASUMS256.txt )
+          ( cd "${out}" && sha256sum ./*.tar.gz > SHASUMS256.txt )
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

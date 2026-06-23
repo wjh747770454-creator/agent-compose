@@ -9,24 +9,11 @@ automatically), so the installer itself is tiny.
 
 | Asset | Purpose |
 |-------|---------|
-| `agent-compose-installer.run` | Single-file self-extracting installer (arch-agnostic) |
-| `agent-compose-installer.tar.gz` | Same installer as a tar archive |
+| `agent-compose-installer.tar.gz` | Docker Compose installer bundle |
 | `install.sh` | Standalone installer for `curl \| bash` |
-| `agent-compose-<version>-<os>-<arch>.tar.gz` | Go binary archive |
-| `agent-compose-<version>-<os>-<arch>.tar.gz.sha256` | Per-binary checksum |
 | `SHASUMS256.txt` | Checksums |
 
 ## Quick start
-
-### Single-file installer (recommended)
-
-```bash
-chmod +x agent-compose-installer.run
-./agent-compose-installer.run                      # install with defaults
-./agent-compose-installer.run -- --dir /opt/agent-compose --port 8080
-```
-
-Arguments after `--` are passed to the embedded installer (see Options below).
 
 ### One-line install
 
@@ -40,6 +27,13 @@ curl -fsSL https://github.com/chaitin/agent-compose/releases/latest/download/ins
 tar -xzf agent-compose-installer.tar.gz
 cd agent-compose-installer
 ./install.sh
+```
+
+### Specific install directory
+
+```bash
+curl -fsSL https://github.com/chaitin/agent-compose/releases/latest/download/install.sh | \
+  bash -s -- --dir /opt/agent-compose --port 8080
 ```
 
 On first run the installer generates an admin password and prints it once:
@@ -61,6 +55,7 @@ On first run the installer generates an admin password and prints it once:
 ./install.sh --image-prefix registry.example.com/agent-compose   # mirror / private registry
 ./install.sh --upgrade                # update an existing install to this release
 ./install.sh --no-start               # write files but don't pull images or start
+./install.sh --yes                    # skip the confirmation prompt
 ```
 
 ## Requirements
@@ -87,5 +82,9 @@ before exposing the daemon beyond a trusted network.
 Re-running the installer refreshes the compose/nginx files and fills missing
 secrets or image refs, but it does not overwrite image refs already set in
 `.env` unless `--upgrade` is passed. Use `--upgrade` with a newer
-`agent-compose-installer.run` to update an existing installation to that
-release and restart the stack.
+installer to update an existing installation to that release and restart the
+stack.
+
+Before changing the installation directory, the installer prints a deployment
+plan and asks for confirmation. Use `--yes` or `AGENT_COMPOSE_YES=1` for
+non-interactive automation.
