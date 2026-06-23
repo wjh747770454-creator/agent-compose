@@ -9,7 +9,7 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     ports:
-      - "7410:7410"
+      - "127.0.0.1:7410:7410"
     environment:
       DATA_ROOT: /data
       SESSION_ROOT: /data/sessions

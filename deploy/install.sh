@@ -21,7 +21,6 @@ VERSION="latest"
 IMAGE_PREFIX=""
 PORT=""
 NO_START=0
-NO_AUTH=0
 UPGRADE=0
 
 log()  { printf '\033[0;36m==>\033[0m %s\n' "$*"; }
@@ -42,7 +41,6 @@ Options:
   --image-prefix <ref>   Pull images from this prefix (mirror / private registry)
                          instead of the default registry
   --upgrade              Update existing image refs to this installer version
-  --no-auth              Do not generate a password; run unauthenticated
   --no-start             Lay down files but do not pull images or start
   -h, --help             Show this help
 
@@ -62,7 +60,6 @@ while [ $# -gt 0 ]; do
     --version)      VERSION="${2:?--version needs a value}"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="${2:?--image-prefix needs a value}"; shift 2 ;;
     --upgrade)      UPGRADE=1; shift ;;
-    --no-auth)      NO_AUTH=1; shift ;;
     --no-start)     NO_START=1; shift ;;
     -h|--help)      usage; exit 0 ;;
     *)              die "unknown option: $1 (try --help)" ;;
@@ -226,13 +223,8 @@ if [ ! -f "$ENV_FILE" ]; then
 
   set_env "$ENV_FILE" AUTH_SECRET "$(gen_hex 32)"
 
-  if [ "$NO_AUTH" -eq 1 ]; then
-    set_env "$ENV_FILE" AUTH_PASSWORD ""
-    warn "running without authentication (--no-auth); bind to loopback / trusted networks only"
-  else
-    GENERATED_PASSWORD="$(gen_password)"
-    set_env "$ENV_FILE" AUTH_PASSWORD "$GENERATED_PASSWORD"
-  fi
+  GENERATED_PASSWORD="$(gen_password)"
+  set_env "$ENV_FILE" AUTH_PASSWORD "$GENERATED_PASSWORD"
 
   apply_image_refs "$ENV_FILE" overwrite
   [ -n "$PORT" ] && set_env "$ENV_FILE" AGENT_COMPOSE_HTTP_PORT "$PORT"
@@ -242,10 +234,7 @@ else
     set_env "$ENV_FILE" AUTH_SECRET "$(gen_hex 32)"
     log "Generated missing AUTH_SECRET in $ENV_FILE"
   fi
-  if [ "$NO_AUTH" -eq 1 ]; then
-    set_env "$ENV_FILE" AUTH_PASSWORD ""
-    warn "running without authentication (--no-auth); bind to loopback / trusted networks only"
-  elif [ -z "$(get_env "$ENV_FILE" AUTH_PASSWORD)" ]; then
+  if [ -z "$(get_env "$ENV_FILE" AUTH_PASSWORD)" ]; then
     GENERATED_PASSWORD="$(gen_password)"
     set_env "$ENV_FILE" AUTH_PASSWORD "$GENERATED_PASSWORD"
     log "Generated missing AUTH_PASSWORD in $ENV_FILE"
@@ -283,8 +272,6 @@ if [ -n "$GENERATED_PASSWORD" ]; then
   printf '    Username: %s\n' "$USERNAME"
   printf '    Password: \033[1m%s\033[0m\n' "$GENERATED_PASSWORD"
   printf '  Stored in %s (key AUTH_PASSWORD).\n' "$ENV_FILE"
-elif [ "$NO_AUTH" -eq 1 ]; then
-  printf '\n  Authentication is DISABLED. Restrict network access.\n'
 else
   printf '\n  Credentials unchanged; see AUTH_PASSWORD in %s.\n' "$ENV_FILE"
 fi

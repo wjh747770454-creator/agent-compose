@@ -215,6 +215,8 @@ service for this layout.
 For a deployment that uses published container images:
 
 ```bash
+export AUTH_PASSWORD="$(openssl rand -base64 24)"
+export AUTH_SECRET="$(openssl rand -hex 32)"
 docker compose -f docker-compose.deploy.yml pull
 docker compose -f docker-compose.deploy.yml up -d
 ```

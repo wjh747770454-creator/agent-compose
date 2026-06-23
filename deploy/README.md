@@ -60,7 +60,6 @@ On first run the installer generates an admin password and prints it once:
 ./install.sh --version v1.2.3         # specific release (remote mode)
 ./install.sh --image-prefix registry.example.com/agent-compose   # mirror / private registry
 ./install.sh --upgrade                # update an existing install to this release
-./install.sh --no-auth                # run unauthenticated (trusted networks only)
 ./install.sh --no-start               # write files but don't pull images or start
 ```
 
