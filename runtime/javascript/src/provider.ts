@@ -1,9 +1,11 @@
 import type { Provider } from "./types.js";
 
 export function normalizeProvider(raw: unknown): Provider {
-  const provider = String(raw || "").trim().toLowerCase();
+  const provider = String(raw ?? "").trim().toLowerCase();
+  if (!provider) {
+    throw new Error("provider is required; expected one of: codex, claude, gemini");
+  }
   switch (provider) {
-    case "":
     case "codex":
       return "codex";
     case "claude":
@@ -15,6 +17,6 @@ export function normalizeProvider(raw: unknown): Provider {
     case "gemini_cli":
       return "gemini";
     default:
-      throw new Error(`unsupported provider ${JSON.stringify(raw)}`);
+      throw new Error(`unsupported provider ${JSON.stringify(raw)}; expected one of: codex, claude, gemini`);
   }
 }

@@ -69,6 +69,26 @@ describe("commander CLI", () => {
     }
   });
 
+  it("rejects an empty prompt provider", async () => {
+    const runPrompt = vi.spyOn(promptModule, "runPromptCommand");
+    const program = createProgram({ exitOverride: true });
+    const stdio = captureStdio();
+    try {
+      await expect(program.parseAsync([
+        "node",
+        "cli",
+        "prompt",
+        "--provider",
+        "",
+        "--message-file",
+        "/tmp/message.txt",
+      ])).rejects.toThrow(/provider is required/);
+    } finally {
+      stdio.restore();
+    }
+    expect(runPrompt).toHaveBeenCalledTimes(1);
+  });
+
   it("prints the prefixed result for exec command", async () => {
     const runExec = vi.spyOn(commandModule, "runExecCommand").mockResolvedValue({
       stdout: "ok\n",

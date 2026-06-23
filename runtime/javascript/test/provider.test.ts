@@ -3,7 +3,6 @@ import { normalizeProvider } from "../src/provider.js";
 
 describe("provider normalization", () => {
   it.each([
-    ["", "codex"],
     ["codex", "codex"],
     ["CLAUDE", "claude"],
     ["claude-code", "claude"],
@@ -15,7 +14,16 @@ describe("provider normalization", () => {
   });
 
   it("rejects unsupported providers", () => {
-    expect(() => normalizeProvider("qwen")).toThrow(/unsupported provider/);
+    expect(() => normalizeProvider("qwen")).toThrow(/unsupported provider "qwen"; expected one of: codex, claude, gemini/);
+  });
+
+  it.each([
+    "",
+    "   ",
+    undefined,
+    null,
+  ])("rejects missing provider %j", (input) => {
+    expect(() => normalizeProvider(input)).toThrow(/provider is required/);
   });
 
   it("trims provider names before normalization", () => {
