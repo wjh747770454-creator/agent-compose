@@ -258,6 +258,35 @@ agents:
 	}
 }
 
+func TestCanonicalOutputIncludesAgentCapsetIDs(t *testing.T) {
+	normalized := mustNormalizeCompose(t, `
+name: canonical-capsets
+agents:
+  reviewer:
+    provider: codex
+    capset_ids:
+      - xray-dev
+`, nil)
+
+	jsonData, err := normalized.MarshalCanonicalJSON(false)
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	yamlData, err := normalized.MarshalCanonicalYAML(false)
+	if err != nil {
+		t.Fatalf("MarshalCanonicalYAML returned error: %v", err)
+	}
+	for _, data := range [][]byte{jsonData, yamlData} {
+		if !bytes.Contains(data, []byte("capset_ids")) || !bytes.Contains(data, []byte("xray-dev")) {
+			t.Fatalf("capset ids missing from canonical output: %s", data)
+		}
+	}
+	redacted := normalized.Redacted()
+	if redacted == nil || len(redacted.Agents) != 1 || len(redacted.Agents[0].CapsetIDs) != 1 || redacted.Agents[0].CapsetIDs[0] != "xray-dev" {
+		t.Fatalf("redacted output lost capset ids: %#v", redacted)
+	}
+}
+
 func TestSpecHashIgnoresFieldAndMapOrder(t *testing.T) {
 	first := mustNormalizeCompose(t, `
 name: hash-project

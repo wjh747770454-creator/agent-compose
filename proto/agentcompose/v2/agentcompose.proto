@@ -276,6 +276,7 @@ message AgentSpec {
   repeated EnvVarSpec env = 7;
   WorkspaceSpec workspace = 8;
   SchedulerSpec scheduler = 9;
+  repeated string capset_ids = 10;
 }
 
 message EnvVarSpec {

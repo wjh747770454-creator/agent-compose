@@ -118,6 +118,35 @@ func TestNormalizeSortsAgentsForStableOutput(t *testing.T) {
 	}
 }
 
+func TestNormalizeAgentCapsetIDs(t *testing.T) {
+	spec := mustParseCompose(t, `
+name: capsets
+agents:
+  reviewer:
+    provider: codex
+    capset_ids:
+      - xray-dev
+      - xray-dev
+      - " data "
+      - ""
+`)
+
+	normalized, err := Normalize(spec, NormalizeOptions{})
+	if err != nil {
+		t.Fatalf("Normalize returned error: %v", err)
+	}
+	got := normalized.Agents[0].CapsetIDs
+	want := []string{"xray-dev", "data"}
+	if len(got) != len(want) {
+		t.Fatalf("capset ids = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("capset ids = %#v, want %#v", got, want)
+		}
+	}
+}
+
 func TestNormalizePreservesValidAgentNames(t *testing.T) {
 	spec := &ProjectSpec{
 		Name: "valid-agents",

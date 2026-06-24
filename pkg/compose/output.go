@@ -33,6 +33,7 @@ type orderedAgentSpec struct {
 	Image        string                   `yaml:"image,omitempty" json:"image,omitempty"`
 	Driver       *NormalizedDriverSpec    `yaml:"driver" json:"driver"`
 	Env          []orderedEnvVarSpec      `yaml:"env,omitempty" json:"env,omitempty"`
+	CapsetIDs    []string                 `yaml:"capset_ids,omitempty" json:"capset_ids,omitempty"`
 	Workspace    *WorkspaceSpec           `yaml:"workspace,omitempty" json:"workspace,omitempty"`
 	Scheduler    *NormalizedSchedulerSpec `yaml:"scheduler,omitempty" json:"scheduler,omitempty"`
 }
@@ -75,6 +76,7 @@ func (s *NormalizedProjectSpec) ordered(redactSecrets bool) orderedProjectSpec {
 			Image:        agent.Image,
 			Driver:       cloneNormalizedDriverSpec(agent.Driver),
 			Env:          orderedEnvVars(agent.Env, redactSecrets),
+			CapsetIDs:    slices.Clone(agent.CapsetIDs),
 			Workspace:    cloneWorkspaceSpec(agent.Workspace),
 			Scheduler:    cloneNormalizedSchedulerSpec(agent.Scheduler),
 		})
@@ -108,6 +110,7 @@ func (s *NormalizedProjectSpec) clone(redactSecrets bool) *NormalizedProjectSpec
 			Image:        agent.Image,
 			Driver:       agent.Driver,
 			Env:          envVarMapFromOrdered(agent.Env),
+			CapsetIDs:    slices.Clone(agent.CapsetIDs),
 			Workspace:    agent.Workspace,
 			Scheduler:    agent.Scheduler,
 		})

@@ -45,6 +45,7 @@ type NormalizedAgentSpec struct {
 	Image        string                   `yaml:"image,omitempty" json:"image,omitempty"`
 	Driver       *NormalizedDriverSpec    `yaml:"driver" json:"driver"`
 	Env          map[string]EnvVarSpec    `yaml:"env,omitempty" json:"env,omitempty"`
+	CapsetIDs    []string                 `yaml:"capset_ids,omitempty" json:"capset_ids,omitempty"`
 	Workspace    *WorkspaceSpec           `yaml:"workspace,omitempty" json:"workspace,omitempty"`
 	Scheduler    *NormalizedSchedulerSpec `yaml:"scheduler,omitempty" json:"scheduler,omitempty"`
 }
@@ -170,9 +171,33 @@ func normalizeAgent(name string, agent AgentSpec, options NormalizeOptions) (Nor
 		Image:        strings.TrimSpace(agent.Image),
 		Driver:       driver,
 		Env:          env,
+		CapsetIDs:    normalizeStringList(agent.CapsetIDs),
 		Workspace:    cloneWorkspaceSpec(agent.Workspace),
 		Scheduler:    scheduler,
 	}, nil
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func normalizeDriverSpec(path string, driver *DriverSpec) (*NormalizedDriverSpec, error) {

@@ -474,6 +474,9 @@ func agentYAMLMap(agents []*agentcomposev2.AgentSpec) (map[string]any, []*agentc
 		} else if len(env) > 0 {
 			raw["env"] = env
 		}
+		if capsetIDs := normalizeCapsetIDs(agent.GetCapsetIds()); len(capsetIDs) > 0 {
+			raw["capset_ids"] = capsetIDs
+		}
 		if workspace := workspaceYAMLShape(agent.GetWorkspace()); len(workspace) > 0 {
 			raw["workspace"] = workspace
 		}
@@ -685,6 +688,7 @@ func projectManagedAgentDefinitionFromSpec(project ProjectRecord, revision int64
 		GuestImage:             agent.Image,
 		EnvItems:               sessionEnvItemsFromCompose(agent.Env),
 		ConfigJSON:             "{}",
+		CapsetIDs:              normalizeCapsetIDs(agent.CapsetIDs),
 		ManagedProjectID:       project.ID,
 		ManagedProjectRevision: revision,
 		ManagedAgentName:       agent.Name,
@@ -815,6 +819,7 @@ func projectManagedLoaderFromScheduler(project ProjectRecord, scheduler ProjectS
 			DefaultAgent:       agent.Provider,
 			SessionPolicy:      LoaderSessionPolicyNew,
 			ConcurrencyPolicy:  LoaderConcurrencyPolicySkip,
+			CapsetIDs:          normalizeCapsetIDs(agent.CapsetIDs),
 			ManagedProjectID:   project.ID,
 			ManagedRevision:    scheduler.Revision,
 			ManagedAgentName:   agent.Name,
@@ -1589,6 +1594,7 @@ func agentSpecResponses(agents []compose.NormalizedAgentSpec) []*agentcomposev2.
 			Image:        agent.Image,
 			Driver:       driverResponse(agent.Driver),
 			Env:          envVarResponses(agent.Env),
+			CapsetIds:    normalizeCapsetIDs(agent.CapsetIDs),
 			Workspace:    workspaceResponse(agent.Workspace),
 			Scheduler:    schedulerResponse(agent.Scheduler),
 		})

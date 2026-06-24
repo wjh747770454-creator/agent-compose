@@ -23,6 +23,7 @@ type AgentSpec struct {
 	Image        string                `yaml:"image,omitempty" json:"image,omitempty"`
 	Driver       *DriverSpec           `yaml:"driver,omitempty" json:"driver,omitempty"`
 	Env          map[string]EnvVarSpec `yaml:"env,omitempty" json:"env,omitempty"`
+	CapsetIDs    []string              `yaml:"capset_ids,omitempty" json:"capset_ids,omitempty"`
 	Workspace    *WorkspaceSpec        `yaml:"workspace,omitempty" json:"workspace,omitempty"`
 	Scheduler    *SchedulerSpec        `yaml:"scheduler,omitempty" json:"scheduler,omitempty"`
 }
@@ -221,9 +222,22 @@ func validateAgent(node *yaml.Node, path string) error {
 		"image":         validateScalar,
 		"driver":        validateDriver,
 		"env":           validateEnvVarMap,
+		"capset_ids":    validateStringList,
 		"workspace":     validateWorkspace,
 		"scheduler":     validateScheduler,
 	})
+}
+
+func validateStringList(node *yaml.Node, path string) error {
+	if err := requireKind(node, path, yaml.SequenceNode, "sequence"); err != nil {
+		return err
+	}
+	for index, item := range node.Content {
+		if err := validateScalar(item, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateScheduler(node *yaml.Node, path string) error {

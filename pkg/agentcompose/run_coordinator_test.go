@@ -205,6 +205,152 @@ func testRunServiceRunAgentCreatesTerminalSucceededRecord(t *testing.T) {
 	}
 }
 
+func TestRunServiceRunAgentInjectsProjectAgentCapabilities(t *testing.T) {
+	testRunServiceRunAgentInjectsProjectAgentCapabilities(t)
+}
+
+func TestE2ERunServiceRunAgentInjectsProjectAgentCapabilities(t *testing.T) {
+	testRunServiceRunAgentInjectsProjectAgentCapabilities(t)
+}
+
+func testRunServiceRunAgentInjectsProjectAgentCapabilities(t *testing.T) {
+	spec := newProjectServiceTestSpec("capset-run", "gpt-test")
+	spec.Agents[0].CapsetIds = []string{"xray-dev"}
+	store, service, projectID := setupRunPreparationProject(t, spec, t.TempDir())
+	catalog := "# Catalog: xray-dev\n\n## gRPC\n\n| Method | Metadata |\n| --- | --- |\n| `/pkg.Service/Call` | `x-octobus-capset=xray-dev, x-octobus-instance=inst` |\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin/v1/catalog/xray-dev" && r.URL.Query().Get("format") == "md" {
+			w.Header().Set("Content-Type", "text/markdown")
+			_, _ = w.Write([]byte(catalog))
+			return
+		}
+		t.Errorf("unexpected request %s?%s", r.URL.Path, r.URL.RawQuery)
+		http.Error(w, "unexpected", http.StatusBadRequest)
+	}))
+	defer server.Close()
+	service.cap = newTestCapabilityProvider(server.URL, "agent-compose:9100")
+
+	ctx := context.Background()
+	resp, err := service.RunAgent(ctx, connect.NewRequest(&agentcomposev2.RunAgentRequest{
+		ProjectId:       projectID,
+		AgentName:       "reviewer",
+		Prompt:          "run with capabilities",
+		ClientRequestId: "capset-run-request",
+	}))
+	if err != nil {
+		t.Fatalf("RunAgent returned error: %v", err)
+	}
+	summary := resp.Msg.GetRun().GetSummary()
+	if summary.GetStatus() != agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED || summary.GetSessionId() == "" {
+		t.Fatalf("RunAgent summary = %#v", summary)
+	}
+	stored, err := store.GetProjectRun(ctx, summary.GetRunId())
+	if err != nil {
+		t.Fatalf("GetProjectRun returned error: %v", err)
+	}
+	session, err := service.store.GetSession(ctx, stored.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession returned error: %v", err)
+	}
+	env := envItemsByName(session.EnvItems)
+	if got := env[capProxyTargetEnvName]; got.Value != "agent-compose:9100" || got.Secret {
+		t.Fatalf("session %s = %#v, want visible proxy target", capProxyTargetEnvName, got)
+	}
+	if got := env[capabilitySessionTokenEnvName]; strings.TrimSpace(got.Value) == "" || !got.Secret {
+		t.Fatalf("session %s = %#v, want secret token", capabilitySessionTokenEnvName, got)
+	}
+	assertStringSliceEqual(t, sessionCapabilityCapsets(session), []string{"xray-dev"}, "run session capset tags")
+	guide, err := os.ReadFile(sessionCapabilityGuidePath(session))
+	if err != nil {
+		t.Fatalf("capability guide not written to MPI catalog: %v", err)
+	}
+	if !strings.Contains(string(guide), "agent-compose:9100") ||
+		!strings.Contains(string(guide), "CAP_GRPC_TARGET") ||
+		!strings.Contains(string(guide), "x-octobus-instance=inst") {
+		t.Fatalf("capability guide missing proxy/routing info: %s", guide)
+	}
+}
+
+func TestRunServiceRunAgentRefreshesCapabilitiesOnReusedSession(t *testing.T) {
+	testRunServiceRunAgentRefreshesCapabilitiesOnReusedSession(t)
+}
+
+func TestE2ERunServiceRunAgentRefreshesCapabilitiesOnReusedSession(t *testing.T) {
+	testRunServiceRunAgentRefreshesCapabilitiesOnReusedSession(t)
+}
+
+func testRunServiceRunAgentRefreshesCapabilitiesOnReusedSession(t *testing.T) {
+	spec := newProjectServiceTestSpec("capset-reuse", "gpt-test")
+	spec.Agents[0].CapsetIds = []string{"xray-dev"}
+	store, service, projectID := setupRunPreparationProject(t, spec, t.TempDir())
+	catalog := "# Catalog: xray-dev\n\n## gRPC\n\n| Method | Metadata |\n| --- | --- |\n| `/pkg.Service/Call` | `x-octobus-capset=xray-dev, x-octobus-instance=inst` |\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin/v1/catalog/xray-dev" && r.URL.Query().Get("format") == "md" {
+			w.Header().Set("Content-Type", "text/markdown")
+			_, _ = w.Write([]byte(catalog))
+			return
+		}
+		t.Errorf("unexpected request %s?%s", r.URL.Path, r.URL.RawQuery)
+		http.Error(w, "unexpected", http.StatusBadRequest)
+	}))
+	defer server.Close()
+	service.cap = newTestCapabilityProvider(server.URL, "agent-compose:9100")
+
+	ctx := context.Background()
+	existing, err := service.store.CreateSession(ctx, "Reusable Capability Session", "", "boxlite", "guest:latest", "", SessionTypeManual, nil, nil,
+		[]SessionTag{{Name: "legacy", Value: "true"}})
+	if err != nil {
+		t.Fatalf("CreateSession existing returned error: %v", err)
+	}
+	existing.Summary.VMStatus = VMStatusStopped
+	if err := service.store.UpdateSession(ctx, existing); err != nil {
+		t.Fatalf("UpdateSession existing returned error: %v", err)
+	}
+	resp, err := service.RunAgent(ctx, connect.NewRequest(&agentcomposev2.RunAgentRequest{
+		ProjectId:       projectID,
+		AgentName:       "reviewer",
+		SessionId:       existing.Summary.ID,
+		Prompt:          "reuse with capabilities",
+		CleanupPolicy:   agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING,
+		ClientRequestId: "capset-reuse-request",
+	}))
+	if err != nil {
+		t.Fatalf("RunAgent reuse returned error: %v", err)
+	}
+	summary := resp.Msg.GetRun().GetSummary()
+	if summary.GetSessionId() != existing.Summary.ID || summary.GetStatus() != agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED {
+		t.Fatalf("RunAgent reuse summary = %#v", summary)
+	}
+	loaded, err := service.store.GetSession(ctx, existing.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetSession existing returned error: %v", err)
+	}
+	env := envItemsByName(loaded.EnvItems)
+	if got := env[capProxyTargetEnvName]; got.Value != "agent-compose:9100" || got.Secret {
+		t.Fatalf("reused session %s = %#v, want visible proxy target", capProxyTargetEnvName, got)
+	}
+	if got := env[capabilitySessionTokenEnvName]; strings.TrimSpace(got.Value) == "" || !got.Secret {
+		t.Fatalf("reused session %s = %#v, want secret token", capabilitySessionTokenEnvName, got)
+	}
+	assertStringSliceEqual(t, sessionCapabilityCapsets(loaded), []string{"xray-dev"}, "reused run session capset tags")
+	guide, err := os.ReadFile(sessionCapabilityGuidePath(loaded))
+	if err != nil {
+		t.Fatalf("capability guide not written for reused session: %v", err)
+	}
+	if !strings.Contains(string(guide), "agent-compose:9100") ||
+		!strings.Contains(string(guide), "CAP_GRPC_TARGET") ||
+		!strings.Contains(string(guide), "x-octobus-instance=inst") {
+		t.Fatalf("reused session capability guide missing proxy/routing info: %s", guide)
+	}
+	runs, err := store.ListProjectRunsByOptions(ctx, ProjectRunListOptions{ProjectID: projectID, SessionID: existing.Summary.ID})
+	if err != nil {
+		t.Fatalf("ListProjectRunsByOptions returned error: %v", err)
+	}
+	if len(runs) != 1 || runs[0].RunID != summary.GetRunId() {
+		t.Fatalf("runs for reused session = %#v", runs)
+	}
+}
+
 func TestIntegrationRunAgentStreamReturnsRealtimeOutput(t *testing.T) {
 	testRunAgentStreamReturnsRealtimeOutput(t)
 }

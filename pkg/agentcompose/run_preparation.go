@@ -16,6 +16,7 @@ import (
 type ProjectRunPreparation struct {
 	EnvItems         []SessionEnvVar
 	ProviderEnvItems []SessionEnvVar
+	CapsetIDs        []string
 	WorkspaceConfig  *WorkspaceConfig
 	Workspace        *SessionWorkspace
 }
@@ -60,7 +61,7 @@ func (s *Service) prepareProjectRun(ctx context.Context, run ProjectRunRecord, r
 	if err != nil {
 		return ProjectRunPreparation{}, err
 	}
-	prepared := ProjectRunPreparation{EnvItems: envItems, ProviderEnvItems: providerEnvItems}
+	prepared := ProjectRunPreparation{EnvItems: envItems, ProviderEnvItems: providerEnvItems, CapsetIDs: normalizeCapsetIDs(agent.CapsetIDs)}
 	if workspace != nil {
 		prepared.WorkspaceConfig = workspace
 		prepared.Workspace = toSessionWorkspaceSnapshot(*workspace)

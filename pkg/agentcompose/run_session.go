@@ -21,6 +21,8 @@ func (s *Service) ensureProjectRunSession(ctx context.Context, run ProjectRunRec
 		return ProjectRunSessionResult{}, fmt.Errorf("session runtime dependencies are required")
 	}
 	tags := projectRunSessionTags(run)
+	capabilityVars, capabilityTags := buildCapabilityGatewaySessionVars(capabilityGatewayProxyTarget(s.cap), prepared.CapsetIDs)
+	tags = append(tags, capabilityTags...)
 	if sessionID := strings.TrimSpace(requestedSessionID); sessionID != "" {
 		session, err := s.store.GetSession(ctx, sessionID)
 		if err != nil {
@@ -41,6 +43,7 @@ func (s *Service) ensureProjectRunSession(ctx context.Context, run ProjectRunRec
 				return ProjectRunSessionResult{Session: session}, err
 			}
 		}
+		session.EnvItems = mergeEnvItems(session.EnvItems, capabilityVars)
 		session.Summary.Tags = mergeSessionTags(session.Summary.Tags, tags)
 		if err := s.startProjectRunSession(ctx, session, "session.resumed", "session resumed for project run"); err != nil {
 			return ProjectRunSessionResult{Session: session}, err
@@ -73,7 +76,7 @@ func (s *Service) ensureProjectRunSession(ctx context.Context, run ProjectRunRec
 		workspaceID,
 		SessionTypeManual,
 		prepared.Workspace,
-		prepared.EnvItems,
+		mergeEnvItems(prepared.EnvItems, capabilityVars),
 		tags,
 	)
 	if err != nil {
@@ -95,6 +98,7 @@ func (s *Service) startProjectRunSession(ctx context.Context, session *Session, 
 		_ = s.store.UpdateSession(ctx, session)
 		return err
 	}
+	writeCapabilityGuide(ctx, s.cap, s.store, s.streams, session, sessionCapabilityCapsets(session))
 	if session.Summary.VMStatus != VMStatusRunning {
 		if err := s.driver.StartSessionVM(ctx, session); err != nil {
 			session.Summary.VMStatus = VMStatusFailed

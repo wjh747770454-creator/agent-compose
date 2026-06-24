@@ -366,6 +366,55 @@ func testProjectServiceApplyProjectInlineSchedulerRevisionLifecycle(t *testing.T
 	}
 }
 
+func TestProjectServiceApplyProjectPersistsAgentCapsetIDs(t *testing.T) {
+	store := newTestConfigStore(t)
+	service := newProjectServiceTestService(t, store)
+	ctx := context.Background()
+	source := &agentcomposev2.ProjectSource{ComposePath: filepath.Join(t.TempDir(), "agent-compose.yml")}
+	spec := newProjectServiceTestSpec("capset-demo", "gpt-test")
+	spec.Agents[0].CapsetIds = []string{"xray-dev", "xray-dev", " data "}
+
+	resp, err := service.ApplyProject(ctx, connect.NewRequest(&agentcomposev2.ApplyProjectRequest{
+		Spec:   spec,
+		Source: source,
+	}))
+	if err != nil {
+		t.Fatalf("ApplyProject returned error: %v", err)
+	}
+	if !resp.Msg.GetApplied() {
+		t.Fatalf("ApplyProject response = %#v", resp.Msg)
+	}
+	project := resp.Msg.GetProject()
+	projectID := project.GetSummary().GetProjectId()
+	reviewerManagedID := managedAgentIDByName(t, project.GetAgents(), "reviewer")
+	reviewerDefinition := assertManagedAgentDefinition(t, store, ctx, reviewerManagedID, projectID, "reviewer", 1, true)
+	assertStringSliceEqual(t, reviewerDefinition.CapsetIDs, []string{"xray-dev", "data"}, "managed reviewer capset ids")
+
+	managedSchedulerID := managedSchedulerIDByAgentName(t, project.GetSchedulers(), "reviewer")
+	managedLoaderID := managedLoaderIDByAgentName(t, project.GetSchedulers(), "reviewer")
+	reviewerLoader := assertManagedLoader(t, store, ctx, managedLoaderID, projectID, "reviewer", managedSchedulerID, 1, true)
+	assertStringSliceEqual(t, reviewerLoader.Summary.CapsetIDs, []string{"xray-dev", "data"}, "managed reviewer loader capset ids")
+
+	loaded, err := service.GetProject(ctx, connect.NewRequest(&agentcomposev2.GetProjectRequest{
+		Project:     &agentcomposev2.ProjectRef{ProjectId: projectID},
+		IncludeSpec: true,
+	}))
+	if err != nil {
+		t.Fatalf("GetProject returned error: %v", err)
+	}
+	var reviewerSpec *agentcomposev2.AgentSpec
+	for _, agent := range loaded.Msg.GetProject().GetSpec().GetAgents() {
+		if agent.GetName() == "reviewer" {
+			reviewerSpec = agent
+			break
+		}
+	}
+	if reviewerSpec == nil {
+		t.Fatalf("reviewer spec missing from GetProject response: %#v", loaded.Msg.GetProject().GetSpec())
+	}
+	assertStringSliceEqual(t, reviewerSpec.GetCapsetIds(), []string{"xray-dev", "data"}, "GetProject reviewer spec capset ids")
+}
+
 func TestProjectServiceGetProjectAndListProjects(t *testing.T) {
 	testProjectServiceGetProjectAndListProjects(t)
 }
@@ -1095,4 +1144,16 @@ func assertManagedLoader(t *testing.T, store *ConfigStore, ctx context.Context, 
 		t.Fatalf("managed loader = %#v, want project=%s revision=%d agent=%s scheduler=%s enabled=%v", loader.Summary, projectID, revision, agentName, schedulerID, enabled)
 	}
 	return loader
+}
+
+func assertStringSliceEqual(t *testing.T, got, want []string, label string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s = %#v, want %#v", label, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s = %#v, want %#v", label, got, want)
+		}
+	}
 }

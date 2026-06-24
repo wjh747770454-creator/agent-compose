@@ -1629,6 +1629,11 @@ export class AgentSpec extends Message<AgentSpec> {
    */
   scheduler?: SchedulerSpec;
 
+  /**
+   * @generated from field: repeated string capset_ids = 10;
+   */
+  capsetIds: string[] = [];
+
   constructor(data?: PartialMessage<AgentSpec>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1646,6 +1651,7 @@ export class AgentSpec extends Message<AgentSpec> {
     { no: 7, name: "env", kind: "message", T: EnvVarSpec, repeated: true },
     { no: 8, name: "workspace", kind: "message", T: WorkspaceSpec },
     { no: 9, name: "scheduler", kind: "message", T: SchedulerSpec },
+    { no: 10, name: "capset_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AgentSpec {
