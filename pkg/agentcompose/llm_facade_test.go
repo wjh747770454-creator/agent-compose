@@ -852,6 +852,45 @@ func TestSessionEnvProviderSelectionUsesAgentFamilyPreference(t *testing.T) {
 	}
 }
 
+func TestDaemonEnvProviderSelectionUsesAgentFamilyPreference(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LLM_API_ENDPOINT", "")
+	t.Setenv("LLM_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://anthropic.example.invalid")
+	t.Setenv("ANTHROPIC_API_ENDPOINT", "")
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_MODEL", "shared-model")
+	t.Setenv("CLAUDE_MODEL", "")
+	service, _, _ := newTestServiceAPIHarness(t)
+	service.config.RuntimeBaseURL = "http://agent-compose.test"
+	service.config.LLMAPIEndpoint = "https://openai.example.invalid"
+	service.config.LLMAPIKey = "openai-key"
+	service.config.LLMAPIProtocol = llmAPIProtocolChatCompletions
+	service.config.LLMModel = "shared-model"
+
+	session := createRunningLLMFacadeSession(t, ctx, service, "daemon-env-agent-family")
+	env, err := ensureSessionLLMFacadeConfig(ctx, service.config, service.configDB, session, "codex", "", "test", "run-codex")
+	if err != nil {
+		t.Fatalf("ensureSessionLLMFacadeConfig(codex) returned error: %v", err)
+	}
+	if env["LLM_API_PROTOCOL"] != llmAPIProtocolResponses {
+		t.Fatalf("LLM_API_PROTOCOL = %q, want responses facade wire API", env["LLM_API_PROTOCOL"])
+	}
+	token, err := service.configDB.GetLLMFacadeToken(ctx, env["AGENT_COMPOSE_SESSION_TOKEN"])
+	if err != nil {
+		t.Fatalf("GetLLMFacadeToken returned error: %v", err)
+	}
+	if token.ProviderID != llmProviderIDDefaultOpenAI {
+		t.Fatalf("codex provider id = %q, want default OpenAI provider", token.ProviderID)
+	}
+	if token.WireAPI != llmAPIProtocolResponses {
+		t.Fatalf("codex token wire api = %q, want responses facade wire API", token.WireAPI)
+	}
+}
+
 func TestSessionEnvProviderIsNotSelectedWithoutProviderID(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LLM_API_ENDPOINT", "")

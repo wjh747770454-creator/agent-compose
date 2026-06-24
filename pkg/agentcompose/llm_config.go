@@ -589,7 +589,7 @@ func resolveRuntimeLLMTargetWithEnv(ctx context.Context, config *appconfig.Confi
 	if len(providers) == 0 {
 		return LLMResolvedTarget{}, fmt.Errorf("llm provider is not configured")
 	}
-	model, provider, wireAPI, ok, err := selectLLMModelAndProvider(ctx, store, models, providers, requestedModel, "", providerID)
+	model, provider, wireAPI, ok, err := selectLLMModelAndProvider(ctx, store, models, providers, requestedModel, preferredProviderFamily, providerID)
 	if err != nil {
 		return LLMResolvedTarget{}, err
 	}

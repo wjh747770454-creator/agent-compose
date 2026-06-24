@@ -38,10 +38,7 @@ func ensureSessionCodexLLMFacadeConfig(ctx context.Context, config *appconfig.Co
 	if strings.TrimSpace(baseURL) == "" {
 		return nil, nil
 	}
-	facadeWireAPI := target.WireAPI
-	if normalizeLLMProviderType(target.Provider.ProviderType) != llmProviderFamilyOpenAI {
-		facadeWireAPI = llmAPIProtocolResponses
-	}
+	facadeWireAPI := llmAPIProtocolResponses
 	tokenValue, token, err := newLLMFacadeToken(session.Summary.ID, target.Model.Name, target.Provider.ID, facadeWireAPI, source, runID)
 	if err != nil {
 		return nil, err
