@@ -45,7 +45,6 @@ tasks:
       - task build
       - task image:agent-compose-guest
       - task image:agent-compose
-      - task image:agent-compose-frontend
 
   prepare:
     desc: Install local dev dependencies
@@ -80,7 +79,6 @@ tasks:
     desc: Lint/format code
     deps: ['lint:go']
     cmds:
-      - npm run check:ui
       - echo "lint all done"
 
   lint:go:
@@ -150,8 +148,8 @@ tasks:
           {{.GO_TOOLCHAIN_ENV}} go test -tags 'boxlitecgo,boxlite_repro' ./pkg/driver -run '^TestManualBoxLiteFiveDirMountRepro$' -count=1 -v
 
   build:
-    desc: Build project binaries and frontend assets
-    deps: ['build:ui', 'build:agent-compose', 'build:runtime-sdk']
+    desc: Build project binaries
+    deps: ['build:agent-compose', 'build:runtime-sdk']
     cmds:
       - echo "build all done"
 
@@ -162,12 +160,6 @@ tasks:
       - npm ci
       - npm run build
       - npm run test:packaging
-
-  build:ui:
-    desc: Build the standalone product UI
-    dir: '{{.TASKFILE_DIR}}'
-    cmds:
-      - npm run build:ui
 
   prepare:agent-compose:boxlite-dev:
     internal: true
@@ -230,16 +222,6 @@ tasks:
     deps: [build:image:agent-compose]
     cmds:
       - echo 'build:image:agent-compose done'
-
-  build:image:agent-compose-frontend:
-    dir: '{{.TASKFILE_DIR}}'
-    cmds:
-      - IMAGE_NAME={{default "agent-compose-frontend:latest" .FRONTEND_IMAGE_NAME}} DOCKERFILE=nginx/Dockerfile BUILD_CONTEXT={{.TASKFILE_DIR}} VERSION={{.VERSION}} HTTP_PROXY={{.BUILD_HTTP_PROXY}} HTTPS_PROXY={{.BUILD_HTTPS_PROXY}} ALL_PROXY={{.BUILD_ALL_PROXY}} REGISTRY_MIRROR={{.BUILD_REGISTRY_MIRROR}} ./build_docker.sh
-
-  image:agent-compose-frontend:
-    deps: [build:image:agent-compose-frontend]
-    cmds:
-      - echo 'build:image:agent-compose-frontend done'
 
   playground:push-agent-compose-guest:
     dir: '{{.TASKFILE_DIR}}/playground'

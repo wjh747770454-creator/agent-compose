@@ -22,8 +22,10 @@ Chinese documentation is available at [docs/zh-CN/README.md](docs/zh-CN/README.m
 - Starts isolated guest runtimes with Docker, BoxLite, or Microsandbox.
 - Provisions workspaces from local directories or Git repositories.
 - Exposes v1 session-oriented APIs and v2 project/run/image APIs.
-- Includes a Svelte frontend under `frontend/`.
 - Includes JavaScript runtime components under `runtime/`.
+
+The web UI lives in a separate repository,
+[agent-compose-ui](https://github.com/chaitin/agent-compose-ui).
 
 ## Maturity
 
@@ -44,7 +46,7 @@ pkg/auth/                      authentication middleware and login flows
 pkg/config/                    environment configuration
 pkg/imagecache/                OCI image cache helpers
 proto/                         Connect API definitions and generated Go code
-frontend/                      Svelte frontend
+proto-client/                  npm package config for the generated TypeScript client
 runtime/                       guest runtime SDKs and JavaScript scheduler runtime
 guest-images/                  guest image Dockerfiles
 loader-script/                 scheduler script examples and API notes
@@ -200,18 +202,16 @@ The default guest image is `debian:bookworm-slim` unless overridden by
 
 ## Frontend
 
-The Svelte frontend lives in `frontend/`.
+The web UI lives in a separate repository,
+[agent-compose-ui](https://github.com/chaitin/agent-compose-ui). It consumes the
+generated API client from the published
+[`@chaitin-ai/agent-compose-client`](https://www.npmjs.com/package/@chaitin-ai/agent-compose-client)
+package, which is built from this repository's `proto/` via `proto-client/`.
 
-```bash
-npm ci
-npm run build:ui
-npm run dev:ui
-```
-
-The daemon does not host the Web UI. Serve the built frontend with a static
-server such as nginx and proxy API and Jupyter routes to the daemon. The
-repository `docker-compose.yml` includes an `agent-compose-frontend` nginx
-service for this layout.
+The daemon does not host the Web UI. The frontend repository builds an nginx
+image (`ghcr.io/chaitin/agent-compose-frontend`) that serves the built UI and
+reverse-proxies API and Jupyter routes to the daemon. The `docker-compose.yml`
+and `docker-compose.deploy.yml` here reference that published image.
 
 For a deployment that uses published container images:
 
@@ -223,10 +223,10 @@ docker compose -f docker-compose.deploy.yml up -d
 ```
 
 Override `AGENT_COMPOSE_IMAGE`, `AGENT_COMPOSE_FRONTEND_IMAGE`, or
-`DEFAULT_IMAGE` to pin a release tag such as `v2606.1.0` or use locally built
-images. The default `latest` image tag is published by the image workflow for
-release tags; main branch builds publish the `main` tag instead. The deployment
-compose serves the frontend on port `80` by default; set
+`DEFAULT_IMAGE` to pin release tags or use locally built images. The frontend is
+released independently by `agent-compose-ui`; installer manifests declare
+`AGENT_COMPOSE_FRONTEND_VERSION`, which defaults to `latest` unless explicitly
+pinned. The deployment compose serves the frontend on port `80` by default; set
 `AGENT_COMPOSE_HTTP_PORT` to use another host port. The default
 `docker-compose.yml` remains oriented toward local development builds. Set
 `AUTH_USERNAME` and `AUTH_PASSWORD` before exposing the deployment to a network.

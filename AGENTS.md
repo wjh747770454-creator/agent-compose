@@ -10,7 +10,7 @@ Main entrypoints:
 - `proto/agentcompose/v1/`: agent-compose Connect API definitions and generated Go code.
 - `proto/agentcompose/v2/`: agent-compose v2 Connect API definitions and generated Go code.
 - `proto/health/v1/`: health Connect API definitions and generated Go code.
-- `frontend/`: Svelte frontend and generated TypeScript protocol clients.
+- `proto-client/`: npm package config that publishes the generated TypeScript client (`@chaitin-ai/agent-compose-client`). The web UI lives in the separate `agent-compose-ui` repository and consumes this package.
 
 ## Runtime Layout
 
@@ -76,7 +76,7 @@ Current Docker build behavior:
 - `build_docker.sh` defaults to `IMAGE_NAME=agent-compose:latest` and `DOCKERFILE=Dockerfile`
 
 Current compose behavior:
-- `docker-compose.yml` deploys the `agent-compose` service and nginx
+- `docker-compose.yml` deploys the `agent-compose` service and the published `agent-compose-frontend` nginx image
 - the agent-compose service listens on `7410`
 - data is mounted from `./data/agent-compose`
 - Docker socket and `/dev/kvm` are exposed for runtime support

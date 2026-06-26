@@ -8,6 +8,10 @@
 /playground/data/
 /.state/
 
+# Local git worktrees and agent scratch
+/.worktrees/
+/.claude/
+
 # Build outputs
 /build/
 /dist/

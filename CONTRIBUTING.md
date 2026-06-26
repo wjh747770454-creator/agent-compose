@@ -27,7 +27,6 @@ For smaller loops:
 
 ```bash
 go test ./cmd/... ./pkg/...
-npm run build:ui
 cd runtime/agent-compose-runtime-sdk && npm test
 cd runtime/javascript && npm run test:unit
 ```

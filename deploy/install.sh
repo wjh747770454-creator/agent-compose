@@ -17,6 +17,7 @@ set -euo pipefail
 REPO="${AGENT_COMPOSE_REPO:-chaitin/agent-compose}"
 INSTALL_DIR="${AGENT_COMPOSE_INSTALL_DIR:-./agent-compose}"
 VERSION="latest"
+FRONTEND_VERSION="${AGENT_COMPOSE_FRONTEND_VERSION:-latest}"
 IMAGE_PREFIX=""
 PORT=""
 NO_START=0
@@ -48,6 +49,9 @@ Options:
 Environment:
   AGENT_COMPOSE_REPO          GitHub repo for downloads (owner/name)
   AGENT_COMPOSE_INSTALL_DIR   Same as --dir
+  AGENT_COMPOSE_FRONTEND_VERSION
+                              Frontend image tag to use with --image-prefix
+                              when no bundle manifest is available (default: latest)
   AGENT_COMPOSE_YES=1         Same as --yes
 EOF
 }
@@ -119,7 +123,8 @@ apply_image_refs() { # $1=file $2=mode(set-missing|overwrite)
   if [ -n "$IMAGE_PREFIX" ]; then
     for pair in \
       "AGENT_COMPOSE_IMAGE=${IMAGE_PREFIX}/agent-compose:${IMAGE_VERSION}" \
-      "AGENT_COMPOSE_FRONTEND_IMAGE=${IMAGE_PREFIX}/agent-compose-frontend:${IMAGE_VERSION}" \
+      "AGENT_COMPOSE_FRONTEND_VERSION=${FRONTEND_VERSION}" \
+      "AGENT_COMPOSE_FRONTEND_IMAGE=${IMAGE_PREFIX}/agent-compose-frontend:${FRONTEND_VERSION}" \
       "DEFAULT_IMAGE=${IMAGE_PREFIX}/agent-compose-guest:${IMAGE_VERSION}"; do
       key="${pair%%=*}"
       value="${pair#*=}"
@@ -134,7 +139,7 @@ apply_image_refs() { # $1=file $2=mode(set-missing|overwrite)
   elif [ -f "$MANIFEST" ]; then
     while IFS='=' read -r key value; do
       case "$key" in
-        AGENT_COMPOSE_IMAGE|AGENT_COMPOSE_FRONTEND_IMAGE|DEFAULT_IMAGE)
+        AGENT_COMPOSE_IMAGE|AGENT_COMPOSE_FRONTEND_VERSION|AGENT_COMPOSE_FRONTEND_IMAGE|DEFAULT_IMAGE)
           current="$(get_env "$file" "$key")"
           if [ "$mode" = "overwrite" ] || [ -z "$current" ]; then
             set_env "$file" "$key" "$value"

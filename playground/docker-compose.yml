@@ -34,12 +34,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   agent-compose-frontend:
-    build:
-      context: ..
-      dockerfile: nginx/Dockerfile
-      args:
-        REGISTRY_MIRROR: ${REGISTRY_MIRROR:-docker.io}
-    image: agent-compose-frontend:latest
+    image: ${AGENT_COMPOSE_FRONTEND_IMAGE:-ghcr.io/chaitin/agent-compose-frontend:latest}
     container_name: agent-compose-frontend
     restart: unless-stopped
     depends_on:
@@ -47,5 +42,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ../nginx/nginx.conf:/etc/nginx/templates/agent-compose.conf.template:ro
       - ./nginx_log:/var/log/nginx
       - ./data:/data

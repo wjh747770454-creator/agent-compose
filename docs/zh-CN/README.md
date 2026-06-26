@@ -102,15 +102,9 @@ agent 常用字段：
 
 ## 前端
 
-前端源码在 `frontend/`：
+Web UI 在独立仓库 [agent-compose-ui](https://github.com/chaitin/agent-compose-ui)。它通过已发布的 [`@chaitin-ai/agent-compose-client`](https://www.npmjs.com/package/@chaitin-ai/agent-compose-client) 包消费 API 客户端——该包由本仓库的 `proto/` 经 `proto-client/` 生成发布。
 
-```bash
-npm ci
-npm run build:ui
-npm run dev:ui
-```
-
-daemon 不托管 Web UI。请使用 nginx 等静态服务提供构建后的前端，并将 API 和 Jupyter proxy 路由反向代理到 daemon。仓库中的 `docker-compose.yml` 包含用于该部署方式的 `agent-compose-frontend` nginx 服务。
+daemon 不托管 Web UI。前端仓库构建一个 nginx 镜像（`ghcr.io/chaitin/agent-compose-frontend`），负责托管构建后的前端并把 API、Jupyter proxy 路由反向代理到 daemon。本仓库的 `docker-compose.yml` 和 `docker-compose.deploy.yml` 直接引用该已发布镜像。
 
 ## 配置
 

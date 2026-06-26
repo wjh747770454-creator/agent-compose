@@ -8,18 +8,14 @@ on:
       - cmd/**
       - deploy/**
       - docker-compose.deploy.yml
-      - frontend/**
       - guest-images/**
       - go.mod
       - go.sum
       - nginx/**
-      - package-lock.json
-      - package.json
       - pkg/**
       - proto/**
       - runtime/**
       - scripts/**
-      - vite.config.*
   push:
     branches:
       - main
@@ -77,16 +73,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [agent-compose, agent-compose-frontend, agent-compose-guest]
+        name: [agent-compose, agent-compose-guest]
         platform: ${{ fromJSON(needs.setup.outputs.platforms) }}
         include:
           - name: agent-compose
             image: agent-compose
             dockerfile: Dockerfile
-            context: .
-          - name: agent-compose-frontend
-            image: agent-compose-frontend
-            dockerfile: nginx/Dockerfile
             context: .
           - name: agent-compose-guest
             image: agent-compose-guest
@@ -148,7 +140,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [agent-compose, agent-compose-frontend, agent-compose-guest]
+        image: [agent-compose, agent-compose-guest]
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -214,6 +206,7 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          frontend_version="${AGENT_COMPOSE_FRONTEND_VERSION:-latest}"
           out="${PWD}/upload"
           mkdir -p "${out}"
 
@@ -231,7 +224,8 @@ jobs:
           chmod +x "${payload}/install.sh"
           {
             echo "AGENT_COMPOSE_IMAGE=${IMAGE_PREFIX}/agent-compose:${VERSION}"
-            echo "AGENT_COMPOSE_FRONTEND_IMAGE=${IMAGE_PREFIX}/agent-compose-frontend:${VERSION}"
+            echo "AGENT_COMPOSE_FRONTEND_VERSION=${frontend_version}"
+            echo "AGENT_COMPOSE_FRONTEND_IMAGE=${IMAGE_PREFIX}/agent-compose-frontend:${frontend_version}"
             echo "DEFAULT_IMAGE=${IMAGE_PREFIX}/agent-compose-guest:${VERSION}"
           } > "${payload}/images/manifest.env"
 
