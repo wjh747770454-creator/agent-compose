@@ -129,10 +129,9 @@ func TestCapabilityGatewayControlPlaneE2E(t *testing.T) {
 	}
 }
 
-// TestCapabilityGatewayUpdatePreservesToken verifies that updating the addr
-// without supplying a token keeps the existing one (the read response never
-// echoes the token, so the UI cannot resend it).
-func TestCapabilityGatewayUpdatePreservesToken(t *testing.T) {
+// TestCapabilityGatewayUpdateClearsToken verifies that an empty token follows
+// the API contract and clears any previously saved OctoBus token.
+func TestCapabilityGatewayUpdateClearsToken(t *testing.T) {
 	ctx := context.Background()
 	configDB := newTestConfigStore(t)
 	service := &Service{configDB: configDB, cap: &capabilityProvider{source: configDB}}
@@ -140,16 +139,20 @@ func TestCapabilityGatewayUpdatePreservesToken(t *testing.T) {
 	if _, err := service.UpdateCapabilityGatewayConfig(ctx, connect.NewRequest(&agentcomposev1.UpdateCapabilityGatewayConfigRequest{Addr: "http://octo:9000", Token: "keep-me"})); err != nil {
 		t.Fatalf("initial update: %v", err)
 	}
-	if _, err := service.UpdateCapabilityGatewayConfig(ctx, connect.NewRequest(&agentcomposev1.UpdateCapabilityGatewayConfigRequest{Addr: "http://octo2:9000"})); err != nil {
-		t.Fatalf("addr-only update: %v", err)
+	cleared, err := service.UpdateCapabilityGatewayConfig(ctx, connect.NewRequest(&agentcomposev1.UpdateCapabilityGatewayConfigRequest{Addr: "http://octo:9000", Token: ""}))
+	if err != nil {
+		t.Fatalf("clear token update: %v", err)
+	}
+	if cleared.Msg.GetTokenSet() {
+		t.Fatalf("token_set = true after clear, want false")
 	}
 
 	settings, err := configDB.GetCapabilityGateway(ctx)
 	if err != nil {
 		t.Fatalf("get settings: %v", err)
 	}
-	if settings.Addr != "http://octo2:9000" || settings.Token != "keep-me" {
-		t.Fatalf("token not preserved on addr-only update: %+v", settings)
+	if settings.Addr != "http://octo:9000" || settings.Token != "" {
+		t.Fatalf("token not cleared: %+v", settings)
 	}
 }
 

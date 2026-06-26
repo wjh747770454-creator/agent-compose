@@ -23,7 +23,7 @@ export async function getCapabilityGatewayConfig(): Promise<CapabilityGatewayCon
 }
 
 // updateCapabilityGatewayConfig saves the OctoBus connection. An empty token
-// keeps the existing one (the backend never returns the token).
+// clears the stored token.
 export async function updateCapabilityGatewayConfig(addr: string, token: string): Promise<CapabilityGatewayConfig> {
   const response = await configClient.updateCapabilityGatewayConfig({ addr, token });
   return { addr: response.addr, tokenSet: response.tokenSet };

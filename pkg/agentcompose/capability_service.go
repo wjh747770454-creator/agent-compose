@@ -149,15 +149,6 @@ func (s *Service) GetCapabilityGatewayConfig(ctx context.Context, req *connect.R
 
 func (s *Service) UpdateCapabilityGatewayConfig(ctx context.Context, req *connect.Request[agentcomposev1.UpdateCapabilityGatewayConfigRequest]) (*connect.Response[agentcomposev1.CapabilityGatewayConfig], error) {
 	token := strings.TrimSpace(req.Msg.GetToken())
-	if token == "" {
-		// An empty token means "keep existing": the read response never returns
-		// the token, so the UI cannot echo it back when editing only the addr.
-		existing, err := s.configDB.GetCapabilityGateway(ctx)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		token = existing.Token
-	}
 	saved, err := s.configDB.SaveCapabilityGateway(ctx, CapabilityGatewaySettings{
 		Addr:  req.Msg.GetAddr(),
 		Token: token,

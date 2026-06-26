@@ -41,7 +41,7 @@
   let lastSyncedAt = '';
   let gatewayAddr = '';
   let savedGatewayAddr = '';
-  let gatewayToken = ''; // write-only; blank keeps the existing token
+  let gatewayToken = ''; // write-only; blank clears the existing token
   let gatewayTokenSet = false;
   let gatewaySaving = false;
 
@@ -698,7 +698,7 @@
     </div>
     <div class="description-grid compact">
       <label>OctoBus 地址<input bind:value={gatewayAddr} placeholder="http://127.0.0.1:9000"></label>
-      <label>访问 Token<input type="password" bind:value={gatewayToken} placeholder={gatewayTokenSet ? '已设置（留空保持不变）' : '可选'}></label>
+      <label>访问 Token<input type="password" bind:value={gatewayToken} placeholder={gatewayTokenSet ? '已设置（留空清空）' : '可选'}></label>
       <div><span>连接状态</span><b><span class="chip {gatewayStatusChip}">{gatewayStatusLabel}</span></b></div>
       <div><span>可用服务数量</span><b>{capabilityCount}</b></div>
       <div><span>最近同步</span><b>{formatDateTime(lastSyncedAt)}</b></div>
