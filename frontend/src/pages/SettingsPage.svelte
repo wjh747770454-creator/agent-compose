@@ -125,6 +125,7 @@
     provider: '',
     topicPrefix: 'webhook.',
     token: '',
+    clearToken: false,
     bodyLimitBytes: '',
   };
 
@@ -527,6 +528,7 @@
       provider: '',
       topicPrefix: 'webhook.',
       token: '',
+      clearToken: false,
       bodyLimitBytes: '',
     };
   }
@@ -549,13 +551,22 @@
       provider: source.provider,
       topicPrefix: source.topicPrefix,
       token: '',
+      clearToken: false,
       bodyLimitBytes: source.bodyLimitBytes > 0 ? String(source.bodyLimitBytes) : '',
     };
     webhookEditorOpen = true;
   }
 
+  function selectedWebhookSource(): WebhookSource | undefined {
+    return webhookSources.find((source) => source.id === webhookForm.id);
+  }
+
   function existingWebhookSourceSelected(): boolean {
-    return Boolean(webhookForm.id && webhookSources.some((source) => source.id === webhookForm.id));
+    return Boolean(webhookForm.id && selectedWebhookSource());
+  }
+
+  function selectedWebhookSourceHasToken(): boolean {
+    return selectedWebhookSource()?.hasToken ?? false;
   }
 
   function validateWebhookForm(): { sourceId: string; bodyLimitBytes: number } | null {
@@ -584,8 +595,8 @@
         enabled: webhookForm.enabled,
         provider: webhookForm.provider,
         topicPrefix: webhookForm.topicPrefix,
-        token: webhookForm.token,
-        clearToken: false,
+        token: webhookForm.clearToken ? '' : webhookForm.token,
+        clearToken: existingWebhookSourceSelected() && webhookForm.clearToken,
         bodyLimitBytes: validated.bodyLimitBytes,
       });
       webhookSources = [saved, ...webhookSources.filter((source) => source.id !== saved.id)];
@@ -803,10 +814,13 @@
           <label class="form-item"><span>名称</span><input bind:value={webhookForm.name} placeholder="GitHub Main"></label>
           <label class="form-item"><span>平台</span><input bind:value={webhookForm.provider} placeholder="github"></label>
           <label class="form-item"><span>主题前缀</span><input bind:value={webhookForm.topicPrefix} placeholder="webhook.github."></label>
-          <label class="form-item"><span>访问令牌</span><input bind:value={webhookForm.token} type="password" placeholder={existingWebhookSourceSelected() ? '不修改请留空' : '请输入访问令牌'}></label>
+          <label class="form-item"><span>访问令牌</span><input bind:value={webhookForm.token} type="password" disabled={webhookForm.clearToken} placeholder={webhookForm.clearToken ? '保存后清空令牌' : existingWebhookSourceSelected() ? '不修改请留空' : '请输入访问令牌'}></label>
           <label class="form-item"><span>请求体上限</span><input bind:value={webhookForm.bodyLimitBytes} inputmode="numeric" placeholder="1048576"></label>
           <div class="webhook-switches">
             <label><input type="checkbox" bind:checked={webhookForm.enabled}> 启用</label>
+            {#if existingWebhookSourceSelected() && selectedWebhookSourceHasToken()}
+              <label><input type="checkbox" bind:checked={webhookForm.clearToken}> 清空令牌</label>
+            {/if}
           </div>
         </div>
         <div class="webhook-form-actions">
