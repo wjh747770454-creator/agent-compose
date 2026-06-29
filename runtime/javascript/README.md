@@ -1,9 +1,9 @@
-# agent-compose JavaScript Runtime
+# @chaitin-ai/agent-compose-runtime
 
-`agent-compose-runtime-js` is the guest-side runtime used by agent-compose agent sessions. It exposes the compatible CLI entrypoint:
+`@chaitin-ai/agent-compose-runtime` is the guest-side runtime package used by agent-compose agent sessions. It exposes the compatible CLI entrypoint:
 
 ```sh
-agent-compose-runtime-js prompt \
+agent-compose-runtime prompt \
   --provider <codex|claude|gemini> \
   --message-file <path> \
   --output-schema-file <path> \

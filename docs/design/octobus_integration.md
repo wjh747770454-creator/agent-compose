@@ -244,7 +244,7 @@ capset, call OctoBus
 `GET /admin/v1/catalog/{capset_id}?format=md&grpc=true` to render capability
 guide markdown, then write it to the **session MPI catalog**
 `<sessionDir>/runtime/mpi/catalog.md` (mounted in the guest as
-`/data/runtime/mpi/catalog.md`). `agent-compose-runtime-js`
+`/data/runtime/mpi/catalog.md`). `agent-compose-runtime`
 (`runtime/javascript`) `readMpiContext` reads this catalog and injects it as
 **high-priority context** into the agent system prompt: Codex receives it through
 `config.developer_instructions`; Claude receives it through `systemPrompt`
@@ -292,7 +292,7 @@ Injection chain:
 | `prepareSessionWorkspace` | Populate workspace with git clone / file copy |
 | `writeCapabilityGuide` (step 2) | Render capability guide markdown into session MPI catalog `runtime/mpi/catalog.md` (guest `/data/runtime/mpi/catalog.md`) |
 | runtime driver | Inject `session.EnvItems` into guest and mount workspace/runtime directories |
-| `agent-compose-runtime-js` (guest) | `readMpiContext` reads catalog and injects Codex / Claude system prompt |
+| `agent-compose-runtime` (guest) | `readMpiContext` reads catalog and injects Codex / Claude system prompt |
 
 ## Frontend
 
@@ -343,7 +343,7 @@ Backend:
    `CAP_GRPC_TARGET` / `CAP_TOKEN` env + `capset` tags; `writeCapabilityGuide`
    after DB creation and before VM start to render capability guide markdown
    with `?format=md&grpc=true` into session MPI catalog
-   `runtime/mpi/catalog.md`, which `agent-compose-runtime-js` injects into Codex
+   `runtime/mpi/catalog.md`, which `agent-compose-runtime` injects into Codex
    / Claude system prompt.
 
 Frontend:

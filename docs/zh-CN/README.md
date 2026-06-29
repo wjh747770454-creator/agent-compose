@@ -127,7 +127,7 @@ daemon 不托管 Web UI。前端仓库构建一个 nginx 镜像（`ghcr.io/chait
 
 ### Agent Provider
 
-Guest agent session 在 guest 容器内运行 provider CLI（`agent-compose-runtime-js`）。Codex 和 Claude 通过 Runtime LLM Facade 调用：真实 provider key 保存在 daemon 侧 LLM provider 配置中，runtime 只拿 session-scoped facade token 和 facade base URL。`LLM_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`GOOGLE_API_KEY`、`GEMINI_API_KEY` 等 provider key 名称会从用户提供的 runtime env 中过滤。兼容别名 `LLM_API_KEY`、`LLM_API_ENDPOINT` 仍可能出现在 runtime 中，但它们是 daemon 写入的 facade 值，不是上游 provider 凭据。Gemini 和 OpenCode 仍直接使用各自 provider CLI；OpenCode 凭据取决于所选 OpenCode model provider。
+Guest agent session 在 guest 容器内通过 `agent-compose-runtime` CLI 运行 provider CLI；该 CLI 由 `@chaitin-ai/agent-compose-runtime` npm 包提供。Codex 和 Claude 通过 Runtime LLM Facade 调用：真实 provider key 保存在 daemon 侧 LLM provider 配置中，runtime 只拿 session-scoped facade token 和 facade base URL。`LLM_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`GOOGLE_API_KEY`、`GEMINI_API_KEY` 等 provider key 名称会从用户提供的 runtime env 中过滤。兼容别名 `LLM_API_KEY`、`LLM_API_ENDPOINT` 仍可能出现在 runtime 中，但它们是 daemon 写入的 facade 值，不是上游 provider 凭据。Gemini 和 OpenCode 仍直接使用各自 provider CLI；OpenCode 凭据取决于所选 OpenCode model provider。
 
 | Provider | 典型环境变量 | 说明 |
 | --- | --- | --- |
@@ -191,7 +191,7 @@ task test
 - [英文文档索引](../README.md)
 - [架构说明](design/agent-compose_design.md)
 - [Agent system prompt（Phase 1）](design/agent_system_prompt_design.md)
-- [Runtime JS contract](design/agent-compose-runtime-js_contract.md)
+- [Runtime contract](design/agent-compose-runtime_contract.md)
 - [OpenCode CLI Provider 支持](design/opencode_cli_support.md)
 - [Webhook design](design/webhook_design.md)
 - [Webhook queue design](design/webhook_queue_design.md)

@@ -5,7 +5,7 @@ import { vi } from "vitest";
 import type { RunnerOptions } from "../src/types.js";
 
 export async function withTempSession<T>(fn: (root: string) => Promise<T>): Promise<T> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-compose-runtime-js-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-compose-runtime-"));
   try {
     return await fn(root);
   } finally {

@@ -12,7 +12,7 @@ import { runPromptCommand } from "./prompt.js";
 export function createProgram(options: { exitOverride?: boolean } = {}): Command {
   const program = new Command();
   program
-    .name("agent-compose-runtime-js")
+    .name("agent-compose-runtime")
     .description("agent-compose JavaScript agent runtime");
   if (options.exitOverride) {
     program.exitOverride();

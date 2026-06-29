@@ -1,6 +1,6 @@
-# agent-compose 与 agent-compose-runtime-js 调用规约
+# agent-compose 与 agent-compose-runtime 调用规约
 
-本文档描述 Go host 侧 `agent-compose` 与 sandbox 内 JavaScript runtime `agent-compose-runtime-js` 之间的调用边界。当前 runtime 主要用于 `AgentService`：host 在 sandbox 内执行统一入口命令，由 JS runtime 适配 Codex、Claude、Gemini，并把结构化结果回传给 host。
+本文档描述 Go host 侧 `agent-compose` 与 sandbox 内 JavaScript runtime `agent-compose-runtime` 之间的调用边界。当前 runtime 主要用于 `AgentService`：host 在 sandbox 内执行统一入口命令，由 JS runtime 适配 Codex、Claude、Gemini，并把结构化结果回传给 host。
 
 相关代码：
 
@@ -15,13 +15,13 @@
 
 `agent-compose` 是 host 侧 Go 服务，负责 session 生命周期、目录准备、runtime driver 调度、代理和持久化。
 
-`agent-compose-runtime-js` 安装在 guest image 内。镜像构建时：
+`agent-compose-runtime` 安装在 guest image 内。镜像构建时：
 
 ```text
 COPY runtime/javascript /tmp/agent-compose-runtime
 npm ci
 npm install -g <packed runtime>
-ln -sv ../lib/node_modules/agent-compose-runtime-js/dist/cli.js /usr/bin/agent-compose-runtime
+ln -sv ../lib/node_modules/@chaitin-ai/agent-compose-runtime/dist/cli.js /usr/bin/agent-compose-runtime
 ```
 
 host 侧实际调用的是 guest 内的：
@@ -144,7 +144,7 @@ prompt
 exec
 ```
 
-CLI 使用 `commander` 解析命令和参数。npm 包的 `bin` 入口为 `agent-compose-runtime-js`，guest image 额外创建 `agent-compose-runtime` 软链接指向编译后的 `dist/cli.js`。
+CLI 使用 `commander` 解析命令和参数。`@chaitin-ai/agent-compose-runtime` 包的 `bin` 入口为 `agent-compose-runtime`，guest image 额外创建 `agent-compose-runtime` 软链接指向编译后的 `dist/cli.js`。
 
 命令参数：
 

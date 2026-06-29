@@ -1,6 +1,7 @@
 {
-  "name": "agent-compose-runtime-js",
-  "version": "0.1.0",
+  "name": "@chaitin-ai/agent-compose-runtime",
+  "version": "0.4.0",
+  "description": "Guest-side runtime CLI for agent-compose agent sessions.",
   "license": "AGPL-3.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,7 +10,28 @@
     "README.md"
   ],
   "bin": {
-    "agent-compose-runtime-js": "./dist/cli.js"
+    "agent-compose-runtime": "./dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chaitin/agent-compose.git",
+    "directory": "runtime/javascript"
+  },
+  "homepage": "https://github.com/chaitin/agent-compose#readme",
+  "bugs": {
+    "url": "https://github.com/chaitin/agent-compose/issues"
+  },
+  "keywords": [
+    "agent-compose",
+    "runtime",
+    "agent"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",

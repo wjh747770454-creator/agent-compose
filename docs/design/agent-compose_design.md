@@ -408,7 +408,7 @@ result into Codex `developer_instructions`, Claude `systemPrompt.append`, or
 Gemini user prompt prepend.
 
 See [agent_system_prompt_design.md](agent_system_prompt_design.md) and
-[agent-compose-runtime-js_contract.md](agent-compose-runtime-js_contract.md) for
+[agent-compose-runtime_contract.md](agent-compose-runtime_contract.md) for
 the full contract.
 
 ## Command Execution And Images

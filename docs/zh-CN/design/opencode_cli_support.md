@@ -3,7 +3,7 @@
 英文版见：[../../design/opencode_cli_support.md](../../design/opencode_cli_support.md)
 
 本文档记录把 `opencode` 接入为 guest agent provider 的实现方案。它遵循当前
-[agent-compose-runtime-js_contract.md](agent-compose-runtime-js_contract.md)：
+[agent-compose-runtime_contract.md](agent-compose-runtime_contract.md)：
 Go 控制面负责创建 session 并在 guest 内执行统一 runtime 命令，
 `runtime/javascript` 负责适配各 provider CLI。
 

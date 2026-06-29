@@ -1,6 +1,7 @@
 {
   "name": "@chaitin-ai/agent-compose-runtime-sdk",
   "version": "0.4.0",
+  "description": "Node.js SDK for scripts running inside an agent-compose guest runtime.",
   "license": "LGPL-3.0-only",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
@@ -17,6 +18,27 @@
     "dist",
     "README.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chaitin/agent-compose.git",
+    "directory": "runtime/agent-compose-runtime-sdk"
+  },
+  "homepage": "https://github.com/chaitin/agent-compose#readme",
+  "bugs": {
+    "url": "https://github.com/chaitin/agent-compose/issues"
+  },
+  "keywords": [
+    "agent-compose",
+    "runtime",
+    "sdk"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "node scripts/clean-dist.mjs && npm run build:esm && npm run build:cjs && npm run build:types && node scripts/rename-cjs.mjs",
     "build:esm": "tsc -p tsconfig.esm.json",

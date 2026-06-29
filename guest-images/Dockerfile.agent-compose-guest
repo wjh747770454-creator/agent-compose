@@ -93,7 +93,7 @@ RUN cd /tmp/agent-compose-runtime && \
     RUNTIME_TARBALL="$(npm pack --silent | tail -n 1)" && \
     npm install -g "./${RUNTIME_TARBALL}" && \
     rm -rf /tmp/agent-compose-runtime && \
-    ln -sv ../lib/node_modules/agent-compose-runtime-js/dist/cli.js /usr/bin/agent-compose-runtime && \
+    ln -sfv ../lib/node_modules/@chaitin-ai/agent-compose-runtime/dist/cli.js /usr/bin/agent-compose-runtime && \
     ln -sf ../lib/node_modules/@openai/codex/bin/codex.js /usr/bin/codex && \
     ln -sf ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/bin/claude && \
     ln -sf ../lib/node_modules/@google/gemini-cli/bundle/gemini.js /usr/bin/gemini && \

@@ -62,7 +62,7 @@ RUN cd /tmp/agent-compose-runtime && \
     RUNTIME_TARBALL="$(npm pack --silent | tail -n 1)" && \
     npm install -g "./${RUNTIME_TARBALL}" && \
     cd /usr/local/bin && \
-    ln -sv  ../lib/node_modules/agent-compose-runtime-js/dist/cli.js agent-compose-runtime && \
+    ln -sfv ../lib/node_modules/@chaitin-ai/agent-compose-runtime/dist/cli.js agent-compose-runtime && \
     rm -rf /tmp/agent-compose-runtime
 
 RUN PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --break-system-packages --no-cache-dir --no-input \

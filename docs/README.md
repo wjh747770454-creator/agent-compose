@@ -20,7 +20,7 @@ are available under [zh-CN/design/](zh-CN/design/).
 - [Architecture notes](design/agent-compose_design.md)
 - [Agent system prompt (Phase 1)](design/agent_system_prompt_design.md)
 - [Runtime LLM Facade](zh-CN/design/agent-compose-runtime-llm-facade.md)
-- [Runtime JavaScript contract](design/agent-compose-runtime-js_contract.md)
+- [Runtime contract](design/agent-compose-runtime_contract.md)
 - [OpenCode CLI provider support](design/opencode_cli_support.md)
 - [Runtime environment variables](design/runtime_environment_variables_design.md)
 - [Runtime mount manifest](design/runtime_mount_manifest_design.md)

@@ -179,7 +179,7 @@ CAP_TOKEN=<每会话新生成 uuid>   # secret
 
 tag：每个能力集一个 `capset=<capset_id>`。前提仅是至少一个 capset 已选 + `CAP_GRPC_TARGET` 已配置；后者缺失则跳过能力注入并记 warning，不阻塞创建。
 
-**步骤 2：`writeCapabilityGuide(session, capset_ids)`（`prepareSessionWorkspace` 之后、`StartSessionVM` 之前，best-effort）** —— 对每个 capset 调 OctoBus `GET /admin/v1/catalog/{capset_id}?format=md&grpc=true` 渲染能力说明 markdown，写入**会话 MPI catalog** `<sessionDir>/runtime/mpi/catalog.md`（经挂载出现在 guest `/data/runtime/mpi/catalog.md`）。`agent-compose-runtime-js`（`runtime/javascript`）的 `readMpiContext` 会读这个 catalog，把它作为**高优先级上下文注入 agent system prompt**：codex 进 `config.developer_instructions`，claude 进 `systemPrompt`（preset `claude_code` + `append`）。所以创建会话后 agent 一启动就知道有哪些能力可调，无需自己 cat 文件。渲染内容含每个 gRPC 方法及其 `x-octobus-*` metadata（capset / instance）和「用 server reflection 获取描述符」的指引，guest 据此在调用时携带 `x-octobus-capset` / `x-octobus-instance`。不含 OctoBus 地址与 token（只取 `grpc` 段）。**OctoBus 不可达 / 渲染失败时记事件并继续，session/loader 照常启动**。
+**步骤 2：`writeCapabilityGuide(session, capset_ids)`（`prepareSessionWorkspace` 之后、`StartSessionVM` 之前，best-effort）** —— 对每个 capset 调 OctoBus `GET /admin/v1/catalog/{capset_id}?format=md&grpc=true` 渲染能力说明 markdown，写入**会话 MPI catalog** `<sessionDir>/runtime/mpi/catalog.md`（经挂载出现在 guest `/data/runtime/mpi/catalog.md`）。`agent-compose-runtime`（`runtime/javascript`）的 `readMpiContext` 会读这个 catalog，把它作为**高优先级上下文注入 agent system prompt**：codex 进 `config.developer_instructions`，claude 进 `systemPrompt`（preset `claude_code` + `append`）。所以创建会话后 agent 一启动就知道有哪些能力可调，无需自己 cat 文件。渲染内容含每个 gRPC 方法及其 `x-octobus-*` metadata（capset / instance）和「用 server reflection 获取描述符」的指引，guest 据此在调用时携带 `x-octobus-capset` / `x-octobus-instance`。不含 OctoBus 地址与 token（只取 `grpc` 段）。**OctoBus 不可达 / 渲染失败时记事件并继续，session/loader 照常启动**。
 
 > 覆盖范围：codex、claude 经 `mpiContext` 注入 system prompt；gemini runner 当前未消费 `mpiContext`（已有 gap，本期不处理）。
 
@@ -205,7 +205,7 @@ agent definition、创建会话与 loader 都保存能力集选择，`capset_ids
 | `prepareSessionWorkspace` | 填充工作区（git clone / file copy） |
 | `writeCapabilityGuide`（步骤 2） | 渲染能力说明 md 写入会话 MPI catalog `runtime/mpi/catalog.md`（guest `/data/runtime/mpi/catalog.md`） |
 | runtime driver | 将 `session.EnvItems` 注入 guest，挂载工作区与 runtime 目录 |
-| `agent-compose-runtime-js`（guest） | `readMpiContext` 读 catalog → 注入 codex / claude 的 system prompt |
+| `agent-compose-runtime`（guest） | `readMpiContext` 读 catalog → 注入 codex / claude 的 system prompt |
 
 ## 前端
 
@@ -241,7 +241,7 @@ agent definition、创建会话与 loader 都保存能力集选择，`capset_ids
 2. proto：`ConfigService` 增加 `GetCapabilityGatewayConfig` / `UpdateCapabilityGatewayConfig`；`CreateSessionRequest`、agent definition 与 loader messages 增加 `capset_ids`；`CapabilityService` 三个 rpc。重新生成 Go / TS。
 3. 控制面 provider 依赖 `ConfigStore`，每次调用读 `addr` / `token`。
 4. 数据面 capproxy：从 `ConfigStore` 读 OctoBus addr / token；token→session 内存索引；校验 `x-octobus-capset` 属于 session 绑定集合；业务调用要求 guest 带 `x-octobus-instance`；专用 gRPC listener。
-5. 两步注入，工作会话与 loader run 共用：`buildCapabilityGatewaySessionVars`（建库前，生成 `CAP_GRPC_TARGET` / `CAP_TOKEN` env + `capset` tags）；`writeCapabilityGuide`（建库后、VM 启动前，`?format=md&grpc=true` 渲染能力说明 md 写入会话 MPI catalog `runtime/mpi/catalog.md`，由 `agent-compose-runtime-js` 注入 codex / claude 的 system prompt）。
+5. 两步注入，工作会话与 loader run 共用：`buildCapabilityGatewaySessionVars`（建库前，生成 `CAP_GRPC_TARGET` / `CAP_TOKEN` env + `capset` tags）；`writeCapabilityGuide`（建库后、VM 启动前，`?format=md&grpc=true` 渲染能力说明 md 写入会话 MPI catalog `runtime/mpi/catalog.md`，由 `agent-compose-runtime` 注入 codex / claude 的 system prompt）。
 
 前端：
 

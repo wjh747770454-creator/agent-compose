@@ -8,7 +8,7 @@ Chinese version: [../zh-CN/design/agent_system_prompt_design.md](../zh-CN/design
 
 Related documents:
 
-- Runtime invocation contract: [agent-compose-runtime-js_contract.md](agent-compose-runtime-js_contract.md)
+- Runtime invocation contract: [agent-compose-runtime_contract.md](agent-compose-runtime_contract.md)
 
 Before Phase 1, `AgentDefinition.system_prompt` was persisted, exposed through
 API/Proto, and editable in the Agents UI, but the execution path never read it.
@@ -368,7 +368,7 @@ Runner tests (`runners.test.ts`, `runner-execution.test.ts`) were updated to use
 | `runtime/javascript/test/system-context.test.ts` | **new** — composition unit tests |
 | `runtime/javascript/test/runners.test.ts` | Updated for `systemContext` |
 | `runtime/javascript/test/runner-execution.test.ts` | Updated for `systemContext` |
-| `docs/design/agent-compose-runtime-js_contract.md` | Document convention path and layering |
+| `docs/design/agent-compose-runtime_contract.md` | Document convention path and layering |
 
 ## Success Criteria (Phase 1, verified)
 

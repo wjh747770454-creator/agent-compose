@@ -4,7 +4,7 @@ Chinese version: [../zh-CN/design/opencode_cli_support.md](../zh-CN/design/openc
 
 This document records the implementation for adding `opencode` as a guest agent
 provider. It follows the current runtime contract in
-[agent-compose-runtime-js_contract.md](agent-compose-runtime-js_contract.md):
+[agent-compose-runtime_contract.md](agent-compose-runtime_contract.md):
 the Go control plane creates sessions and executes one unified runtime command
 inside the guest, while `runtime/javascript` adapts provider-specific CLIs.
 

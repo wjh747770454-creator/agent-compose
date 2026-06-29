@@ -1,10 +1,10 @@
-# agent-compose And agent-compose-runtime-js Call Contract
+# agent-compose And agent-compose-runtime Call Contract
 
-Chinese version: [../zh-CN/design/agent-compose-runtime-js_contract.md](../zh-CN/design/agent-compose-runtime-js_contract.md)
+Chinese version: [../zh-CN/design/agent-compose-runtime_contract.md](../zh-CN/design/agent-compose-runtime_contract.md)
 
 This document describes the call boundary between the Go host side
 `agent-compose` process and the JavaScript runtime
-`agent-compose-runtime-js` inside the sandbox. The current runtime is primarily
+`agent-compose-runtime` inside the sandbox. The current runtime is primarily
 used by `AgentService`: the host executes a unified entry command inside the
 sandbox, the JavaScript runtime adapts Codex, Claude, and Gemini, and structured
 results are returned to the host.
@@ -23,14 +23,14 @@ Related code:
 `agent-compose` is the host-side Go service. It owns session lifecycle,
 directory preparation, runtime driver scheduling, proxying, and persistence.
 
-`agent-compose-runtime-js` is installed inside the guest image. During image
+`agent-compose-runtime` is installed inside the guest image. During image
 build:
 
 ```text
 COPY runtime/javascript /tmp/agent-compose-runtime
 npm ci
 npm install -g <packed runtime>
-ln -sv ../lib/node_modules/agent-compose-runtime-js/dist/cli.js /usr/bin/agent-compose-runtime
+ln -sv ../lib/node_modules/@chaitin-ai/agent-compose-runtime/dist/cli.js /usr/bin/agent-compose-runtime
 ```
 
 The host actually invokes this command inside the guest:
@@ -172,9 +172,10 @@ prompt
 exec
 ```
 
-The CLI uses `commander` to parse commands and arguments. The npm package `bin`
-entry is `agent-compose-runtime-js`; the guest image also creates an
-`agent-compose-runtime` symlink pointing to the compiled `dist/cli.js`.
+The CLI uses `commander` to parse commands and arguments. The
+`@chaitin-ai/agent-compose-runtime` package exposes the `agent-compose-runtime`
+bin entry; the guest image also creates an `agent-compose-runtime` symlink
+pointing to the compiled `dist/cli.js`.
 
 Command arguments:
 

@@ -282,8 +282,8 @@ Important variables include:
 
 ### Agent providers
 
-Guest agent sessions run provider CLIs inside the guest container
-(`agent-compose-runtime-js`). Codex and Claude calls use the Runtime LLM Facade:
+Guest agent sessions run provider CLIs through the `agent-compose-runtime` CLI,
+provided by the `@chaitin-ai/agent-compose-runtime` npm package. Codex and Claude calls use the Runtime LLM Facade:
 provider keys stay in the daemon-side LLM provider configuration, while guest
 runtimes receive session-scoped facade tokens and facade base URLs. LLM provider
 key names such as `LLM_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,

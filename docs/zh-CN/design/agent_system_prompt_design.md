@@ -6,7 +6,7 @@
 
 相关文档：
 
-- Runtime 调用契约：[agent-compose-runtime-js_contract.md](agent-compose-runtime-js_contract.md)
+- Runtime 调用契约：[agent-compose-runtime_contract.md](agent-compose-runtime_contract.md)
 
 Phase 1 之前，`AgentDefinition.system_prompt` 已持久化、通过 API/Proto 暴露、并可在 Agents UI 中编辑，但执行路径从未读取它。只有 MPI（Model Program Interface）能力目录会进入 provider 的 system/developer instruction 通道。
 
@@ -330,7 +330,7 @@ Runner 测试（`runners.test.ts`、`runner-execution.test.ts`）已更新为使
 | `runtime/javascript/test/system-context.test.ts` | **新增** — 组合单元测试 |
 | `runtime/javascript/test/runners.test.ts` | 更新为 `systemContext` |
 | `runtime/javascript/test/runner-execution.test.ts` | 更新为 `systemContext` |
-| `docs/design/agent-compose-runtime-js_contract.md` | 记录约定路径与分层 |
+| `docs/design/agent-compose-runtime_contract.md` | 记录约定路径与分层 |
 
 ## 验收标准（Phase 1，已验证）
 
