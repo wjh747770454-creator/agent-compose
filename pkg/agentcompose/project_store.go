@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent-compose/pkg/agentcompose/domain"
+	"agent-compose/pkg/agentcompose/projects"
 	"agent-compose/pkg/compose"
 )
 
@@ -61,84 +62,15 @@ func StableProjectRunID(projectID, agentName, source, idempotencyKey string) (st
 }
 
 func NewProjectRecordFromSpec(spec *compose.NormalizedProjectSpec, sourcePath string) (ProjectRecord, error) {
-	if spec == nil {
-		return ProjectRecord{}, fmt.Errorf("project spec is required")
-	}
-	sourcePath = normalizeProjectSourcePath(sourcePath)
-	projectID, err := StableProjectID(spec.Name, sourcePath)
-	if err != nil {
-		return ProjectRecord{}, err
-	}
-	specHash, err := spec.Hash()
-	if err != nil {
-		return ProjectRecord{}, fmt.Errorf("hash project spec: %w", err)
-	}
-	sourceJSON, err := encodeProjectSourceJSON(sourcePath)
-	if err != nil {
-		return ProjectRecord{}, err
-	}
-	return ProjectRecord{
-		ID:         projectID,
-		Name:       strings.TrimSpace(spec.Name),
-		SourcePath: sourcePath,
-		SourceJSON: sourceJSON,
-		SpecHash:   specHash,
-	}, nil
+	return projects.NewRecordFromSpec(spec, sourcePath)
 }
 
 func NewProjectAgentRecordFromSpec(projectID string, revision int64, agent compose.NormalizedAgentSpec) (ProjectAgentRecord, error) {
-	managedAgentID, err := StableManagedAgentID(projectID, agent.Name)
-	if err != nil {
-		return ProjectAgentRecord{}, err
-	}
-	specJSON, err := marshalCanonicalProjectJSON(agent)
-	if err != nil {
-		return ProjectAgentRecord{}, fmt.Errorf("marshal project agent %s spec: %w", agent.Name, err)
-	}
-	driver := ""
-	if agent.Driver != nil {
-		driver = agent.Driver.Name
-	}
-	return ProjectAgentRecord{
-		ProjectID:        strings.TrimSpace(projectID),
-		AgentName:        strings.TrimSpace(agent.Name),
-		ManagedAgentID:   managedAgentID,
-		Revision:         revision,
-		Provider:         strings.TrimSpace(agent.Provider),
-		Model:            strings.TrimSpace(agent.Model),
-		Image:            strings.TrimSpace(agent.Image),
-		Driver:           strings.TrimSpace(driver),
-		SchedulerEnabled: agent.Scheduler != nil && agent.Scheduler.Enabled,
-		SpecJSON:         string(specJSON),
-	}, nil
+	return projects.NewAgentRecordFromSpec(projectID, revision, agent)
 }
 
 func NewProjectSchedulerRecordFromSpec(projectID string, revision int64, agent compose.NormalizedAgentSpec) (ProjectSchedulerRecord, bool, error) {
-	if agent.Scheduler == nil {
-		return ProjectSchedulerRecord{}, false, nil
-	}
-	schedulerID, err := StableProjectSchedulerID(projectID, agent.Name, "")
-	if err != nil {
-		return ProjectSchedulerRecord{}, false, err
-	}
-	loaderID, err := StableManagedLoaderID(projectID, agent.Name, "")
-	if err != nil {
-		return ProjectSchedulerRecord{}, false, err
-	}
-	specJSON, err := marshalCanonicalProjectJSON(agent.Scheduler)
-	if err != nil {
-		return ProjectSchedulerRecord{}, false, fmt.Errorf("marshal project scheduler %s spec: %w", agent.Name, err)
-	}
-	return ProjectSchedulerRecord{
-		ProjectID:       strings.TrimSpace(projectID),
-		SchedulerID:     schedulerID,
-		AgentName:       strings.TrimSpace(agent.Name),
-		ManagedLoaderID: loaderID,
-		Revision:        revision,
-		Enabled:         agent.Scheduler.Enabled,
-		TriggerCount:    len(agent.Scheduler.Triggers),
-		SpecJSON:        string(specJSON),
-	}, true, nil
+	return projects.NewSchedulerRecordFromSpec(projectID, revision, agent)
 }
 
 func (s *ConfigStore) UpsertProject(ctx context.Context, project ProjectRecord) (ProjectRecord, error) {
@@ -833,21 +765,11 @@ func normalizeProjectSourcePath(sourcePath string) string {
 }
 
 func encodeProjectSourceJSON(sourcePath string) (string, error) {
-	data, err := json.Marshal(struct {
-		ComposePath string `json:"compose_path,omitempty"`
-	}{ComposePath: normalizeProjectSourcePath(sourcePath)})
-	if err != nil {
-		return "", fmt.Errorf("marshal project source: %w", err)
-	}
-	return string(data), nil
+	return projects.EncodeSourceJSON(sourcePath)
 }
 
 func marshalCanonicalProjectJSON(value any) ([]byte, error) {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return projects.MarshalCanonicalJSON(value)
 }
 
 func stableReadableID(prefix, readable, seed string) string {
