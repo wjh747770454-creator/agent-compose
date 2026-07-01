@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
 	"github.com/samber/do/v2"
@@ -178,29 +177,7 @@ func (s *ConfigStore) ensureAgentDefinitionSchema(ctx context.Context) error {
 }
 
 func (s *ConfigStore) tableColumnTypes(ctx context.Context, tableName string) (map[string]string, error) {
-	trimmedTableName := strings.TrimSpace(tableName)
-	if trimmedTableName == "" {
-		return nil, fmt.Errorf("schema table name is required")
-	}
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`SELECT name, type FROM pragma_table_info('%s')`, strings.ReplaceAll(trimmedTableName, "'", "''")))
-	if err != nil {
-		return nil, fmt.Errorf("query schema for %s: %w", tableName, err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	columnTypes := make(map[string]string)
-	for rows.Next() {
-		var name string
-		var columnType string
-		if err := rows.Scan(&name, &columnType); err != nil {
-			return nil, fmt.Errorf("scan schema for %s: %w", tableName, err)
-		}
-		columnTypes[strings.ToLower(strings.TrimSpace(name))] = strings.TrimSpace(columnType)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate schema for %s: %w", tableName, err)
-	}
-	return columnTypes, nil
+	return configstore.TableColumnTypes(ctx, s.db, tableName)
 }
 
 func (s *ConfigStore) rebuildGlobalEnvTable(ctx context.Context) error {
@@ -792,42 +769,11 @@ func mergeEnvItems(globalItems, sessionItems []SessionEnvVar) []SessionEnvVar {
 }
 
 func normalizeWorkspaceConfig(item WorkspaceConfig, assignID bool) (WorkspaceConfig, error) {
-	item.ID = strings.TrimSpace(item.ID)
-	item.Name = strings.TrimSpace(item.Name)
-	item.Type = strings.ToLower(strings.TrimSpace(item.Type))
-	item.ConfigJSON = strings.TrimSpace(item.ConfigJSON)
-	item.Comment = strings.TrimSpace(item.Comment)
-	if assignID && item.ID == "" {
-		item.ID = uuid.NewString()
-	}
-	if item.ID == "" {
-		return WorkspaceConfig{}, fmt.Errorf("workspace config id is required")
-	}
-	if item.Name == "" {
-		return WorkspaceConfig{}, fmt.Errorf("workspace config name is required")
-	}
-	if item.Type == "" {
-		return WorkspaceConfig{}, fmt.Errorf("workspace config type is required")
-	}
-	if item.Type != "git" && item.Type != "file" {
-		return WorkspaceConfig{}, fmt.Errorf("unsupported workspace config type %q", item.Type)
-	}
-	if item.ConfigJSON == "" {
-		item.ConfigJSON = "{}"
-	}
-	return item, nil
+	return configstore.NormalizeWorkspaceConfig(item, assignID)
 }
 
 func scanWorkspaceConfig(scan func(dest ...any) error) (WorkspaceConfig, error) {
-	var item WorkspaceConfig
-	var createdAtRaw any
-	var updatedAtRaw any
-	if err := scan(&item.ID, &item.Name, &item.Type, &item.ConfigJSON, &item.Comment, &createdAtRaw, &updatedAtRaw); err != nil {
-		return WorkspaceConfig{}, fmt.Errorf("scan workspace config: %w", err)
-	}
-	item.CreatedAt = parseStoredTime(createdAtRaw)
-	item.UpdatedAt = parseStoredTime(updatedAtRaw)
-	return item, nil
+	return configstore.ScanWorkspaceConfig(scan)
 }
 
 func parseStoredUnixTimeAuto(value int64) time.Time {
