@@ -63,6 +63,47 @@ func NormalizeWireAPI(value string) string {
 	}
 }
 
+func NormalizeAPIEndpoint(raw string) string {
+	return NormalizeAPIEndpointForProtocol(raw, APIProtocolResponses)
+}
+
+func NormalizeAPIEndpointForProtocol(raw, protocol string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	normalizedProtocol := NormalizeWireAPI(protocol)
+	if normalizedProtocol == APIProtocolChatCompletions && (strings.TrimSpace(parsed.Path) == "" || parsed.Path == "/") {
+		parsed.Path = "/v1/chat/completions"
+		return parsed.String()
+	}
+	cleanPath := strings.TrimRight(parsed.Path, "/")
+	if normalizedProtocol == APIProtocolChatCompletions && (cleanPath == "/v1" || strings.HasSuffix(cleanPath, "/openai/v1")) {
+		parsed.Path = pathpkg.Join(parsed.Path, "/chat/completions")
+		return parsed.String()
+	}
+	if normalizedProtocol == APIProtocolChatCompletions && strings.HasSuffix(cleanPath, "/openai") {
+		parsed.Path = pathpkg.Join(parsed.Path, "/v1/chat/completions")
+		return parsed.String()
+	}
+	if normalizedProtocol == APIProtocolResponses && strings.HasSuffix(cleanPath, "/openai") {
+		parsed.Path = pathpkg.Join(parsed.Path, "/v1/responses")
+		return parsed.String()
+	}
+	if normalizedProtocol == APIProtocolResponses && (cleanPath == "/v1" || strings.HasSuffix(cleanPath, "/openai/v1")) {
+		parsed.Path = pathpkg.Join(parsed.Path, "/responses")
+		return parsed.String()
+	}
+	if strings.TrimSpace(parsed.Path) == "" || parsed.Path == "/" {
+		parsed.Path = pathpkg.Join(parsed.Path, "/v1/responses")
+	}
+	return parsed.String()
+}
+
 func NormalizeProviderType(value string) string {
 	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), "-", "_") {
 	case "", "openai", "openai_compatible":
