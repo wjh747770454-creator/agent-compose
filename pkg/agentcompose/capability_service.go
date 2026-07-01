@@ -10,90 +10,19 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"agent-compose/pkg/agentcompose/api"
+	"agent-compose/pkg/agentcompose/capabilities"
 	"agent-compose/pkg/capability"
 	appconfig "agent-compose/pkg/config"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 )
 
-// capabilityGatewaySource supplies the page-configured OctoBus connection.
-// *ConfigStore satisfies it; tests can substitute a fake.
-type capabilityGatewaySource interface {
-	GetCapabilityGateway(ctx context.Context) (CapabilityGatewaySettings, error)
-}
-
-type CapabilityProvider interface {
-	Status(context.Context) capability.Status
-	ListCapsets(context.Context) ([]capability.Capset, error)
-	Catalog(context.Context, string) (capability.Catalog, error)
-	CapabilityGuide(ctx context.Context, capsetID string) ([]byte, error)
-	ProxyTarget() string
-}
+type CapabilityProvider = capabilities.Provider
 
 type capabilityIntegration interface{ CapabilityProvider }
 
-// capabilityProvider reads the OctoBus connection from source on every call, so
-// page edits take effect without a restart. An empty addr means disabled.
-// proxyTarget is the deployment-fixed, guest-reachable proxy address.
-type capabilityProvider struct {
-	source      capabilityGatewaySource
-	proxyTarget string
-}
-
 func NewCapabilityProvider(di do.Injector) (capabilityIntegration, error) {
 	conf := do.MustInvoke[*appconfig.Config](di)
-	return &capabilityProvider{
-		source:      do.MustInvoke[*ConfigStore](di),
-		proxyTarget: strings.TrimSpace(conf.CapGRPCTarget),
-	}, nil
-}
-
-// client builds an OctoBus client from the current settings. ok is false when
-// the gateway is not configured (empty addr) or settings are unreadable.
-func (p *capabilityProvider) client(ctx context.Context) (*capability.Client, bool) {
-	if p == nil || p.source == nil {
-		return nil, false
-	}
-	settings, err := p.source.GetCapabilityGateway(ctx)
-	if err != nil || strings.TrimSpace(settings.Addr) == "" {
-		return nil, false
-	}
-	return capability.NewClient(capability.Config{Addr: settings.Addr, Token: settings.Token}), true
-}
-
-func (p *capabilityProvider) Status(ctx context.Context) capability.Status {
-	client, ok := p.client(ctx)
-	if !ok {
-		return capability.Status{Configured: false, OK: false, Status: "not_configured"}
-	}
-	return client.Status(ctx)
-}
-
-func (p *capabilityProvider) ListCapsets(ctx context.Context) ([]capability.Capset, error) {
-	client, ok := p.client(ctx)
-	if !ok {
-		return []capability.Capset{}, nil
-	}
-	return client.ListCapsets(ctx)
-}
-
-func (p *capabilityProvider) Catalog(ctx context.Context, capsetID string) (capability.Catalog, error) {
-	client, ok := p.client(ctx)
-	if !ok {
-		return capability.Catalog{}, capability.ErrNotConfigured
-	}
-	return client.Catalog(ctx, capsetID)
-}
-
-func (p *capabilityProvider) CapabilityGuide(ctx context.Context, capsetID string) ([]byte, error) {
-	client, ok := p.client(ctx)
-	if !ok {
-		return nil, capability.ErrNotConfigured
-	}
-	return client.CatalogMarkdown(ctx, capsetID)
-}
-
-func (p *capabilityProvider) ProxyTarget() string {
-	return p.proxyTarget
+	return capabilities.NewDynamicProvider(do.MustInvoke[*ConfigStore](di), conf.CapGRPCTarget), nil
 }
 
 func (s *Service) GetCapabilityStatus(ctx context.Context, req *connect.Request[agentcomposev1.GetCapabilityStatusRequest]) (*connect.Response[agentcomposev1.CapabilityStatusResponse], error) {
