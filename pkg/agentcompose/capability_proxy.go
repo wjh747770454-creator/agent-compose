@@ -57,7 +57,7 @@ func (s *Store) ResolveCapabilitySession(ctx context.Context, token string) (cap
 		}
 		return capproxy.SessionBinding{SessionID: session.Summary.ID, CapsetIDs: capsetIDs}, nil
 	}
-	return capproxy.SessionBinding{}, fmt.Errorf("capability session token not found")
+	return capproxy.SessionBinding{}, classifyError(ErrNotFound, "capability session token not found", nil)
 }
 
 func sessionCapabilityToken(session *Session) string {

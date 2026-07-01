@@ -1,9 +1,11 @@
 package agentcompose
 
 import (
-	driverpkg "agent-compose/pkg/driver"
 	"context"
+	"errors"
 	"testing"
+
+	driverpkg "agent-compose/pkg/driver"
 )
 
 func TestResolveCapabilitySession(t *testing.T) {
@@ -38,5 +40,11 @@ func TestResolveCapabilitySession(t *testing.T) {
 	}
 	if _, err := bridge.store.ResolveCapabilitySession(ctx, "session-token"); err == nil {
 		t.Fatal("expected stopped session capability token to be rejected")
+	}
+
+	if _, err := bridge.store.ResolveCapabilitySession(ctx, "missing-token"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing capability token error = %v, want ErrNotFound", err)
+	} else if err.Error() != "capability session token not found" {
+		t.Fatalf("missing capability token message = %q", err.Error())
 	}
 }
