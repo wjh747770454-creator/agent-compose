@@ -116,7 +116,7 @@ func testSupportControlPlaneStartAndConfigHelpers(t *testing.T) {
 	}
 	configDB := newSupportTestConfigStore(t)
 	store := &Store{config: config}
-	bus := &LoaderBus{ch: make(chan LoaderTopicEvent, 8)}
+	bus := newTestLoaderBus(8)
 	manager := &LoaderManager{
 		config:       config,
 		rootCtx:      ctx,
@@ -148,7 +148,7 @@ func testSupportControlPlaneStartAndConfigHelpers(t *testing.T) {
 	}
 	manager.Start()
 
-	dispatchBus := &LoaderBus{ch: make(chan LoaderTopicEvent, 8)}
+	dispatchBus := newTestLoaderBus(8)
 	dispatcher := NewEventDispatcher(ctx, configDB, dispatchBus)
 	dispatcher.interval = time.Millisecond
 	dispatcher.Start()
@@ -208,7 +208,7 @@ func testSupportConstructorsAndHelpers(t *testing.T) {
 	runtimes := fixedRuntimeProvider{runtime: runtime}
 	executor := &Executor{config: config, store: store, runtimes: runtimes}
 	capProvider := newTestCapabilityProvider("", "")
-	bus := &LoaderBus{ch: make(chan LoaderTopicEvent, 4)}
+	bus := newTestLoaderBus(4)
 	sessions := &SessionRPCBridge{config: config, store: store, configDB: configDB, driver: driver, runtimes: runtimes, bus: bus}
 	manager := &LoaderManager{
 		config:       config,

@@ -1,34 +1,13 @@
 package agentcompose
 
 import (
-	"strings"
+	"agent-compose/pkg/agentcompose/loaders"
 
 	"github.com/samber/do/v2"
 )
 
-type LoaderBus struct {
-	ch chan LoaderTopicEvent
-}
+type LoaderBus = loaders.Bus
 
-func NewLoaderBus(do.Injector) (*LoaderBus, error) {
-	return &LoaderBus{ch: make(chan LoaderTopicEvent, 256)}, nil
-}
-
-func (b *LoaderBus) Events() <-chan LoaderTopicEvent {
-	if b == nil {
-		return nil
-	}
-	return b.ch
-}
-
-func (b *LoaderBus) Publish(event LoaderTopicEvent) bool {
-	if b == nil || strings.TrimSpace(event.Topic) == "" {
-		return false
-	}
-	select {
-	case b.ch <- event:
-		return true
-	default:
-		return false
-	}
+func NewLoaderBus(di do.Injector) (*LoaderBus, error) {
+	return loaders.NewBus(di)
 }

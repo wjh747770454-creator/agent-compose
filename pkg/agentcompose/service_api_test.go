@@ -776,7 +776,7 @@ func newTestServiceAPIHarness(t *testing.T) (*Service, *fakeLoaderAgentRuntime, 
 	driver := &fakeSessionDriver{}
 	streams := &SessionStreamBroker{subscribers: map[string]map[int]chan sessionWatchEvent{}}
 	executor := &Executor{config: config, store: store, configDB: configDB, runtimes: runtimes, streams: streams}
-	bus := &LoaderBus{ch: make(chan LoaderTopicEvent, 256)}
+	bus := newTestLoaderBus(256)
 	aggregator := &DashboardOverviewAggregator{
 		store:    store,
 		configDB: configDB,
@@ -845,7 +845,7 @@ func testServiceConfigAndLoaderAPIs(t *testing.T) {
 		scheduleWake: make(chan struct{}, 1),
 	}
 	manager.llm = newTestLLMClient(t, configDB, "loader llm text")
-	manager.bus = &LoaderBus{ch: make(chan LoaderTopicEvent, 4)}
+	manager.bus = newTestLoaderBus(4)
 	service := &Service{
 		config:   config,
 		store:    manager.store,

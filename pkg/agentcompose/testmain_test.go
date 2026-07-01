@@ -1,6 +1,7 @@
 package agentcompose
 
 import (
+	"agent-compose/pkg/agentcompose/loaders"
 	"os"
 	"testing"
 )
@@ -22,4 +23,8 @@ func TestMain(m *testing.M) {
 		_ = os.Unsetenv(key)
 	}
 	os.Exit(m.Run())
+}
+
+func newTestLoaderBus(buffer int) *LoaderBus {
+	return loaders.NewBusWithBuffer(buffer)
 }
