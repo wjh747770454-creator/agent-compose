@@ -50,3 +50,45 @@ func TopicEventToJSON(item domain.TopicEventRecord) TopicEventJSON {
 	}
 	return out
 }
+
+func EventSessionsResponseFor(item domain.TopicEventRecord, links []domain.EventSessionTraceItem) EventSessionsResponse {
+	resp := EventSessionsResponse{
+		EventID:       item.ID,
+		CorrelationID: item.CorrelationID,
+		Sessions:      make([]EventSessionJSON, 0, len(links)),
+	}
+	for _, link := range links {
+		resp.Sessions = append(resp.Sessions, EventSessionJSON{
+			SessionID:     link.SessionID,
+			Relation:      link.Relation,
+			LoaderID:      link.LoaderID,
+			RunID:         link.RunID,
+			TriggerID:     link.TriggerID,
+			LoaderEventID: link.LoaderEventID,
+			EventID:       link.EventID,
+			CreatedAt:     link.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	return resp
+}
+
+func EventRunsResponseFor(item domain.TopicEventRecord, deliveries []domain.EventDelivery) EventRunsResponse {
+	resp := EventRunsResponse{
+		EventID:       item.ID,
+		CorrelationID: item.CorrelationID,
+		Runs:          make([]EventRunJSON, 0, len(deliveries)),
+	}
+	for _, delivery := range deliveries {
+		resp.Runs = append(resp.Runs, EventRunJSON{
+			EventID:   delivery.EventID,
+			LoaderID:  delivery.LoaderID,
+			RunID:     delivery.RunID,
+			TriggerID: delivery.TriggerID,
+			Status:    delivery.Status,
+			Error:     delivery.Error,
+			CreatedAt: delivery.CreatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt: delivery.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	return resp
+}

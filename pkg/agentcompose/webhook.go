@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -21,8 +20,6 @@ type (
 	topicEventListResponse    = webhooks.TopicEventListResponse
 	eventSessionsResponse     = webhooks.EventSessionsResponse
 	eventRunsResponse         = webhooks.EventRunsResponse
-	eventRunJSON              = webhooks.EventRunJSON
-	eventSessionJSON          = webhooks.EventSessionJSON
 	webhookSourceRequest      = webhooks.SourceRequest
 	webhookSourceJSON         = webhooks.SourceJSON
 	webhookSourceListResponse = webhooks.SourceListResponse
@@ -206,24 +203,7 @@ func (s *Service) handleGetEventSessions(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list event sessions"})
 	}
-	resp := eventSessionsResponse{
-		EventID:       item.ID,
-		CorrelationID: item.CorrelationID,
-		Sessions:      make([]eventSessionJSON, 0, len(links)),
-	}
-	for _, link := range links {
-		resp.Sessions = append(resp.Sessions, eventSessionJSON{
-			SessionID:     link.SessionID,
-			Relation:      link.Relation,
-			LoaderID:      link.LoaderID,
-			RunID:         link.RunID,
-			TriggerID:     link.TriggerID,
-			LoaderEventID: link.LoaderEventID,
-			EventID:       link.EventID,
-			CreatedAt:     link.CreatedAt.UTC().Format(time.RFC3339Nano),
-		})
-	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, eventSessionsResponse(webhooks.EventSessionsResponseFor(item, links)))
 }
 
 func (s *Service) handleGetEventRuns(c echo.Context) error {
@@ -243,24 +223,7 @@ func (s *Service) handleGetEventRuns(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list event runs"})
 	}
-	resp := eventRunsResponse{
-		EventID:       item.ID,
-		CorrelationID: item.CorrelationID,
-		Runs:          make([]eventRunJSON, 0, len(deliveries)),
-	}
-	for _, delivery := range deliveries {
-		resp.Runs = append(resp.Runs, eventRunJSON{
-			EventID:   delivery.EventID,
-			LoaderID:  delivery.LoaderID,
-			RunID:     delivery.RunID,
-			TriggerID: delivery.TriggerID,
-			Status:    delivery.Status,
-			Error:     delivery.Error,
-			CreatedAt: delivery.CreatedAt.UTC().Format(time.RFC3339Nano),
-			UpdatedAt: delivery.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		})
-	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, eventRunsResponse(webhooks.EventRunsResponseFor(item, deliveries)))
 }
 
 func (s *Service) handleListWebhookSources(c echo.Context) error {
