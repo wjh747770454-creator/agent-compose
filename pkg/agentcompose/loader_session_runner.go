@@ -108,7 +108,7 @@ func (r *LoaderSessionRunner) Ensure(ctx context.Context, loader Loader, request
 	guestImage := r.guestImage(request, loader, agentDefinition, driver)
 	title := firstNonEmpty(strings.TrimSpace(request.Title), strings.TrimSpace(loader.Summary.Name), domain.DefaultLoaderName(time.Now().UTC()))
 	if agentDefinition != nil {
-		tags = append(tags, sessionTagsFromProto(agentDefinitionTags(*agentDefinition))...)
+		tags = append(tags, sessionTagsFromProto(api.AgentDefinitionTagsToProto(*agentDefinition))...)
 	}
 	session, err := m.store.CreateSession(ctx, title, "", driver, guestImage, workspaceID, SessionTypeScript+":"+loader.Summary.ID, workspaceSnapshot, envItems, tags)
 	if err != nil {

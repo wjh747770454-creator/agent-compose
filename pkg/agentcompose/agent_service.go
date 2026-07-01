@@ -156,7 +156,7 @@ func (s *Service) stopAgentSessions(ctx context.Context, agentID string) error {
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	for _, session := range sessions {
-		if !sessionHasAgentTag(session, agentID) {
+		if !domain.SessionHasAgentTag(session, agentID) {
 			continue
 		}
 		switch session.Summary.VMStatus {
@@ -286,8 +286,8 @@ func (s *Service) CreateAgentSession(ctx context.Context, req *connect.Request[a
 	envItems := domain.MergeEnvItems(agent.EnvItems, envItemsFromProto(req.Msg.GetEnvItems()))
 	createReq := &agentcomposev1.CreateSessionRequest{
 		Title:       title,
-		Tags:        agentDefinitionTags(agent),
-		EnvItems:    toProtoEnvItems(envItems),
+		Tags:        api.AgentDefinitionTagsToProto(agent),
+		EnvItems:    api.EnvItemsToProto(envItems),
 		WorkspaceId: workspaceID,
 		Driver:      driver,
 		GuestImage:  guestImage,
@@ -318,7 +318,7 @@ func (s *Service) validateAgentDefinitionWithWorkspace(item AgentDefinition, run
 		Availability: agentcomposev1.AgentAvailabilityStatus_AGENT_AVAILABILITY_STATUS_AVAILABLE,
 		Health:       agentcomposev1.AgentHealthStatus_AGENT_HEALTH_STATUS_HEALTHY,
 	}
-	if _, err := normalizeAgentDefinition(item, true); err != nil {
+	if _, err := domain.NormalizeAgentDefinition(item, true); err != nil {
 		result.Errors = append(result.Errors, err.Error())
 	}
 	if strings.TrimSpace(runtimeImageID) != "" {
@@ -364,7 +364,7 @@ func (s *Service) agentDefinitionToProto(ctx context.Context, item AgentDefiniti
 func (s *Service) agentDefinitionToProtoWith(ctx context.Context, item AgentDefinition, sessions []*Session) *agentcomposev1.AgentDefinition {
 	workspace, workspaceErr := s.agentWorkspace(ctx, item.WorkspaceID)
 	validation := s.validateAgentDefinitionWithWorkspace(item, "", workspace, workspaceErr)
-	current, latest := agentRunSummaries(item.ID, sessions)
+	current, latest := domain.AgentRunSummaries(item.ID, sessions)
 	if !item.DeletedAt.IsZero() {
 		validation.Availability = agentcomposev1.AgentAvailabilityStatus_AGENT_AVAILABILITY_STATUS_UNAVAILABLE
 		validation.Health = agentcomposev1.AgentHealthStatus_AGENT_HEALTH_STATUS_AT_RISK
@@ -373,7 +373,7 @@ func (s *Service) agentDefinitionToProtoWith(ctx context.Context, item AgentDefi
 	} else if latest != nil && latest.Status == VMStatusFailed {
 		validation.Health = agentcomposev1.AgentHealthStatus_AGENT_HEALTH_STATUS_AT_RISK
 	}
-	return toProtoAgentDefinition(item, workspace, validation, current, latest)
+	return api.AgentDefinitionToProto(item, workspace, validation.Availability, validation.Health, current, latest)
 }
 
 func (s *Service) agentWorkspace(ctx context.Context, workspaceID string) (*WorkspaceConfig, error) {
@@ -394,10 +394,6 @@ func (s *Service) listAllSessions(ctx context.Context) ([]*Session, error) {
 		return nil, err
 	}
 	return result.Sessions, nil
-}
-
-func agentRunSummaries(agentID string, sessions []*Session) (AgentCurrentRunSummary, *AgentLatestRunSummary) {
-	return domain.AgentRunSummaries(agentID, sessions)
 }
 
 func envItemsFromProto(items []*agentcomposev1.SessionEnvVar) []SessionEnvVar {

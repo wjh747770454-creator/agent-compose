@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"agent-compose/pkg/agentcompose/api"
+	"agent-compose/pkg/agentcompose/domain"
 	loaderpkg "agent-compose/pkg/agentcompose/loaders"
 	"agent-compose/pkg/agentcompose/projects"
 	"agent-compose/pkg/agentcompose/runs"
@@ -586,7 +587,7 @@ func (s *Service) validateProjectManagedAgentDefinitions(normalized normalizedV2
 	}
 	for _, agent := range agents {
 		path := "agents." + agent.ManagedAgentName
-		if _, err := normalizeAgentDefinition(agent, true); err != nil {
+		if _, err := domain.NormalizeAgentDefinition(agent, true); err != nil {
 			issues = append(issues, projectValidationIssue(path, err.Error()))
 			continue
 		}

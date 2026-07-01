@@ -380,7 +380,7 @@ func (s *ConfigStore) DeleteWorkspaceConfig(ctx context.Context, id string) erro
 }
 
 func (s *ConfigStore) CreateAgentDefinition(ctx context.Context, item AgentDefinition) (AgentDefinition, error) {
-	normalized, err := normalizeAgentDefinition(item, true)
+	normalized, err := domain.NormalizeAgentDefinition(item, true)
 	if err != nil {
 		return AgentDefinition{}, err
 	}
@@ -409,7 +409,7 @@ func (s *ConfigStore) CreateAgentDefinition(ctx context.Context, item AgentDefin
 }
 
 func (s *ConfigStore) UpdateAgentDefinition(ctx context.Context, item AgentDefinition) (AgentDefinition, error) {
-	normalized, err := normalizeAgentDefinition(item, true)
+	normalized, err := domain.NormalizeAgentDefinition(item, true)
 	if err != nil {
 		return AgentDefinition{}, err
 	}
@@ -450,7 +450,7 @@ func (s *ConfigStore) UpdateAgentDefinition(ctx context.Context, item AgentDefin
 }
 
 func (s *ConfigStore) UpsertManagedAgentDefinition(ctx context.Context, item AgentDefinition) (AgentDefinition, error) {
-	normalized, err := normalizeAgentDefinition(item, true)
+	normalized, err := domain.NormalizeAgentDefinition(item, true)
 	if err != nil {
 		return AgentDefinition{}, err
 	}

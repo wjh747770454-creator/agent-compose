@@ -833,7 +833,7 @@ func (s *Service) resolveSessionAgentConfig(ctx context.Context, session *Sessio
 		return config
 	}
 	agentID := sessionTagValue(session.Summary.Tags, agentSessionTagID)
-	if agentID == "" || !sessionHasAgentTag(session, agentID) || s.configDB == nil {
+	if agentID == "" || !domain.SessionHasAgentTag(session, agentID) || s.configDB == nil {
 		return config
 	}
 	agent, err := s.configDB.GetAgentDefinition(ctx, agentID)
@@ -1225,7 +1225,7 @@ func (e *Executor) resolveAgentSystemPrompt(ctx context.Context, session *Sessio
 	agentID := strings.TrimSpace(agentDefinitionID)
 	if agentID == "" {
 		taggedAgentID := sessionTagValue(session.Summary.Tags, agentSessionTagID)
-		if !sessionHasAgentTag(session, taggedAgentID) {
+		if !domain.SessionHasAgentTag(session, taggedAgentID) {
 			return "", nil
 		}
 		agentID = taggedAgentID

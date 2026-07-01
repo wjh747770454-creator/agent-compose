@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 
 	"agent-compose/pkg/agentcompose/capabilities"
+	"agent-compose/pkg/agentcompose/domain"
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
@@ -43,7 +44,7 @@ func testAgentRunSummariesScansAllSessions(t *testing.T) {
 			{Name: agentSessionTagID, Value: "agent-x"},
 		},
 	}})
-	current, latest := agentRunSummaries("agent-x", sessions)
+	current, latest := domain.AgentRunSummaries("agent-x", sessions)
 	if current.RunningSessionCount != 1 {
 		t.Fatalf("running session count = %d, want 1", current.RunningSessionCount)
 	}
