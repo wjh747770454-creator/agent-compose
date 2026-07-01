@@ -741,5 +741,5 @@ func cloneSessionForAgentExecution(session *Session, providerEnvItems []SessionE
 }
 
 func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `"'"'"'`) + "'"
+	return execution.ShellQuote(value)
 }
