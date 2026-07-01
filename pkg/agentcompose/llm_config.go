@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -532,15 +531,7 @@ func ensureDefaultAnthropicEnvProvider(ctx context.Context, config *appconfig.Co
 }
 
 func looksLikeAnthropicMessagesEndpoint(endpoint string) bool {
-	endpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
-	if endpoint == "" {
-		return false
-	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil {
-		return strings.HasSuffix(endpoint, "/messages")
-	}
-	return strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/messages")
+	return llms.LooksLikeAnthropicMessagesEndpoint(endpoint)
 }
 
 // anthropicProviderAuthFromLookup chooses the Anthropic auth header from the same
@@ -591,21 +582,7 @@ func hasEnabledLLMProviderID(ctx context.Context, store *ConfigStore, providerID
 // can (re)bootstrap a provider with a fresh key" from "the env has no key and we
 // should reuse the already-persisted session-env provider".
 func envHasProviderKeyForFamily(envItems []SessionEnvVar, providerFamily string) bool {
-	switch normalizeLLMProviderType(providerFamily) {
-	case llmProviderFamilyAnthropic:
-		return strings.TrimSpace(firstNonEmpty(
-			lookupEnvItemValue(envItems, "ANTHROPIC_API_KEY"),
-			lookupEnvItemValue(envItems, "ANTHROPIC_AUTH_TOKEN"),
-			lookupEnvItemValue(envItems, "LLM_API_KEY"),
-		)) != ""
-	case llmProviderFamilyOpenAI:
-		return strings.TrimSpace(firstNonEmpty(
-			lookupEnvItemValue(envItems, "LLM_API_KEY"),
-			lookupEnvItemValue(envItems, "OPENAI_API_KEY"),
-		)) != ""
-	default:
-		return false
-	}
+	return llms.EnvHasProviderKeyForFamily(envItems, providerFamily)
 }
 
 func hasConfiguredLLMProviderForFamily(ctx context.Context, store *ConfigStore, providerFamily string) bool {
@@ -637,65 +614,31 @@ func llmProviderScopeIsConfigured(scope string) bool {
 }
 
 func hasOpenAIEnvProviderInput(envItems []SessionEnvVar) bool {
-	endpoint := lookupEnvItemValue(envItems, "LLM_API_ENDPOINT")
-	if looksLikeAnthropicMessagesEndpoint(endpoint) {
-		return false
-	}
-	return strings.TrimSpace(firstNonEmpty(
-		endpoint,
-		lookupEnvItemValue(envItems, "LLM_API_KEY"),
-		lookupEnvItemValue(envItems, "OPENAI_API_KEY"),
-	)) != ""
+	return llms.HasOpenAIEnvProviderInput(envItems)
 }
 
 func hasAnthropicEnvProviderInput(envItems []SessionEnvVar) bool {
-	return strings.TrimSpace(firstNonEmpty(
-		lookupEnvItemValue(envItems, "ANTHROPIC_BASE_URL"),
-		lookupEnvItemValue(envItems, "ANTHROPIC_API_ENDPOINT"),
-		lookupEnvItemValue(envItems, "ANTHROPIC_API_KEY"),
-		lookupEnvItemValue(envItems, "ANTHROPIC_AUTH_TOKEN"),
-	)) != "" || looksLikeAnthropicMessagesEndpoint(lookupEnvItemValue(envItems, "LLM_API_ENDPOINT"))
+	return llms.HasAnthropicEnvProviderInput(envItems)
 }
 
 func hasSessionEnvProviderInput(envItems []SessionEnvVar) bool {
-	return hasOpenAIEnvProviderInput(envItems) || hasAnthropicEnvProviderInput(envItems)
+	return llms.HasSessionEnvProviderInput(envItems)
 }
 
 func sessionAnthropicEnvModel(envItems []SessionEnvVar) string {
-	genericModel := lookupEnvItemValue(envItems, "LLM_MODEL")
-	return firstNonEmpty(
-		lookupEnvItemValue(envItems, "ANTHROPIC_MODEL"),
-		lookupEnvItemValue(envItems, "CLAUDE_MODEL"),
-		genericModel,
-	)
+	return llms.SessionAnthropicEnvModel(envItems)
 }
 
 func sessionEnvProviderID(sessionID, providerFamily string) string {
-	sessionID = strings.TrimSpace(sessionID)
-	providerFamily = normalizeOptionalLLMProviderType(providerFamily)
-	if sessionID == "" || providerFamily == "" {
-		return ""
-	}
-	return "session-env:" + sessionID + ":" + providerFamily
+	return llms.SessionEnvProviderID(sessionID, providerFamily)
 }
 
 func isSessionEnvProviderID(providerID string) bool {
-	return strings.HasPrefix(strings.TrimSpace(providerID), "session-env:")
+	return llms.IsSessionEnvProviderID(providerID)
 }
 
 func chooseSessionEnvProviderID(current, next, nextFamily, preferredFamily string) string {
-	next = strings.TrimSpace(next)
-	if next == "" {
-		return current
-	}
-	if strings.TrimSpace(current) == "" {
-		return next
-	}
-	preferredFamily = normalizeOptionalLLMProviderType(preferredFamily)
-	if preferredFamily != "" && normalizeLLMProviderType(nextFamily) == preferredFamily {
-		return next
-	}
-	return current
+	return llms.ChooseSessionEnvProviderID(current, next, nextFamily, preferredFamily)
 }
 
 func resolveLLMTargetForProviderFamily(ctx context.Context, config *appconfig.Config, store *ConfigStore, providerFamily, requestedModel string) (LLMResolvedTarget, error) {
@@ -785,16 +728,7 @@ func lookupEnvValue(ctx context.Context, store *ConfigStore, key string) string 
 }
 
 func lookupEnvItemValue(items []SessionEnvVar, key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ""
-	}
-	for _, item := range normalizeEnvItems(items) {
-		if strings.EqualFold(strings.TrimSpace(item.Name), key) {
-			return strings.TrimSpace(item.Value)
-		}
-	}
-	return ""
+	return llms.EnvItemValue(items, key)
 }
 
 func newLLMFacadeToken(sessionID, model, providerID, wireAPI, source, runID string) (string, LLMFacadeToken, error) {
