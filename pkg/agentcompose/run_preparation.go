@@ -65,59 +65,23 @@ func (s *Service) prepareProjectRun(ctx context.Context, run ProjectRunRecord, r
 }
 
 func decodeProjectRevisionSpec(raw string) (*agentcomposev2.ProjectSpec, error) {
-	var spec agentcomposev2.ProjectSpec
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &spec); err != nil {
-		return nil, fmt.Errorf("decode project revision spec: %w", err)
-	}
-	return &spec, nil
+	return runs.DecodeRevisionSpec(raw)
 }
 
 func normalizedProjectAgentByName(spec *agentcomposev2.ProjectSpec, name string) (*agentcomposev2.AgentSpec, bool) {
-	if spec == nil {
-		return nil, false
-	}
-	name = strings.TrimSpace(name)
-	for _, agent := range spec.GetAgents() {
-		if agent.GetName() == name {
-			return agent, true
-		}
-	}
-	return nil, false
+	return runs.AgentSpecByName(spec, name)
 }
 
 func sessionEnvItemsFromV2(items []*agentcomposev2.EnvVarSpec) []SessionEnvVar {
-	env := make([]SessionEnvVar, 0, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		env = append(env, SessionEnvVar{
-			Name:   item.GetName(),
-			Value:  item.GetValue(),
-			Secret: item.GetSecret(),
-		})
-	}
-	return normalizeEnvItems(env)
+	return runs.EnvItemsFromV2(items)
 }
 
 func composeWorkspaceSpecFromV2(workspace *agentcomposev2.WorkspaceSpec) *compose.WorkspaceSpec {
-	if workspace == nil {
-		return nil
-	}
-	return &compose.WorkspaceSpec{
-		Provider: workspace.GetProvider(),
-		URL:      workspace.GetUrl(),
-		Branch:   workspace.GetBranch(),
-		Path:     workspace.GetPath(),
-	}
+	return runs.ComposeWorkspaceSpecFromV2(workspace)
 }
 
 func mergeRunEnvItems(groups ...[]SessionEnvVar) []SessionEnvVar {
-	var merged []SessionEnvVar
-	for _, group := range groups {
-		merged = mergeEnvItems(merged, group)
-	}
-	return merged
+	return runs.MergeEnvItems(groups...)
 }
 
 func (s *Service) prepareProjectRunWorkspace(ctx context.Context, run ProjectRunRecord, project ProjectRecord, projectWorkspace, agentWorkspace *compose.WorkspaceSpec) (*WorkspaceConfig, error) {
