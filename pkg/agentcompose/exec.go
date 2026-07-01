@@ -472,16 +472,7 @@ func (e *Executor) executeCell(ctx context.Context, session *Session, cellType, 
 }
 
 func normalizeCellType(cellType string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(cellType)) {
-	case "", CellTypeJavaScript:
-		return CellTypeJavaScript, nil
-	case CellTypeShell:
-		return CellTypeShell, nil
-	case CellTypePython:
-		return CellTypePython, nil
-	default:
-		return "", fmt.Errorf("unsupported cell type %q", cellType)
-	}
+	return execution.NormalizeCellType(cellType)
 }
 
 func cellExecSpec(cellType, guestCellDir string) (scriptName, command string, args []string) {

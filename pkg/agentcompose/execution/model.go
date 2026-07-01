@@ -2,6 +2,8 @@ package execution
 
 import (
 	"agent-compose/pkg/agentcompose/domain"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -32,4 +34,17 @@ type ExecuteAgentRequest struct {
 	Timeout           time.Duration
 	OutputSchemaJSON  string
 	Stream            AgentExecutionStream
+}
+
+func NormalizeCellType(cellType string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(cellType)) {
+	case "", CellTypeJavaScript:
+		return CellTypeJavaScript, nil
+	case CellTypeShell:
+		return CellTypeShell, nil
+	case CellTypePython:
+		return CellTypePython, nil
+	default:
+		return "", fmt.Errorf("unsupported cell type %q", cellType)
+	}
 }
