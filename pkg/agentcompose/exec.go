@@ -20,10 +20,10 @@ import (
 )
 
 const (
-	CellTypeShell      = "shell"
-	CellTypeJavaScript = "javascript"
-	CellTypePython     = "python"
-	CellTypeAgent      = "agent"
+	CellTypeShell      = execution.CellTypeShell
+	CellTypeJavaScript = execution.CellTypeJavaScript
+	CellTypePython     = execution.CellTypePython
+	CellTypeAgent      = execution.CellTypeAgent
 )
 
 const defaultLoaderCommandMaxOutputBytes = int64(1024 * 1024)

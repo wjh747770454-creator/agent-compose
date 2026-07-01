@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"agent-compose/pkg/agentcompose/domain"
+	"agent-compose/pkg/agentcompose/execution"
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 
@@ -26,7 +27,7 @@ const (
 	VMStatusStopped = domain.VMStatusStopped
 	VMStatusFailed  = domain.VMStatusFailed
 
-	CellTypeAgent = "agent"
+	CellTypeAgent = execution.CellTypeAgent
 )
 
 type (

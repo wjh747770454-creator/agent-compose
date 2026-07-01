@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+const (
+	CellTypeShell      = "shell"
+	CellTypeJavaScript = "javascript"
+	CellTypePython     = "python"
+	CellTypeAgent      = "agent"
+)
+
 type CellExecutionStream struct {
 	OnStart func(domain.NotebookCell) error
 	OnChunk func(string, domain.ExecChunk) error
