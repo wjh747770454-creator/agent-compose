@@ -53,6 +53,34 @@ func ScanFacadeToken(scan func(dest ...any) error) (FacadeToken, error) {
 	return item, nil
 }
 
+func NormalizeDefaultConfig(provider Provider, model Model) (Provider, Model, bool) {
+	provider.ID = firstNonEmpty(strings.TrimSpace(provider.ID), ProviderIDDefaultOpenAI)
+	provider.Name = firstNonEmpty(strings.TrimSpace(provider.Name), "default")
+	provider.ProviderType = NormalizeProviderType(provider.ProviderType)
+	provider.DefaultWireAPI = NormalizeWireAPI(provider.DefaultWireAPI)
+	if provider.ProviderType == ProviderFamilyAnthropic {
+		provider.BaseURL = NormalizeAnthropicAPIBaseURL(provider.BaseURL)
+	} else {
+		provider.BaseURL = NormalizeAPIBaseURL(provider.BaseURL, provider.DefaultWireAPI)
+	}
+	provider.AuthHeader = firstNonEmpty(strings.TrimSpace(provider.AuthHeader), "Authorization")
+	provider.AuthScheme = strings.TrimSpace(provider.AuthScheme)
+	if provider.AuthScheme == "" && strings.EqualFold(provider.AuthHeader, "Authorization") {
+		provider.AuthScheme = "Bearer"
+	}
+	provider.HeadersJSON = firstNonEmpty(strings.TrimSpace(provider.HeadersJSON), "{}")
+	if provider.Weight == 0 {
+		provider.Weight = 10
+	}
+	provider.Scope = firstNonEmpty(strings.TrimSpace(provider.Scope), ProviderScopeSystem)
+
+	model.ID = firstNonEmpty(strings.TrimSpace(model.ID), strings.TrimSpace(model.Name))
+	model.Name = firstNonEmpty(strings.TrimSpace(model.Name), model.ID)
+	model.Enabled = true
+	model.Scope = firstNonEmpty(strings.TrimSpace(model.Scope), ProviderScopeSystem)
+	return provider, model, model.ID != "" && model.Name != ""
+}
+
 func NormalizeWireAPI(value string) string {
 	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), "-", "_") {
 	case "", APIProtocolResponses:

@@ -104,30 +104,9 @@ func (s *ConfigStore) HasLLMProviders(ctx context.Context) (bool, error) {
 
 func (s *ConfigStore) UpsertDefaultLLMConfig(ctx context.Context, provider LLMProvider, model LLMModel) error {
 	now := time.Now().UTC().Unix()
-	provider.ID = firstNonEmpty(strings.TrimSpace(provider.ID), "default")
-	provider.Name = firstNonEmpty(strings.TrimSpace(provider.Name), "default")
-	provider.ProviderType = normalizeLLMProviderType(provider.ProviderType)
-	provider.DefaultWireAPI = normalizeLLMWireAPI(provider.DefaultWireAPI)
-	if provider.ProviderType == llmProviderFamilyAnthropic {
-		provider.BaseURL = normalizeAnthropicAPIBaseURL(provider.BaseURL)
-	} else {
-		provider.BaseURL = normalizeLLMAPIBaseURL(provider.BaseURL, provider.DefaultWireAPI)
-	}
-	provider.AuthHeader = firstNonEmpty(strings.TrimSpace(provider.AuthHeader), "Authorization")
-	provider.AuthScheme = strings.TrimSpace(provider.AuthScheme)
-	if provider.AuthScheme == "" && strings.EqualFold(provider.AuthHeader, "Authorization") {
-		provider.AuthScheme = "Bearer"
-	}
-	provider.HeadersJSON = firstNonEmpty(strings.TrimSpace(provider.HeadersJSON), "{}")
-	if provider.Weight == 0 {
-		provider.Weight = 10
-	}
-	provider.Scope = firstNonEmpty(strings.TrimSpace(provider.Scope), llmProviderScopeSystem)
-	model.ID = firstNonEmpty(strings.TrimSpace(model.ID), strings.TrimSpace(model.Name))
-	model.Name = firstNonEmpty(strings.TrimSpace(model.Name), model.ID)
-	model.Enabled = true
-	model.Scope = firstNonEmpty(strings.TrimSpace(model.Scope), llmProviderScopeSystem)
-	if model.ID == "" || model.Name == "" {
+	var ok bool
+	provider, model, ok = llms.NormalizeDefaultConfig(provider, model)
+	if !ok {
 		return nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -885,16 +864,8 @@ func normalizeOptionalLLMProviderType(value string) string {
 	return llms.NormalizeOptionalProviderType(value)
 }
 
-func normalizeLLMAPIBaseURL(raw, wireAPI string) string {
-	return llms.NormalizeAPIBaseURL(raw, wireAPI)
-}
-
 func llmEndpointForProvider(provider LLMProvider, wireAPI string) string {
 	return llms.EndpointForProvider(provider, wireAPI)
-}
-
-func normalizeAnthropicAPIBaseURL(raw string) string {
-	return llms.NormalizeAnthropicAPIBaseURL(raw)
 }
 
 func lookupEnvValue(ctx context.Context, store *ConfigStore, key string) string {
