@@ -1,6 +1,7 @@
 package agentcompose
 
 import (
+	"agent-compose/pkg/agentcompose/execution"
 	appconfig "agent-compose/pkg/config"
 	"context"
 	"encoding/json"
@@ -27,27 +28,11 @@ const (
 
 const defaultLoaderCommandMaxOutputBytes = int64(1024 * 1024)
 
-type CellExecutionStream struct {
-	OnStart func(NotebookCell) error
-	OnChunk func(string, ExecChunk) error
-}
-
-type AgentExecutionStream struct {
-	OnStart func(NotebookCell) error
-	OnChunk func(string, ExecChunk) error
-}
-
-type ExecuteAgentRequest struct {
-	Agent             string
-	AgentDefinitionID string
-	Model             string
-	ProviderEnvItems  []SessionEnvVar
-	RunID             string
-	Message           string
-	Timeout           time.Duration
-	OutputSchemaJSON  string
-	Stream            AgentExecutionStream
-}
+type (
+	CellExecutionStream  = execution.CellExecutionStream
+	AgentExecutionStream = execution.AgentExecutionStream
+	ExecuteAgentRequest  = execution.ExecuteAgentRequest
+)
 
 type Executor struct {
 	config   *appconfig.Config
