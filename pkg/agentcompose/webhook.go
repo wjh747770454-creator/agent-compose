@@ -1,15 +1,9 @@
 package agentcompose
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -61,7 +55,7 @@ func (s *Service) handleWebhook(c echo.Context) error {
 	}
 	rawBody, err := readWebhookBody(c.Request(), bodyLimit)
 	if err != nil {
-		if errors.Is(err, errWebhookBodyTooLarge) {
+		if errors.Is(err, ErrBodyTooLarge) {
 			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "request body is too large"})
 		}
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
@@ -362,30 +356,12 @@ func toWebhookSourceJSON(source WebhookSource) webhookSourceJSON {
 	}
 }
 
-func presentedWebhookToken(r *http.Request) string {
-	presented := ""
-	if auth := strings.TrimSpace(r.Header.Get("Authorization")); strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-		presented = strings.TrimSpace(auth[len("bearer "):])
-	}
-	if presented == "" {
-		presented = strings.TrimSpace(r.Header.Get("X-WEBHOOK-TOKEN"))
-	}
-	return presented
-}
-
 func webhookTokenHash(token string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return webhooks.TokenHash(token)
 }
 
 func validWebhookTokenHash(r *http.Request, hash string) bool {
-	hash = strings.TrimSpace(hash)
-	token := presentedWebhookToken(r)
-	if hash == "" || token == "" {
-		return false
-	}
-	actual := webhookTokenHash(token)
-	return subtle.ConstantTimeCompare([]byte(actual), []byte(hash)) == 1
+	return webhooks.ValidTokenHash(r, hash)
 }
 
 func (s *Service) authorizeWebhookRequest(c echo.Context, topic string) (WebhookSource, int64, bool, error) {
@@ -416,51 +392,16 @@ func (s *Service) authorizeWebhookRequest(c echo.Context, topic string) (Webhook
 	return matches[0], limit, false, nil
 }
 
-var errWebhookBodyTooLarge = errors.New("webhook body too large")
-
 func readWebhookBody(r *http.Request, limit int64) ([]byte, error) {
-	if limit <= 0 {
-		limit = 1 << 20
-	}
-	reader := io.LimitReader(r.Body, limit+1)
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return nil, errWebhookBodyTooLarge
-	}
-	return data, nil
+	return webhooks.ReadBody(r, limit)
 }
 
 func requestContentTypeIsJSON(r *http.Request) bool {
-	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
-	if contentType == "" {
-		return false
-	}
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	return err == nil && strings.EqualFold(mediaType, "application/json")
+	return webhooks.RequestContentTypeIsJSON(r)
 }
 
 func decodeWebhookJSONObject(raw []byte) (map[string]any, string, error) {
-	var body map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if err := decoder.Decode(&body); err != nil {
-		return nil, "", fmt.Errorf("body must be valid JSON")
-	}
-	if body == nil {
-		return nil, "", fmt.Errorf("body must be a JSON object")
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, "", fmt.Errorf("body must contain one JSON document")
-	}
-	compact, err := marshalJSONCompact(body)
-	if err != nil {
-		return nil, "", err
-	}
-	return body, compact, nil
+	return webhooks.DecodeJSONObject(raw)
 }
 
 func existingWebhookBodyHash(payloadJSON string) string {
@@ -468,119 +409,31 @@ func existingWebhookBodyHash(payloadJSON string) string {
 }
 
 func validateExternalWebhookTopic(topic string) error {
-	if err := validateTopicEventName(topic); err != nil {
-		return err
-	}
-	if !strings.HasPrefix(topic, "webhook.") {
-		return fmt.Errorf("webhook topic must use webhook.* prefix")
-	}
-	return nil
+	return webhooks.ValidateExternalTopic(topic)
 }
 
 func providerFromWebhookTopic(topic string) string {
-	parts := strings.Split(topic, ".")
-	if len(parts) >= 2 && parts[0] == "webhook" {
-		return strings.TrimSpace(parts[1])
-	}
-	return ""
+	return webhooks.ProviderFromTopic(topic)
 }
 
 func intentFromWebhookBody(body map[string]any) string {
-	if value, ok := body["intent"].(string); ok && strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value)
-	}
-	return "notification"
+	return webhooks.IntentFromBody(body)
 }
 
 func extractCorrelationID(r *http.Request, body map[string]any) string {
-	if value := strings.TrimSpace(r.Header.Get("X-Correlation-ID")); value != "" {
-		return value
-	}
-	if value, ok := body["correlation_id"].(string); ok && strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value)
-	}
-	if value, ok := body["correlationId"].(string); ok && strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value)
-	}
-	return ""
+	return webhooks.ExtractCorrelationID(r, body)
 }
 
 func extractIdempotencyKey(r *http.Request) string {
-	if value := strings.TrimSpace(r.Header.Get("Idempotency-Key")); value != "" {
-		return value
-	}
-	if value := extractDeliveryID(r); value != "" {
-		return value
-	}
-	return strings.TrimSpace(r.Header.Get("X-Request-ID"))
+	return webhooks.ExtractIdempotencyKey(r)
 }
 
 func extractDeliveryID(r *http.Request) string {
-	for _, key := range []string{"X-GitHub-Delivery", "X-Gitlab-Event-UUID", "X-Request-ID"} {
-		if value := strings.TrimSpace(r.Header.Get(key)); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func sanitizeWebhookHeaders(headers http.Header) map[string]string {
-	allowed := map[string]struct{}{
-		"content-type":        {},
-		"user-agent":          {},
-		"x-request-id":        {},
-		"x-correlation-id":    {},
-		"x-github-event":      {},
-		"x-github-delivery":   {},
-		"x-gitlab-event":      {},
-		"x-hub-signature-256": {},
-	}
-	out := make(map[string]string)
-	for key, values := range headers {
-		lower := strings.ToLower(strings.TrimSpace(key))
-		if _, ok := allowed[lower]; !ok || len(values) == 0 {
-			continue
-		}
-		out[lower] = strings.Join(values, ",")
-	}
-	return out
+	return webhooks.ExtractDeliveryID(r)
 }
 
 func buildWebhookPayload(c echo.Context, eventID string, sequence int64, topic, correlationID, idempotencyKey string, source WebhookSource, body map[string]any) map[string]any {
-	r := c.Request()
-	payload := map[string]any{
-		"eventId":        eventID,
-		"sequence":       sequence,
-		"source":         TopicEventSourceWebhook,
-		"provider":       firstNonEmpty(source.Provider, providerFromWebhookTopic(topic)),
-		"intent":         intentFromWebhookBody(body),
-		"method":         r.Method,
-		"path":           r.URL.Path,
-		"topic":          topic,
-		"correlationId":  correlationID,
-		"idempotencyKey": idempotencyKey,
-		"deliveryId":     extractDeliveryID(r),
-		"remoteAddr":     r.RemoteAddr,
-		"headers":        sanitizeWebhookHeaders(r.Header),
-		"query":          queryValuesToMap(r),
-		"body":           body,
-	}
-	if source.ID != "" {
-		payload["webhookSourceId"] = source.ID
-	}
-	return payload
-}
-
-func queryValuesToMap(r *http.Request) map[string]any {
-	out := make(map[string]any)
-	for key, values := range r.URL.Query() {
-		if len(values) == 1 {
-			out[key] = values[0]
-			continue
-		}
-		out[key] = append([]string(nil), values...)
-	}
-	return out
+	return webhooks.BuildPayload(c.Request(), eventID, sequence, topic, correlationID, idempotencyKey, source, body)
 }
 
 func parseOptionalInt64Query(c echo.Context, name string) (int64, error) {
