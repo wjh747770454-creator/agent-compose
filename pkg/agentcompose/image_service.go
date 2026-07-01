@@ -2,11 +2,9 @@ package agentcompose
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -345,138 +343,27 @@ func connectErrorForImageBackend(op, imageRef string, err error) error {
 }
 
 func dockerSummaryToProtoImage(image typesimage.Summary, inspectedAt, imageRef string) *agentcomposev2.Image {
-	repoTags := cleanDockerRefs(image.RepoTags)
-	repoDigests := cleanDockerRefs(image.RepoDigests)
-	ref := firstNonEmpty(strings.TrimSpace(imageRef), firstString(repoTags), firstString(repoDigests), strings.TrimSpace(image.ID))
-	return &agentcomposev2.Image{
-		ImageId:            image.ID,
-		ImageRef:           ref,
-		ResolvedRef:        firstNonEmpty(firstString(repoDigests), firstString(repoTags), strings.TrimSpace(image.ID)),
-		RepoTags:           repoTags,
-		RepoDigests:        repoDigests,
-		Store:              agentcomposev2.ImageStoreKind_IMAGE_STORE_KIND_DOCKER_DAEMON,
-		AvailabilityStatus: agentcomposev2.ImageAvailabilityStatus_IMAGE_AVAILABILITY_STATUS_AVAILABLE,
-		SizeBytes:          nonNegativeUint64(image.Size),
-		VirtualSizeBytes:   nonNegativeUint64(image.Size),
-		CreatedAt:          unixSecondsString(image.Created),
-		InspectedAt:        inspectedAt,
-		Dangling:           dockerImageDangling(repoTags, repoDigests),
-		ContainerCount:     nonNegativeUint64(image.Containers),
-		Docker: &agentcomposev2.DockerImageStatus{
-			Local:           true,
-			ParentId:        image.ParentID,
-			SharedSizeBytes: image.SharedSize,
-		},
-		Labels: cloneStringMap(image.Labels),
-	}
+	return images.DockerSummaryToProtoImage(image, inspectedAt, imageRef)
 }
 
 func dockerInspectToProtoImage(image typesimage.InspectResponse, inspectedAt, imageRef string) *agentcomposev2.Image {
-	repoTags := cleanDockerRefs(image.RepoTags)
-	repoDigests := cleanDockerRefs(image.RepoDigests)
-	labels := map[string]string(nil)
-	if image.Config != nil {
-		labels = cloneStringMap(image.Config.Labels)
-	}
-	return &agentcomposev2.Image{
-		ImageId:            image.ID,
-		ImageRef:           firstNonEmpty(strings.TrimSpace(imageRef), firstString(repoTags), firstString(repoDigests), image.ID),
-		ResolvedRef:        firstNonEmpty(firstString(repoDigests), firstString(repoTags), image.ID),
-		RepoTags:           repoTags,
-		RepoDigests:        repoDigests,
-		Store:              agentcomposev2.ImageStoreKind_IMAGE_STORE_KIND_DOCKER_DAEMON,
-		AvailabilityStatus: agentcomposev2.ImageAvailabilityStatus_IMAGE_AVAILABILITY_STATUS_AVAILABLE,
-		Platform: &agentcomposev2.ImagePlatform{
-			Os:           image.Os,
-			Architecture: image.Architecture,
-			Variant:      image.Variant,
-			OsVersion:    image.OsVersion,
-		},
-		SizeBytes:        nonNegativeUint64(image.Size),
-		VirtualSizeBytes: nonNegativeUint64(image.Size),
-		CreatedAt:        image.Created,
-		InspectedAt:      inspectedAt,
-		Dangling:         dockerImageDangling(repoTags, repoDigests),
-		Docker: &agentcomposev2.DockerImageStatus{
-			Local:    true,
-			ParentId: "",
-		},
-		Labels: labels,
-	}
+	return images.DockerInspectToProtoImage(image, inspectedAt, imageRef)
 }
 
 func consumeDockerImagePullProgress(reader io.Reader) ([]*agentcomposev2.ImagePullProgress, error) {
-	decoder := json.NewDecoder(reader)
-	var progress []*agentcomposev2.ImagePullProgress
-	for {
-		var payload struct {
-			ID          string `json:"id"`
-			Status      string `json:"status"`
-			Progress    string `json:"progress"`
-			Error       string `json:"error"`
-			ErrorDetail *struct {
-				Message string `json:"message"`
-			} `json:"errorDetail"`
-			Detail struct {
-				Current uint64 `json:"current"`
-				Total   uint64 `json:"total"`
-			} `json:"progressDetail"`
-		}
-		if err := decoder.Decode(&payload); err != nil {
-			if err == io.EOF {
-				return progress, nil
-			}
-			return progress, err
-		}
-		if payload.Error != "" {
-			return progress, errors.New(strings.TrimSpace(payload.Error))
-		}
-		if payload.ErrorDetail != nil && strings.TrimSpace(payload.ErrorDetail.Message) != "" {
-			return progress, errors.New(strings.TrimSpace(payload.ErrorDetail.Message))
-		}
-		if payload.ID == "" && payload.Status == "" && payload.Progress == "" {
-			continue
-		}
-		progress = append(progress, &agentcomposev2.ImagePullProgress{
-			Id:           payload.ID,
-			Status:       payload.Status,
-			Progress:     payload.Progress,
-			CurrentBytes: payload.Detail.Current,
-			TotalBytes:   payload.Detail.Total,
-		})
-	}
+	return images.ConsumeDockerImagePullProgress(reader)
 }
 
-func paginateImages(images []*agentcomposev2.Image, offset, limit uint32) ([]*agentcomposev2.Image, bool, uint32) {
-	total := uint32(len(images))
-	if offset > total {
-		offset = total
-	}
-	if limit == 0 {
-		limit = total - offset
-	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
-	return images[offset:end], end < total, end
+func paginateImages(items []*agentcomposev2.Image, offset, limit uint32) ([]*agentcomposev2.Image, bool, uint32) {
+	return images.PaginateProtoImages(items, offset, limit)
 }
 
 func cleanDockerRefs(refs []string) []string {
-	result := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		ref = strings.TrimSpace(ref)
-		if ref == "" || ref == "<none>:<none>" || ref == "<none>@<none>" {
-			continue
-		}
-		result = append(result, ref)
-	}
-	slices.Sort(result)
-	return result
+	return images.CleanDockerRefs(refs)
 }
 
 func dockerImageDangling(tags, digests []string) bool {
-	return len(tags) == 0 && len(digests) == 0
+	return images.DockerImageDangling(tags, digests)
 }
 
 func firstString(values []string) string {
@@ -488,34 +375,15 @@ func nonNegativeUint64(value int64) uint64 {
 }
 
 func unixSecondsString(value int64) string {
-	if value <= 0 {
-		return ""
-	}
-	return time.Unix(value, 0).UTC().Format(time.RFC3339Nano)
+	return images.UnixSecondsString(value)
 }
 
 func dockerPlatformString(platform *agentcomposev2.ImagePlatform) string {
-	if platform == nil {
-		return ""
-	}
-	parts := []string{strings.TrimSpace(platform.GetOs()), strings.TrimSpace(platform.GetArchitecture())}
-	if parts[0] == "" || parts[1] == "" {
-		return ""
-	}
-	if variant := strings.TrimSpace(platform.GetVariant()); variant != "" {
-		parts = append(parts, variant)
-	}
-	return strings.Join(parts, "/")
+	return images.DockerPlatformString(platform)
 }
 
 func dockerEndpointFromEnv() string {
-	if host := strings.TrimSpace(os.Getenv("DOCKER_HOST")); host != "" {
-		return host
-	}
-	if host := strings.TrimSpace(client.DefaultDockerHost); host != "" {
-		return host
-	}
-	return "docker daemon"
+	return images.DockerEndpointFromEnv()
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
