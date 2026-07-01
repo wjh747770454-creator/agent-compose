@@ -1,6 +1,7 @@
 package agentcompose
 
 import (
+	"agent-compose/pkg/agentcompose/capabilities"
 	"agent-compose/pkg/agentcompose/configstore"
 	driverpkg "agent-compose/pkg/driver"
 	"context"
@@ -327,27 +328,11 @@ func decodeLoaderEnvItems(raw string) ([]SessionEnvVar, error) {
 // encodeCapsetIDs marshals the capset id set to the JSON stored in the
 // capset_ids column ("[]" when empty).
 func encodeCapsetIDs(ids []string) (string, error) {
-	normalized := normalizeCapsetIDs(ids)
-	if normalized == nil {
-		normalized = []string{}
-	}
-	data, err := json.Marshal(normalized)
-	if err != nil {
-		return "", fmt.Errorf("encode capset ids: %w", err)
-	}
-	return string(data), nil
+	return capabilities.EncodeCapsetIDs(ids)
 }
 
 func decodeCapsetIDs(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "null" {
-		return nil
-	}
-	var ids []string
-	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
-		return nil
-	}
-	return normalizeCapsetIDs(ids)
+	return capabilities.DecodeCapsetIDs(raw)
 }
 
 func (s *ConfigStore) CreateLoader(ctx context.Context, item Loader) (Loader, error) {

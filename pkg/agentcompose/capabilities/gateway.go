@@ -1,6 +1,7 @@
 package capabilities
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -33,6 +34,30 @@ func NormalizeCapsetIDs(ids []string) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+func EncodeCapsetIDs(ids []string) (string, error) {
+	normalized := NormalizeCapsetIDs(ids)
+	if normalized == nil {
+		normalized = []string{}
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return "", fmt.Errorf("encode capset ids: %w", err)
+	}
+	return string(data), nil
+}
+
+func DecodeCapsetIDs(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil
+	}
+	return NormalizeCapsetIDs(ids)
 }
 
 func BuildGatewaySessionVars(publicTarget string, capsetIDs []string) ([]domain.SessionEnvVar, []domain.SessionTag) {
