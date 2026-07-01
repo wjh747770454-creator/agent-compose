@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	pathpkg "path"
 	"strings"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	distreference "github.com/distribution/reference"
@@ -15,7 +17,7 @@ import (
 	"github.com/docker/docker/client"
 )
 
-func ensureDockerImage(ctx context.Context, imageRef string) (string, error) {
+func ensureDockerImage(ctx context.Context, imageRef string, pullPolicy string, pullTimeout time.Duration) (string, error) {
 	imageRef = strings.TrimSpace(imageRef)
 	if imageRef == "" {
 		return "", nil
@@ -27,32 +29,66 @@ func ensureDockerImage(ctx context.Context, imageRef string) (string, error) {
 	}
 	defer func() { _ = dockerClient.Close() }()
 
-	if resolvedRef, ok, err := resolveLocalDockerImageRef(ctx, dockerClient, imageRef); err == nil && ok {
-		return resolvedRef, nil
-	} else if err != nil {
-		return "", fmt.Errorf("inspect guest image %s: %w", imageRef, err)
-	}
+	switch pullPolicy {
+	case "never":
+		if resolvedRef, ok, err := resolveLocalDockerImageRef(ctx, dockerClient, imageRef); err == nil && ok {
+			return resolvedRef, nil
+		} else if err != nil {
+			return "", fmt.Errorf("inspect guest image %s: %w", imageRef, err)
+		}
+		return "", fmt.Errorf("guest image %s: not found locally (pull_policy=never)", imageRef)
 
+	case "always":
+		pullCtx, pullCancel := context.WithTimeout(ctx, pullTimeout)
+		defer pullCancel()
+		pullErr := dockerImagePull(pullCtx, dockerClient, imageRef)
+		if pullErr != nil {
+			if resolvedRef, ok, resolveErr := resolveLocalDockerImageRef(ctx, dockerClient, imageRef); resolveErr == nil && ok {
+				slog.Warn("guest image pull failed, using cached local image", "image", imageRef, "pull_error", pullErr)
+				return resolvedRef, nil
+			}
+			return "", fmt.Errorf("guest image %s: pull failed (%w) and not found locally", imageRef, pullErr)
+		}
+		if resolvedRef, ok, err := resolveLocalDockerImageRef(ctx, dockerClient, imageRef); err == nil && ok {
+			return resolvedRef, nil
+		} else if err != nil {
+			return "", fmt.Errorf("inspect pulled guest image %s: %w", imageRef, err)
+		}
+		return imageRef, nil
+
+	default:
+		// "missing" or empty: check local first, pull only if missing.
+		// NOTE: the default path intentionally uses the bare parent ctx for the
+		// pull (no pullTimeout) so behavior is byte-identical to the pre-pullPolicy
+		// code. Only the "always" path applies pullTimeout.
+		if resolvedRef, ok, err := resolveLocalDockerImageRef(ctx, dockerClient, imageRef); err == nil && ok {
+			return resolvedRef, nil
+		} else if err != nil {
+			return "", fmt.Errorf("inspect guest image %s: %w", imageRef, err)
+		}
+		if err := dockerImagePull(ctx, dockerClient, imageRef); err != nil {
+			return "", fmt.Errorf("pull guest image %s: %w", imageRef, err)
+		}
+		if resolvedRef, ok, err := resolveLocalDockerImageRef(ctx, dockerClient, imageRef); err == nil && ok {
+			return resolvedRef, nil
+		} else if err != nil {
+			return "", fmt.Errorf("inspect pulled guest image %s: %w", imageRef, err)
+		}
+		return imageRef, nil
+	}
+}
+
+func dockerImagePull(ctx context.Context, dockerClient *client.Client, imageRef string) error {
 	reader, err := dockerClient.ImagePull(ctx, imageRef, typesimage.PullOptions{})
 	if err != nil {
-		return "", fmt.Errorf("pull guest image %s: %w", imageRef, err)
+		return err
 	}
 	defer func() { _ = reader.Close() }()
-
-	if err := consumeDockerPullStream(reader); err != nil {
-		return "", fmt.Errorf("pull guest image %s: %w", imageRef, err)
-	}
-
-	if resolvedRef, ok, err := resolveLocalDockerImageRef(ctx, dockerClient, imageRef); err == nil && ok {
-		return resolvedRef, nil
-	} else if err != nil {
-		return "", fmt.Errorf("inspect pulled guest image %s: %w", imageRef, err)
-	}
-	return imageRef, nil
+	return consumeDockerPullStream(reader)
 }
 
 func EnsureDockerImage(ctx context.Context, imageRef string) (string, error) {
-	return ensureDockerImage(ctx, imageRef)
+	return ensureDockerImage(ctx, imageRef, "", 10*time.Minute)
 }
 
 func resolveLocalDockerImageRef(ctx context.Context, dockerClient *client.Client, imageRef string) (string, bool, error) {

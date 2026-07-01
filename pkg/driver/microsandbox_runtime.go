@@ -721,7 +721,7 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sessio
 	env["STATE_ROOT"] = r.config.GuestStateRoot
 	env["RUNTIME_ROOT"] = r.config.GuestRuntimeRoot
 	env["JUPYTER_TOKEN"] = proxyState.Token
-	pullPolicy := microsandboxPullPolicyForImageRef(imageRef)
+	pullPolicy := microsandboxPullPolicyForImageRef(imageRef, session.Summary.PullPolicy)
 	// Disable DNS rebind protection so guests can resolve names that point at
 	// private/internal IPs (e.g. an internal container registry).
 	rebindDisabled := false
@@ -773,11 +773,18 @@ func (r *microsandboxRuntime) resolveMicrosandboxImageRef(ctx context.Context, i
 	return "", false, nil
 }
 
-func microsandboxPullPolicyForImageRef(imageRef string) microsandbox.PullPolicy {
+func microsandboxPullPolicyForImageRef(imageRef string, perCallPolicy string) microsandbox.PullPolicy {
 	if filepath.IsAbs(imageRef) {
 		return microsandbox.PullPolicyNever
 	}
-	return microsandbox.PullPolicyIfMissing
+	switch strings.ToLower(strings.TrimSpace(perCallPolicy)) {
+	case "always":
+		return microsandbox.PullPolicyAlways
+	case "never":
+		return microsandbox.PullPolicyNever
+	default:
+		return microsandbox.PullPolicyIfMissing
+	}
 }
 
 func (r *microsandboxRuntime) launchJupyter(ctx context.Context, sandbox *microsandbox.Sandbox, proxyState ProxyState) error {
