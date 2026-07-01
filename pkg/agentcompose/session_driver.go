@@ -1,6 +1,7 @@
 package agentcompose
 
 import (
+	"agent-compose/pkg/agentcompose/sessions"
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	"context"
@@ -73,18 +74,10 @@ func (d *SessionDriver) StartSessionVM(ctx context.Context, session *Session) er
 }
 
 func (d *SessionDriver) saveSessionStartInfo(session *Session, vmState VMState, proxyState ProxyState, info SessionVMInfo) error {
-	vmState.BoxID = firstNonEmpty(info.BoxID, vmState.BoxID)
-	vmState.StartedAt = time.Now().UTC()
-	vmState.StoppedAt = time.Time{}
-	vmState.LastError = ""
-	vmState.BootstrapRef = firstNonEmpty(info.JupyterURL, vmState.BootstrapRef)
+	vmState, proxyState = sessions.ApplySessionStartInfo(vmState, proxyState, info, time.Now())
 	if err := d.store.SaveVMState(session.Summary.ID, vmState); err != nil {
 		return err
 	}
-	if info.ProxyState != nil {
-		proxyState = *info.ProxyState
-	}
-	proxyState.JupyterURL = firstNonEmpty(info.JupyterURL, proxyState.JupyterURL)
 	return d.store.SaveProxyState(session.Summary.ID, proxyState)
 }
 
