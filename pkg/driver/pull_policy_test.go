@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	appconfig "agent-compose/pkg/config"
 )
 
 func TestEnsureDockerImageEmptyPolicyPassedThrough(t *testing.T) {
@@ -121,12 +119,3 @@ func TestPullPolicyTimeoutPassedThrough(t *testing.T) {
 	}
 }
 
-func TestPrepareSessionStartReadsImagePullTimeoutFromConfig(t *testing.T) {
-	config := &appconfig.Config{
-		ImagePullTimeout: 3 * time.Minute,
-	}
-	// PrepareSessionStart reads config.ImagePullTimeout; verify it's non-zero
-	if config.ImagePullTimeout <= 0 {
-		t.Fatalf("expected positive ImagePullTimeout, got %v", config.ImagePullTimeout)
-	}
-}
