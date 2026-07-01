@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-compose/pkg/agentcompose/capabilities"
 	"agent-compose/pkg/agentcompose/runs"
 	driverpkg "agent-compose/pkg/driver"
 
@@ -19,7 +20,7 @@ func (s *Service) ensureProjectRunSession(ctx context.Context, run ProjectRunRec
 		return ProjectRunSessionResult{}, fmt.Errorf("session runtime dependencies are required")
 	}
 	tags := projectRunSessionTags(run)
-	capabilityVars, capabilityTags := buildCapabilityGatewaySessionVars(capabilityGatewayProxyTarget(s.cap), prepared.CapsetIDs)
+	capabilityVars, capabilityTags := capabilities.BuildGatewaySessionVars(capabilities.ProxyTarget(s.cap), prepared.CapsetIDs)
 	tags = append(tags, capabilityTags...)
 	if sessionID := strings.TrimSpace(requestedSessionID); sessionID != "" {
 		session, err := s.store.GetSession(ctx, sessionID)
@@ -96,7 +97,7 @@ func (s *Service) startProjectRunSession(ctx context.Context, session *Session, 
 		_ = s.store.UpdateSession(ctx, session)
 		return err
 	}
-	writeCapabilityGuide(ctx, s.cap, s.store, s.streams, session, sessionCapabilityCapsets(session))
+	writeCapabilityGuide(ctx, s.cap, s.store, s.streams, session, capabilities.SessionCapsets(session))
 	if session.Summary.VMStatus != VMStatusRunning {
 		if err := s.driver.StartSessionVM(ctx, session); err != nil {
 			session.Summary.VMStatus = VMStatusFailed

@@ -45,27 +45,17 @@ func (s *Store) ResolveCapabilitySession(ctx context.Context, token string) (cap
 		if err != nil {
 			continue
 		}
-		if sessionCapabilityToken(session) != token {
+		if capabilities.SessionToken(session) != token {
 			continue
 		}
 		if session.Summary.VMStatus != VMStatusRunning {
 			return capproxy.SessionBinding{}, fmt.Errorf("capability session token is not active")
 		}
-		capsetIDs := sessionCapabilityCapsets(session)
+		capsetIDs := capabilities.SessionCapsets(session)
 		if len(capsetIDs) == 0 {
 			return capproxy.SessionBinding{}, fmt.Errorf("session %s has no capability capset", session.Summary.ID)
 		}
 		return capproxy.SessionBinding{SessionID: session.Summary.ID, CapsetIDs: capsetIDs}, nil
 	}
 	return capproxy.SessionBinding{}, classifyError(ErrNotFound, "capability session token not found", nil)
-}
-
-func sessionCapabilityToken(session *Session) string {
-	return capabilities.SessionToken(session)
-}
-
-// sessionCapabilityCapsets reads the allowed capset set from the session's
-// capset tags (server-side binding; the guest never sees this list).
-func sessionCapabilityCapsets(session *Session) []string {
-	return capabilities.SessionCapsets(session)
 }

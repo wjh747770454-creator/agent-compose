@@ -1,6 +1,7 @@
 package agentcompose
 
 import (
+	"agent-compose/pkg/agentcompose/capabilities"
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	"context"
@@ -181,7 +182,7 @@ func (b *SessionRPCBridge) createSession(ctx context.Context, req *connect.Reque
 	envItems = mergeEnvItems(globalEnvItems, envItems)
 	providerEnvItems := envItems
 	envItems = filterPersistedRuntimeEnv(envItems)
-	capabilityVars, capabilityTags := buildCapabilityGatewaySessionVars(capabilityGatewayProxyTarget(b.cap), req.Msg.GetCapsetIds())
+	capabilityVars, capabilityTags := capabilities.BuildGatewaySessionVars(capabilities.ProxyTarget(b.cap), req.Msg.GetCapsetIds())
 	envItems = mergeEnvItems(envItems, capabilityVars)
 	tags = append(tags, capabilityTags...)
 
@@ -252,7 +253,7 @@ func (b *SessionRPCBridge) resumeSession(ctx context.Context, req *connect.Reque
 	if err := prepareSessionWorkspace(ctx, b.config, b.configDB, session); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	writeCapabilityGuide(ctx, b.cap, b.store, b.streams, session, sessionCapabilityCapsets(session))
+	writeCapabilityGuide(ctx, b.cap, b.store, b.streams, session, capabilities.SessionCapsets(session))
 	if err := b.driver.StartSessionVM(ctx, session); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

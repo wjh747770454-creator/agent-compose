@@ -14,31 +14,6 @@ import (
 	"agent-compose/pkg/agentcompose/capabilities"
 )
 
-const (
-	capProxyTargetEnvName         = capabilities.ProxyTargetEnvName
-	capabilitySessionTokenEnvName = capabilities.SessionTokenEnvName
-	// capabilityCapsetTagName is the session tag carrying an allowed capset id.
-	// A session bound to multiple capsets gets one tag per id; capproxy reads
-	// these (server-side) to validate the guest's requested capset.
-	capabilityCapsetTagName = capabilities.CapsetTagName
-)
-
-// normalizeCapsetIDs trims, drops empties, and de-duplicates capset ids while
-// preserving order.
-func normalizeCapsetIDs(ids []string) []string {
-	return capabilities.NormalizeCapsetIDs(ids)
-}
-
-// buildCapabilityGatewaySessionVars produces the capability env items and tags
-// for a session bound to a set of capsets. It is pure and never contacts
-// OctoBus, so capability setup can never block session/loader creation. The env
-// carries only what the guest needs (proxy target + session token); the allowed
-// capset set is recorded as session tags (read server-side by capproxy). No
-// capsets means "no capability"; a missing proxy target skips injection.
-func buildCapabilityGatewaySessionVars(publicTarget string, capsetIDs []string) ([]SessionEnvVar, []SessionTag) {
-	return capabilities.BuildGatewaySessionVars(publicTarget, capsetIDs)
-}
-
 // writeCapabilityGuide renders the guide for each bound capset from OctoBus and
 // writes the concatenation as the session's MPI catalog (guest
 // /data/runtime/mpi/catalog.md), which agent-compose-runtime-js injects into the agent
@@ -47,11 +22,11 @@ func buildCapabilityGatewaySessionVars(publicTarget string, capsetIDs []string) 
 // block session/loader startup. Must be called after the session directory
 // exists and before the runtime mounts it.
 func writeCapabilityGuide(ctx context.Context, provider CapabilityProvider, store *Store, streams *SessionStreamBroker, session *Session, capsetIDs []string) {
-	ids := normalizeCapsetIDs(capsetIDs)
+	ids := capabilities.NormalizeCapsetIDs(capsetIDs)
 	if len(ids) == 0 || provider == nil || session == nil {
 		return
 	}
-	catalogPath := sessionCapabilityGuidePath(session)
+	catalogPath := capabilities.SessionGuidePath(session)
 	if catalogPath == "" {
 		return
 	}
@@ -74,7 +49,7 @@ func writeCapabilityGuide(ctx context.Context, provider CapabilityProvider, stor
 		return
 	}
 	content := b.String()
-	if preamble := capabilityGuidePreamble(capabilityGatewayProxyTarget(provider)); preamble != "" {
+	if preamble := capabilities.GuidePreamble(capabilities.ProxyTarget(provider)); preamble != "" {
 		content = preamble + content
 	}
 	if err := os.MkdirAll(filepath.Dir(catalogPath), 0o755); err != nil {
@@ -106,27 +81,4 @@ func recordCapabilityGuideWarning(ctx context.Context, store *Store, streams *Se
 	if streams != nil {
 		streams.PublishEventAdded(sessionID, event)
 	}
-}
-
-// capabilityGuidePreamble describes how the guest reaches the capability proxy:
-// the gRPC endpoint (proxy target), the per-session auth metadata, and the
-// per-method OctoBus routing metadata. It is prepended to the OctoBus-rendered
-// catalog so the agent has both the connection details and the method table.
-// Returns "" when no proxy target is configured (nothing to connect to).
-func capabilityGuidePreamble(target string) string {
-	return capabilities.GuidePreamble(target)
-}
-
-// sessionCapabilityGuidePath is the session MPI catalog file the capability
-// guide is written to (guest /data/runtime/mpi/catalog.md). Returns "" when the
-// session runtime dir is unknown.
-func sessionCapabilityGuidePath(session *Session) string {
-	return capabilities.SessionGuidePath(session)
-}
-
-func capabilityGatewayProxyTarget(provider CapabilityProvider) string {
-	if provider == nil {
-		return ""
-	}
-	return provider.ProxyTarget()
 }

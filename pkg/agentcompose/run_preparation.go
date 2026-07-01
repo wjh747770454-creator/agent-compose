@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"agent-compose/pkg/agentcompose/capabilities"
 	"agent-compose/pkg/agentcompose/runs"
 	"agent-compose/pkg/compose"
 	appconfig "agent-compose/pkg/config"
@@ -55,7 +56,7 @@ func (s *Service) prepareProjectRun(ctx context.Context, run ProjectRunRecord, r
 	if err != nil {
 		return ProjectRunPreparation{}, err
 	}
-	prepared := ProjectRunPreparation{EnvItems: envItems, ProviderEnvItems: providerEnvItems, CapsetIDs: normalizeCapsetIDs(agent.CapsetIDs)}
+	prepared := ProjectRunPreparation{EnvItems: envItems, ProviderEnvItems: providerEnvItems, CapsetIDs: capabilities.NormalizeCapsetIDs(agent.CapsetIDs)}
 	if workspace != nil {
 		prepared.WorkspaceConfig = workspace
 		prepared.Workspace = toSessionWorkspaceSnapshot(*workspace)

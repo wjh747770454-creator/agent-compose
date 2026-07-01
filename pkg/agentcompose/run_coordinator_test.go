@@ -15,6 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-compose/pkg/agentcompose/capabilities"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 	"agent-compose/proto/agentcompose/v2/agentcomposev2connect"
 )
@@ -253,14 +254,14 @@ func testRunServiceRunAgentInjectsProjectAgentCapabilities(t *testing.T) {
 		t.Fatalf("GetSession returned error: %v", err)
 	}
 	env := envItemsByName(session.EnvItems)
-	if got := env[capProxyTargetEnvName]; got.Value != "agent-compose:9100" || got.Secret {
-		t.Fatalf("session %s = %#v, want visible proxy target", capProxyTargetEnvName, got)
+	if got := env[capabilities.ProxyTargetEnvName]; got.Value != "agent-compose:9100" || got.Secret {
+		t.Fatalf("session %s = %#v, want visible proxy target", capabilities.ProxyTargetEnvName, got)
 	}
-	if got := env[capabilitySessionTokenEnvName]; strings.TrimSpace(got.Value) == "" || !got.Secret {
-		t.Fatalf("session %s = %#v, want secret token", capabilitySessionTokenEnvName, got)
+	if got := env[capabilities.SessionTokenEnvName]; strings.TrimSpace(got.Value) == "" || !got.Secret {
+		t.Fatalf("session %s = %#v, want secret token", capabilities.SessionTokenEnvName, got)
 	}
-	assertStringSliceEqual(t, sessionCapabilityCapsets(session), []string{"xray-dev"}, "run session capset tags")
-	guide, err := os.ReadFile(sessionCapabilityGuidePath(session))
+	assertStringSliceEqual(t, capabilities.SessionCapsets(session), []string{"xray-dev"}, "run session capset tags")
+	guide, err := os.ReadFile(capabilities.SessionGuidePath(session))
 	if err != nil {
 		t.Fatalf("capability guide not written to MPI catalog: %v", err)
 	}
@@ -326,14 +327,14 @@ func testRunServiceRunAgentRefreshesCapabilitiesOnReusedSession(t *testing.T) {
 		t.Fatalf("GetSession existing returned error: %v", err)
 	}
 	env := envItemsByName(loaded.EnvItems)
-	if got := env[capProxyTargetEnvName]; got.Value != "agent-compose:9100" || got.Secret {
-		t.Fatalf("reused session %s = %#v, want visible proxy target", capProxyTargetEnvName, got)
+	if got := env[capabilities.ProxyTargetEnvName]; got.Value != "agent-compose:9100" || got.Secret {
+		t.Fatalf("reused session %s = %#v, want visible proxy target", capabilities.ProxyTargetEnvName, got)
 	}
-	if got := env[capabilitySessionTokenEnvName]; strings.TrimSpace(got.Value) == "" || !got.Secret {
-		t.Fatalf("reused session %s = %#v, want secret token", capabilitySessionTokenEnvName, got)
+	if got := env[capabilities.SessionTokenEnvName]; strings.TrimSpace(got.Value) == "" || !got.Secret {
+		t.Fatalf("reused session %s = %#v, want secret token", capabilities.SessionTokenEnvName, got)
 	}
-	assertStringSliceEqual(t, sessionCapabilityCapsets(loaded), []string{"xray-dev"}, "reused run session capset tags")
-	guide, err := os.ReadFile(sessionCapabilityGuidePath(loaded))
+	assertStringSliceEqual(t, capabilities.SessionCapsets(loaded), []string{"xray-dev"}, "reused run session capset tags")
+	guide, err := os.ReadFile(capabilities.SessionGuidePath(loaded))
 	if err != nil {
 		t.Fatalf("capability guide not written for reused session: %v", err)
 	}

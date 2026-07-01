@@ -1,6 +1,7 @@
 package agentcompose
 
 import (
+	"agent-compose/pkg/agentcompose/capabilities"
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	"context"
@@ -325,7 +326,7 @@ func TestSessionRPCBridgeCreateSessionInjectsCapabilityGatewayVars(t *testing.T)
 	for _, item := range resp.Msg.GetSession().GetEnvItems() {
 		env[item.GetName()] = item.GetValue()
 	}
-	if env[capProxyTargetEnvName] != "agent-compose:9100" || env[capabilitySessionTokenEnvName] == "" {
+	if env[capabilities.ProxyTargetEnvName] != "agent-compose:9100" || env[capabilities.SessionTokenEnvName] == "" {
 		t.Fatalf("capability gateway vars not injected: %+v", env)
 	}
 	// The capability guide is rendered from OctoBus and written as the session
@@ -336,13 +337,13 @@ func TestSessionRPCBridgeCreateSessionInjectsCapabilityGatewayVars(t *testing.T)
 		t.Fatal(err)
 	}
 	// The allowed capset set is recorded as session tags, not env.
-	if capsets := sessionCapabilityCapsets(session); len(capsets) != 1 || capsets[0] != "dev" {
+	if capsets := capabilities.SessionCapsets(session); len(capsets) != 1 || capsets[0] != "dev" {
 		t.Fatalf("capset tag not injected: %+v", capsets)
 	}
 	if _, err := os.Stat(filepath.Join(session.Summary.WorkspacePath, "CAPABILITIES.md")); !os.IsNotExist(err) {
 		t.Fatalf("capability guide must not be written into the workspace, stat err = %v", err)
 	}
-	guide, err := os.ReadFile(sessionCapabilityGuidePath(session))
+	guide, err := os.ReadFile(capabilities.SessionGuidePath(session))
 	if err != nil {
 		t.Fatalf("capability guide not written to MPI catalog: %v", err)
 	}
@@ -376,7 +377,7 @@ func TestSessionRPCBridgeResumeSessionRefreshesCapabilityGuide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guidePath := sessionCapabilityGuidePath(session)
+	guidePath := capabilities.SessionGuidePath(session)
 	if err := os.Remove(guidePath); err != nil {
 		t.Fatalf("remove capability guide returned error: %v", err)
 	}
@@ -410,14 +411,14 @@ func TestSessionRPCBridgeCapabilityInjectionIsBestEffort(t *testing.T) {
 	for _, item := range resp.Msg.GetSession().GetEnvItems() {
 		env[item.GetName()] = item.GetValue()
 	}
-	if env[capProxyTargetEnvName] != "agent-compose:9100" || env[capabilitySessionTokenEnvName] == "" {
+	if env[capabilities.ProxyTargetEnvName] != "agent-compose:9100" || env[capabilities.SessionTokenEnvName] == "" {
 		t.Fatalf("capability env still injected despite OctoBus down: %+v", env)
 	}
 	session, err := bridge.store.GetSession(ctx, resp.Msg.GetSession().GetSummary().GetSessionId())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(sessionCapabilityGuidePath(session)); !os.IsNotExist(err) {
+	if _, err := os.Stat(capabilities.SessionGuidePath(session)); !os.IsNotExist(err) {
 		t.Fatalf("expected no capability guide when OctoBus unreachable, stat err = %v", err)
 	}
 	events, err := bridge.store.ListEvents(ctx, session.Summary.ID)

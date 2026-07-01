@@ -2,6 +2,7 @@ package agentcompose
 
 import (
 	"agent-compose/pkg/agentcompose/api"
+	"agent-compose/pkg/agentcompose/capabilities"
 	driverpkg "agent-compose/pkg/driver"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 	"context"
@@ -89,7 +90,7 @@ func (r *LoaderSessionRunner) Ensure(ctx context.Context, loader Loader, request
 	envItems = mergeEnvItems(envItems, request.SessionEnv)
 	providerEnvItems := envItems
 	envItems = filterPersistedRuntimeEnv(envItems)
-	capabilityVars, capabilityTags := buildCapabilityGatewaySessionVars(capabilityGatewayProxyTarget(m.cap), loader.Summary.CapsetIDs)
+	capabilityVars, capabilityTags := capabilities.BuildGatewaySessionVars(capabilities.ProxyTarget(m.cap), loader.Summary.CapsetIDs)
 	envItems = mergeEnvItems(envItems, capabilityVars)
 	tags := []SessionTag{{Name: "origin", Value: "loader"}, {Name: "loader_id", Value: loader.Summary.ID}, {Name: "loader_name", Value: loader.Summary.Name}}
 	tags = append(tags, capabilityTags...)
@@ -163,7 +164,7 @@ func (r *LoaderSessionRunner) LoadOrResume(ctx context.Context, sessionID string
 	if err := prepareSessionWorkspace(ctx, m.config, m.configDB, session); err != nil {
 		return nil, "", err
 	}
-	writeCapabilityGuide(ctx, m.cap, m.store, m.streams, session, sessionCapabilityCapsets(session))
+	writeCapabilityGuide(ctx, m.cap, m.store, m.streams, session, capabilities.SessionCapsets(session))
 	if err := m.driver.StartSessionVM(ctx, session); err != nil {
 		return nil, "", err
 	}

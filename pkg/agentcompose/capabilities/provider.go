@@ -21,6 +21,13 @@ type Provider interface {
 	ProxyTarget() string
 }
 
+func ProxyTarget(provider Provider) string {
+	if provider == nil {
+		return ""
+	}
+	return provider.ProxyTarget()
+}
+
 // DynamicProvider reads the OctoBus connection from source on every call, so
 // page edits take effect without a restart. An empty addr means disabled.
 // proxyTarget is the deployment-fixed, guest-reachable proxy address.

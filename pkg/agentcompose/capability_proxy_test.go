@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"agent-compose/pkg/agentcompose/capabilities"
 	driverpkg "agent-compose/pkg/driver"
 )
 
@@ -13,8 +14,8 @@ func TestResolveCapabilitySession(t *testing.T) {
 	bridge, _ := newTestSessionRPCBridge(t)
 	// The capset set lives in session tags; only the token lives in env.
 	session, err := bridge.store.CreateSession(ctx, "cap", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", SessionTypeManual, nil,
-		[]SessionEnvVar{{Name: capabilitySessionTokenEnvName, Value: "session-token", Secret: true}},
-		[]SessionTag{{Name: capabilityCapsetTagName, Value: "dev"}, {Name: capabilityCapsetTagName, Value: "data"}})
+		[]SessionEnvVar{{Name: capabilities.SessionTokenEnvName, Value: "session-token", Secret: true}},
+		[]SessionTag{{Name: capabilities.CapsetTagName, Value: "dev"}, {Name: capabilities.CapsetTagName, Value: "data"}})
 	if err != nil {
 		t.Fatal(err)
 	}

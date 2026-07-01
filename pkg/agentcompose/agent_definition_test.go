@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-compose/pkg/agentcompose/capabilities"
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
@@ -278,14 +279,14 @@ func TestAgentDefinitionCreateSessionUsesDefinitionCapsets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession returned error: %v", err)
 	}
-	if capsets := sessionCapabilityCapsets(session); len(capsets) != 1 || capsets[0] != "dev" {
+	if capsets := capabilities.SessionCapsets(session); len(capsets) != 1 || capsets[0] != "dev" {
 		t.Fatalf("session capsets = %+v, want [dev]", capsets)
 	}
 	env := map[string]string{}
 	for _, item := range session.EnvItems {
 		env[item.Name] = item.Value
 	}
-	if env[capProxyTargetEnvName] != "agent-compose:9100" || env[capabilitySessionTokenEnvName] == "" {
+	if env[capabilities.ProxyTargetEnvName] != "agent-compose:9100" || env[capabilities.SessionTokenEnvName] == "" {
 		t.Fatalf("session capability env = %+v", env)
 	}
 }
