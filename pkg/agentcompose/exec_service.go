@@ -98,12 +98,12 @@ func (s *Service) executeProjectCommand(ctx context.Context, req *agentcomposev2
 	if cwd == "" {
 		cwd = s.config.GuestWorkspacePath
 	}
-	execCtx, cancel := execContext(ctx, req.GetTimeoutMs())
+	execCtx, cancel := execution.ExecContext(ctx, req.GetTimeoutMs())
 	defer cancel()
 	result, execErr := runtime.ExecStream(execCtx, session, vmState, ExecSpec{
 		Command: command,
 		Args:    append([]string(nil), req.GetCommand().GetArgs()...),
-		Env:     execEnvMap(req.GetEnv()),
+		Env:     api.ExecEnvMap(req.GetEnv()),
 		Cwd:     cwd,
 	}, writer)
 	if sendErr != nil {
@@ -116,10 +116,10 @@ func (s *Service) executeProjectCommand(ctx context.Context, req *agentcomposev2
 		if strings.TrimSpace(result.Output) == "" {
 			result.Output = firstNonEmpty(result.Stderr, result.Stdout, execErr.Error())
 		}
-		return execResultResponse(execID, session.Summary.ID, runID, req, cwd, result, execErr), nil
+		return api.ExecResultToProto(execID, session.Summary.ID, runID, req, cwd, result, execErr), nil
 	}
 	result = execution.MergeExecResults(result, accumulator.result(result.ExitCode, result.Success))
-	return execResultResponse(execID, session.Summary.ID, runID, req, cwd, result, nil), nil
+	return api.ExecResultToProto(execID, session.Summary.ID, runID, req, cwd, result, nil), nil
 }
 
 func (s *Service) resolveExecTargetSession(ctx context.Context, req *agentcomposev2.ExecRequest) (*Session, string, error) {
@@ -217,16 +217,4 @@ func (s *Service) sessionForProjectRun(ctx context.Context, run ProjectRunRecord
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("session %s for run %s is not running", sessionID, run.RunID))
 	}
 	return session, nil
-}
-
-func execContext(ctx context.Context, timeoutMs uint32) (context.Context, context.CancelFunc) {
-	return execution.ExecContext(ctx, timeoutMs)
-}
-
-func execEnvMap(items []*agentcomposev2.EnvVarSpec) map[string]string {
-	return api.ExecEnvMap(items)
-}
-
-func execResultResponse(execID, sessionID, runID string, req *agentcomposev2.ExecRequest, cwd string, result ExecResult, execErr error) *agentcomposev2.ExecResult {
-	return api.ExecResultToProto(execID, sessionID, runID, req, cwd, result, execErr)
 }

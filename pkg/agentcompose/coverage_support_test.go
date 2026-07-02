@@ -290,13 +290,13 @@ func testSupportConstructorsAndHelpers(t *testing.T) {
 func testSupportAgentAndLoaderHelpers(t *testing.T) {
 	t.Helper()
 	longStderr := strings.Repeat("x", 300)
-	if got := summarizeAgentExecFailure(ExecResult{Stderr: "  line one\nline two  "}); got != "line one line two" {
+	if got := execution.SummarizeAgentExecFailure(ExecResult{Stderr: "  line one\nline two  "}); got != "line one line two" {
 		t.Fatalf("summarizeAgentExecFailure whitespace = %q", got)
 	}
-	if got := summarizeAgentExecFailure(ExecResult{Stderr: longStderr}); len(got) != 243 || !strings.HasSuffix(got, "...") {
+	if got := execution.SummarizeAgentExecFailure(ExecResult{Stderr: longStderr}); len(got) != 243 || !strings.HasSuffix(got, "...") {
 		t.Fatalf("summarizeAgentExecFailure long = %q len=%d", got, len(got))
 	}
-	if got := summarizeAgentExecFailure(ExecResult{}); got != "" {
+	if got := execution.SummarizeAgentExecFailure(ExecResult{}); got != "" {
 		t.Fatalf("summarizeAgentExecFailure empty = %q", got)
 	}
 	if got := summarizeAgentResult(AgentRunResult{Agent: "codex", Success: true}); got != "codex finished without output" {

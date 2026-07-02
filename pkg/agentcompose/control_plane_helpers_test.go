@@ -16,6 +16,8 @@ import (
 	"connectrpc.com/connect"
 	"github.com/labstack/echo/v4"
 
+	"agent-compose/pkg/agentcompose/execution"
+	"agent-compose/pkg/agentcompose/loaders"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 )
 
@@ -55,24 +57,24 @@ func testControlPlaneHelperErrorAndParsingBranches(t *testing.T) {
 		}
 	}
 
-	if err := validateLoaderCommandRequest(LoaderCommandRequest{Mode: "exec"}); err == nil {
+	if err := loaders.ValidateCommandRequest(LoaderCommandRequest{Mode: "exec"}); err == nil {
 		t.Fatalf("validate exec without command returned nil")
 	}
-	if err := validateLoaderCommandRequest(LoaderCommandRequest{Mode: "shell"}); err == nil {
+	if err := loaders.ValidateCommandRequest(LoaderCommandRequest{Mode: "shell"}); err == nil {
 		t.Fatalf("validate shell without script returned nil")
 	}
-	if err := validateLoaderCommandRequest(LoaderCommandRequest{Mode: "bad"}); err == nil {
+	if err := loaders.ValidateCommandRequest(LoaderCommandRequest{Mode: "bad"}); err == nil {
 		t.Fatalf("validate bad mode returned nil")
 	}
-	if err := validateLoaderCommandRequest(LoaderCommandRequest{Mode: "exec", Command: "python3"}); err != nil {
+	if err := loaders.ValidateCommandRequest(LoaderCommandRequest{Mode: "exec", Command: "python3"}); err != nil {
 		t.Fatalf("validate exec returned error: %v", err)
 	}
-	cancelCtx, cancel := loaderCommandContext(ctx, 0)
+	cancelCtx, cancel := loaders.CommandContext(ctx, 0)
 	cancel()
 	if cancelCtx.Err() == nil {
 		t.Fatalf("loaderCommandContext without timeout did not cancel")
 	}
-	timeoutCtx, timeoutCancel := loaderCommandContext(ctx, 1)
+	timeoutCtx, timeoutCancel := loaders.CommandContext(ctx, 1)
 	defer timeoutCancel()
 	select {
 	case <-timeoutCtx.Done():
@@ -125,7 +127,7 @@ func testControlPlaneHelperErrorAndParsingBranches(t *testing.T) {
 			t.Fatalf("loader command env still contains %s: %#v", key, spec.Env)
 		}
 	}
-	if source := loaderCommandCellSource(LoaderCommandRequest{Mode: "shell", Script: "echo hi"}); source != "echo hi" {
+	if source := loaders.CommandCellSource(LoaderCommandRequest{Mode: "shell", Script: "echo hi"}); source != "echo hi" {
 		t.Fatalf("shell source = %q", source)
 	}
 
@@ -134,18 +136,18 @@ func testControlPlaneHelperErrorAndParsingBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal command payload: %v", err)
 	}
-	parsed, err := parseCommandExecResult(ExecResult{Stdout: "noise\n" + commandResultPrefix + string(payloadJSON)})
+	parsed, err := execution.ParseCommandExecResult(ExecResult{Stdout: "noise\n" + commandResultPrefix + string(payloadJSON)})
 	if err != nil || !parsed.Success || parsed.Stdout != "out" {
 		t.Fatalf("parseCommandExecResult(stdout) = %#v/%v", parsed, err)
 	}
-	parsed, err = parseCommandExecResult(ExecResult{Stdout: "noise", Output: string(payloadJSON)})
+	parsed, err = execution.ParseCommandExecResult(ExecResult{Stdout: "noise", Output: string(payloadJSON)})
 	if err != nil || parsed.Output != "outerr" {
 		t.Fatalf("parseCommandExecResult(output fallback) = %#v/%v", parsed, err)
 	}
-	if _, err := parseCommandExecResult(ExecResult{}); err == nil {
+	if _, err := execution.ParseCommandExecResult(ExecResult{}); err == nil {
 		t.Fatalf("parseCommandExecResult(empty) returned nil")
 	}
-	if _, err := parseCommandExecResult(ExecResult{Stdout: "no json"}); err == nil {
+	if _, err := execution.ParseCommandExecResult(ExecResult{Stdout: "no json"}); err == nil {
 		t.Fatalf("parseCommandExecResult(no payload) returned nil")
 	}
 	artifactDir := t.TempDir()
@@ -161,17 +163,17 @@ func testControlPlaneHelperErrorAndParsingBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal agent payload: %v", err)
 	}
-	agentResult, err := parseAgentExecResult("codex", ExecResult{Stdout: "noise\n" + agentResultPrefix + string(agentJSON), ExitCode: 0, Success: true})
+	agentResult, err := execution.ParseAgentExecResult("codex", ExecResult{Stdout: "noise\n" + agentResultPrefix + string(agentJSON), ExitCode: 0, Success: true})
 	if err != nil || agentResult.SessionID != "agent-session" || agentResult.DisplayOutput != "transcript" {
 		t.Fatalf("parseAgentExecResult = %#v/%v", agentResult, err)
 	}
-	if _, err := parseAgentExecResult("codex", ExecResult{}); err == nil {
+	if _, err := execution.ParseAgentExecResult("codex", ExecResult{}); err == nil {
 		t.Fatalf("parseAgentExecResult(empty) returned nil")
 	}
-	if _, err := parseAgentExecResult("codex", ExecResult{Stdout: "no payload", Stderr: "stderr detail"}); err == nil || !strings.Contains(err.Error(), "stderr detail") {
+	if _, err := execution.ParseAgentExecResult("codex", ExecResult{Stdout: "no payload", Stderr: "stderr detail"}); err == nil || !strings.Contains(err.Error(), "stderr detail") {
 		t.Fatalf("parseAgentExecResult(no payload) = %v", err)
 	}
-	if stripped := stripAgentResultPayload("hello\n" + agentResultPrefix + string(agentJSON)); strings.TrimSpace(stripped) != "hello" {
+	if stripped := execution.StripAgentResultPayload("hello\n" + agentResultPrefix + string(agentJSON)); strings.TrimSpace(stripped) != "hello" {
 		t.Fatalf("stripAgentResultPayload = %q", stripped)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"agent-compose/pkg/agentcompose/domain"
 	"agent-compose/pkg/agentcompose/execution"
 	"agent-compose/pkg/agentcompose/llms"
+	"agent-compose/pkg/agentcompose/loaders"
 	appconfig "agent-compose/pkg/config"
 	"context"
 	"fmt"
@@ -79,11 +80,11 @@ func (e *Executor) ExecuteLoaderCommand(ctx context.Context, session *Session, r
 	if session.Summary.VMStatus != VMStatusRunning {
 		return LoaderCommandResult{}, fmt.Errorf("session is not running")
 	}
-	if err := validateLoaderCommandRequest(request); err != nil {
+	if err := loaders.ValidateCommandRequest(request); err != nil {
 		return LoaderCommandResult{}, err
 	}
 
-	ctx, cancel := loaderCommandContext(ctx, request.TimeoutMs)
+	ctx, cancel := loaders.CommandContext(ctx, request.TimeoutMs)
 	defer cancel()
 	execCtx, execCancel := context.WithCancel(ctx)
 	defer execCancel()
@@ -94,7 +95,7 @@ func (e *Executor) ExecuteLoaderCommand(ctx context.Context, session *Session, r
 		return LoaderCommandResult{}, fmt.Errorf("create loader command cell state dir: %w", err)
 	}
 	guestCellDir := guestCellStateDir(e.config, cellID)
-	source := loaderCommandCellSource(request)
+	source := loaders.CommandCellSource(request)
 	startedAt := time.Now().UTC()
 	cell := NotebookCell{
 		ID:        cellID,
@@ -231,7 +232,7 @@ func (e *Executor) ExecuteLoaderCommand(ctx context.Context, session *Session, r
 	if err != nil {
 		return persistFailedCell(execResult, err)
 	}
-	commandResult, err := parseCommandExecResult(execResult)
+	commandResult, err := execution.ParseCommandExecResult(execResult)
 	if err != nil {
 		return persistFailedCell(execResult, err)
 	}

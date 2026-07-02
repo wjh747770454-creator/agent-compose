@@ -1034,10 +1034,6 @@ func writeAgentOutputSchemaFile(config *appconfig.Config, session *Session, agen
 	return filepath.Join(config.GuestStateRoot, "agents", "schemas", name), nil
 }
 
-func parseAgentExecResult(agent string, result ExecResult) (AgentRunResult, error) {
-	return execution.ParseAgentExecResult(agent, result)
-}
-
 func agentTraceEvents(transcript string, createdAt time.Time) []SessionEvent {
 	lines := strings.Split(transcript, "\n")
 	events := make([]SessionEvent, 0)
@@ -1097,18 +1093,6 @@ func parseAgentTraceMarker(line string) (string, string, bool) {
 		}
 	}
 	return "", "", false
-}
-
-func validateLoaderCommandRequest(request LoaderCommandRequest) error {
-	return loaders.ValidateCommandRequest(request)
-}
-
-func loaderCommandContext(ctx context.Context, timeoutMs int64) (context.Context, context.CancelFunc) {
-	return loaders.CommandContext(ctx, timeoutMs)
-}
-
-func loaderCommandCellSource(request LoaderCommandRequest) string {
-	return loaders.CommandCellSource(request)
 }
 
 func runtimeCommandRequestPayload(config *appconfig.Config, request LoaderCommandRequest, guestCellDir string) runtimeCommandRequestJSON {
@@ -1177,10 +1161,6 @@ func buildSessionExecEnv(config *appconfig.Config, session *Session, home string
 	return env
 }
 
-func parseCommandExecResult(result ExecResult) (RuntimeCommandResult, error) {
-	return execution.ParseCommandExecResult(result)
-}
-
 func mirrorRuntimeCommandArtifacts(hostCellDir string, result RuntimeCommandResult) error {
 	files := map[string]string{
 		"stdout.txt": result.Stdout,
@@ -1203,18 +1183,6 @@ func mirrorRuntimeCommandArtifacts(hostCellDir string, result RuntimeCommandResu
 	// guest=root with the docker driver): the host cannot truncate/overwrite the
 	// root-owned file, surfacing as "write command result artifact: permission denied".
 	return nil
-}
-
-func summarizeAgentExecFailure(result ExecResult) string {
-	return execution.SummarizeAgentExecFailure(result)
-}
-
-func stripAgentResultPayload(raw string) string {
-	return execution.StripAgentResultPayload(raw)
-}
-
-func sanitizeAgentExecResult(result ExecResult) ExecResult {
-	return execution.SanitizeAgentExecResult(result)
 }
 
 func (e *Executor) resolveAgentSystemPrompt(ctx context.Context, session *Session, agentDefinitionID string) (string, error) {
@@ -1288,13 +1256,13 @@ func (e *Executor) executeAgentRun(ctx context.Context, session *Session, agent,
 	}
 	result, err := runtime.ExecStream(ctx, session, vmState, spec, stream)
 	if err != nil {
-		return sanitizeAgentExecResult(result), AgentRunResult{}, err
+		return execution.SanitizeAgentExecResult(result), AgentRunResult{}, err
 	}
-	parsed, err := parseAgentExecResult(agent, result)
+	parsed, err := execution.ParseAgentExecResult(agent, result)
 	if err != nil {
-		return sanitizeAgentExecResult(result), AgentRunResult{}, err
+		return execution.SanitizeAgentExecResult(result), AgentRunResult{}, err
 	}
-	return sanitizeAgentExecResult(result), parsed, nil
+	return execution.SanitizeAgentExecResult(result), parsed, nil
 }
 
 func buildAgentExecSpec(config *appconfig.Config, session *Session, agent, model, promptPath, schemaPath string) ExecSpec {
