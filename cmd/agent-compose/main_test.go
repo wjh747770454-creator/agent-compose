@@ -1762,6 +1762,91 @@ agents:
 	}
 }
 
+func TestIntegrationCLIListProjectsTextVerboseAndJSON(t *testing.T) {
+	requests := 0
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		project: projectServiceStub{
+			listProjects: func(ctx context.Context, req *connect.Request[agentcomposev2.ListProjectsRequest]) (*connect.Response[agentcomposev2.ListProjectsResponse], error) {
+				requests++
+				switch req.Msg.GetOffset() {
+				case 0:
+					return connect.NewResponse(&agentcomposev2.ListProjectsResponse{
+						Projects: []*agentcomposev2.ProjectSummary{{
+							ProjectId:       "proj_1",
+							Name:            "reviewer",
+							SourcePath:      "/path/to/reviewer/agent-compose.yml",
+							CurrentRevision: 3,
+							SpecHash:        "sha256:reviewer",
+							AgentCount:      2,
+							SchedulerCount:  1,
+							UpdatedAt:       "2026-07-03T10:00:00Z",
+						}},
+						TotalCount: 2,
+						HasMore:    true,
+						NextOffset: 1,
+					}), nil
+				case 1:
+					return connect.NewResponse(&agentcomposev2.ListProjectsResponse{
+						Projects: []*agentcomposev2.ProjectSummary{{
+							ProjectId:       "proj_2",
+							Name:            "builder",
+							SourcePath:      "/path/to/builder/agent-compose.yaml",
+							CurrentRevision: 5,
+							SpecHash:        "sha256:builder",
+							AgentCount:      1,
+							SchedulerCount:  0,
+							UpdatedAt:       "2026-07-03T11:00:00Z",
+						}},
+						TotalCount: 2,
+					}), nil
+				default:
+					t.Fatalf("ListProjects unexpected offset = %d", req.Msg.GetOffset())
+					return nil, nil
+				}
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("ls", "--host", server.URL)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("ls code/stderr = %d / %q", exitCode, stderr)
+	}
+	for _, want := range []string{"PROJECT", "CONFIG FILE", "SERVICES", "reviewer", "/path/to/reviewer/agent-compose.yml", "builder", "-"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("ls output %q does not contain %q", stdout, want)
+		}
+	}
+
+	verboseOut, verboseErr, _, verboseCode := executeCLICommand("ls", "--host", server.URL, "--verbose")
+	if verboseCode != 0 || verboseErr != "" {
+		t.Fatalf("ls --verbose code/stderr = %d / %q", verboseCode, verboseErr)
+	}
+	for _, want := range []string{"PROJECT ID", "PROJECT DIR", "SPEC HASH", "proj_1", "/path/to/reviewer", "sha256:builder", "active"} {
+		if !strings.Contains(verboseOut, want) {
+			t.Fatalf("ls --verbose output %q does not contain %q", verboseOut, want)
+		}
+	}
+
+	jsonOut, jsonErr, _, jsonCode := executeCLICommand("ls", "--host", server.URL, "--json")
+	if jsonCode != 0 || jsonErr != "" {
+		t.Fatalf("ls --json code/stderr = %d / %q", jsonCode, jsonErr)
+	}
+	var decoded composeProjectListOutput
+	if err := json.Unmarshal([]byte(jsonOut), &decoded); err != nil {
+		t.Fatalf("ls JSON decode failed: %v\n%s", err, jsonOut)
+	}
+	if decoded.TotalCount != 2 || len(decoded.Projects) != 2 {
+		t.Fatalf("ls JSON = %#v", decoded)
+	}
+	if decoded.Projects[0].Name != "reviewer" || decoded.Projects[0].AgentCount != 2 || decoded.Projects[0].SchedulerCount != 1 || decoded.Projects[0].ServiceCount != nil {
+		t.Fatalf("ls first project JSON = %#v", decoded.Projects[0])
+	}
+	if requests != 6 {
+		t.Fatalf("ListProjects requests = %d, want 6", requests)
+	}
+}
+
 func TestNewDaemonAppBuildsHandlerWithoutListening(t *testing.T) {
 	testNewDaemonAppBuildsHandlerWithoutListening(t)
 }

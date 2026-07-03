@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -471,6 +472,17 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	}
 	configCmd.Flags().BoolVar(&configOptions.Quiet, "quiet", false, "Only validate config")
 
+	listOptions := composeListProjectsOptions{}
+	listCmd := &cobra.Command{
+		Use:   "ls",
+		Short: "List daemon projects",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runComposeListProjectsCommand(cmd, options, listOptions)
+		},
+	}
+	listCmd.Flags().BoolVar(&listOptions.Verbose, "verbose", false, "Show more project details")
+
 	upCmd := &cobra.Command{
 		Use:   "up",
 		Short: "Apply the current compose project to the daemon",
@@ -634,7 +646,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 		},
 	}
 
-	root.AddCommand(daemonCmd, versionCmd, statusCmd, configCmd, upCmd, downCmd, runCmd, logsCmd, psCmd, execCmd, imagesCmd, imageCmd, pullCmd, rmiCmd, inspectCmd)
+	root.AddCommand(daemonCmd, versionCmd, statusCmd, configCmd, listCmd, upCmd, downCmd, runCmd, logsCmd, psCmd, execCmd, imagesCmd, imageCmd, pullCmd, rmiCmd, inspectCmd)
 	return root
 }
 
@@ -647,6 +659,10 @@ type cliOptions struct {
 
 type composeConfigOptions struct {
 	Quiet bool
+}
+
+type composeListProjectsOptions struct {
+	Verbose bool
 }
 
 type composeRunOptions struct {
@@ -716,6 +732,55 @@ func runComposeConfigCommand(cmd *cobra.Command, cli cliOptions, options compose
 		return err
 	}
 	return writeCommandOutput(cmd.OutOrStdout(), data)
+}
+
+func runComposeListProjectsCommand(cmd *cobra.Command, cli cliOptions, options composeListProjectsOptions) error {
+	clients, err := newCLIServiceClients(cli)
+	if err != nil {
+		return err
+	}
+	output, err := listAllProjects(cmd.Context(), clients.project)
+	if err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("list projects: %w", err))
+	}
+	if cli.JSON {
+		data, err := json.MarshalIndent(output, "", "  ")
+		if err != nil {
+			return err
+		}
+		return writeCommandOutput(cmd.OutOrStdout(), append(data, '\n'))
+	}
+	return writeProjectListText(cmd.OutOrStdout(), output.Projects, options.Verbose)
+}
+
+func listAllProjects(ctx context.Context, client agentcomposev2connect.ProjectServiceClient) (composeProjectListOutput, error) {
+	const pageSize uint32 = 200
+	var output composeProjectListOutput
+	for {
+		offset := output.NextOffset
+		resp, err := client.ListProjects(ctx, connect.NewRequest(&agentcomposev2.ListProjectsRequest{
+			Offset: offset,
+			Limit:  pageSize,
+		}))
+		if err != nil {
+			return composeProjectListOutput{}, err
+		}
+		msg := resp.Msg
+		output.TotalCount = msg.GetTotalCount()
+		output.HasMore = msg.GetHasMore()
+		output.NextOffset = msg.GetNextOffset()
+		for _, project := range msg.GetProjects() {
+			output.Projects = append(output.Projects, composeProjectListItemFromSummary(project))
+		}
+		if !msg.GetHasMore() {
+			break
+		}
+		if msg.GetNextOffset() == offset {
+			return composeProjectListOutput{}, fmt.Errorf("project list pagination did not advance")
+		}
+	}
+	output.HasMore = false
+	return output, nil
 }
 
 func runComposeUpCommand(cmd *cobra.Command, cli cliOptions) error {
@@ -1287,6 +1352,30 @@ type composeDownOutput struct {
 	Changes            []composeUpChangeOutput `json:"changes"`
 }
 
+type composeProjectListOutput struct {
+	Projects   []composeProjectListItem `json:"projects"`
+	TotalCount uint32                   `json:"total_count"`
+	HasMore    bool                     `json:"has_more"`
+	NextOffset uint32                   `json:"next_offset"`
+}
+
+type composeProjectListItem struct {
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	ConfigFile      string  `json:"config_file"`
+	ProjectDir      string  `json:"project_dir,omitempty"`
+	Revision        uint64  `json:"revision"`
+	SpecHash        string  `json:"spec_hash,omitempty"`
+	AgentCount      uint32  `json:"agent_count"`
+	SchedulerCount  uint32  `json:"scheduler_count"`
+	ServiceCount    *uint32 `json:"service_count"`
+	RunningRunCount uint32  `json:"running_run_count"`
+	LatestRunID     string  `json:"latest_run_id,omitempty"`
+	CreatedAt       string  `json:"created_at,omitempty"`
+	UpdatedAt       string  `json:"updated_at,omitempty"`
+	RemovedAt       string  `json:"removed_at,omitempty"`
+}
+
 type composeUpProjectOutput struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
@@ -1487,6 +1576,30 @@ type composeImageProgressItem struct {
 	TotalBytes   uint64 `json:"total_bytes,omitempty"`
 }
 
+func composeProjectListItemFromSummary(summary *agentcomposev2.ProjectSummary) composeProjectListItem {
+	configFile := summary.GetSourcePath()
+	projectDir := ""
+	if configFile != "" {
+		projectDir = filepath.Dir(configFile)
+	}
+	return composeProjectListItem{
+		ID:              summary.GetProjectId(),
+		Name:            summary.GetName(),
+		ConfigFile:      configFile,
+		ProjectDir:      projectDir,
+		Revision:        summary.GetCurrentRevision(),
+		SpecHash:        summary.GetSpecHash(),
+		AgentCount:      summary.GetAgentCount(),
+		SchedulerCount:  summary.GetSchedulerCount(),
+		ServiceCount:    nil,
+		RunningRunCount: summary.GetRunningRunCount(),
+		LatestRunID:     summary.GetLatestRunId(),
+		CreatedAt:       summary.GetCreatedAt(),
+		UpdatedAt:       summary.GetUpdatedAt(),
+		RemovedAt:       summary.GetRemovedAt(),
+	}
+}
+
 func composeUpOutputFromResponse(resp *agentcomposev2.ApplyProjectResponse) composeUpOutput {
 	summary := resp.GetProject().GetSummary()
 	revision := resp.GetRevision()
@@ -1587,6 +1700,63 @@ func writeComposeUpText(out io.Writer, resp *agentcomposev2.ApplyProjectResponse
 		}
 	}
 	return tw.Flush()
+}
+
+func writeProjectListText(out io.Writer, projects []composeProjectListItem, verbose bool) error {
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	if verbose {
+		if _, err := fmt.Fprintln(tw, "PROJECT\tCONFIG FILE\tREVISION\tAGENTS\tSCHEDULERS\tSERVICES\tPROJECT ID\tPROJECT DIR\tSPEC HASH\tUPDATED\tSTATUS"); err != nil {
+			return err
+		}
+		for _, project := range projects {
+			if _, err := fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				project.Name,
+				firstNonEmptyString(project.ConfigFile, "-"),
+				project.Revision,
+				project.AgentCount,
+				project.SchedulerCount,
+				projectServiceCountText(project.ServiceCount),
+				firstNonEmptyString(project.ID, "-"),
+				firstNonEmptyString(project.ProjectDir, "-"),
+				firstNonEmptyString(project.SpecHash, "-"),
+				firstNonEmptyString(project.UpdatedAt, "-"),
+				projectListStatus(project),
+			); err != nil {
+				return err
+			}
+		}
+		return tw.Flush()
+	}
+	if _, err := fmt.Fprintln(tw, "PROJECT\tCONFIG FILE\tREVISION\tAGENTS\tSCHEDULERS\tSERVICES"); err != nil {
+		return err
+	}
+	for _, project := range projects {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\n",
+			project.Name,
+			firstNonEmptyString(project.ConfigFile, "-"),
+			project.Revision,
+			project.AgentCount,
+			project.SchedulerCount,
+			projectServiceCountText(project.ServiceCount),
+		); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
+func projectServiceCountText(count *uint32) string {
+	if count == nil {
+		return "-"
+	}
+	return strconv.FormatUint(uint64(*count), 10)
+}
+
+func projectListStatus(project composeProjectListItem) string {
+	if project.RemovedAt != "" {
+		return "removed"
+	}
+	return "active"
 }
 
 func writeComposeDownText(out io.Writer, output composeDownOutput) error {
