@@ -975,7 +975,7 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, runCount, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--session-id", "session-reuse", "--keep-running", "reviewer", "check", "this")
+	stdout, stderr, runCount, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--sandbox", "session-reuse", "--keep-running", "reviewer", "check", "this")
 	if exitCode != 0 {
 		t.Fatalf("run success exit code = %d, stderr=%q", exitCode, stderr)
 	}
@@ -987,6 +987,14 @@ agents:
 	}
 	if !sawRequest {
 		t.Fatal("RunAgentStream was not called")
+	}
+
+	legacyOut, legacyErr, _, legacyCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--session-id", "session-reuse", "--keep-running", "reviewer", "check", "this")
+	if legacyCode != 0 {
+		t.Fatalf("run --session-id exit code = %d, stderr=%q", legacyCode, legacyErr)
+	}
+	if legacyOut != "live output\n" || !strings.Contains(legacyErr, "agent-compose run --session-id is deprecated") || strings.Contains(legacyOut, "deprecated") {
+		t.Fatalf("run --session-id stdout/stderr = %q / %q", legacyOut, legacyErr)
 	}
 }
 

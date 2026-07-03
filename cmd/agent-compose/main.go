@@ -511,6 +511,8 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 		},
 	}
 	runCmd.Flags().StringVar(&runOptions.Prompt, "prompt", "", "Prompt to send to the agent")
+	runCmd.Flags().StringVar(&runOptions.SandboxID, "sandbox", "", "Reuse an existing sandbox")
+	// Deprecated: use --sandbox instead.
 	runCmd.Flags().StringVar(&runOptions.SessionID, "session-id", "", "Reuse an existing session")
 	runCmd.Flags().BoolVar(&runOptions.KeepRunning, "keep-running", false, "Keep the session runtime running after completion")
 
@@ -707,6 +709,7 @@ type composeListProjectsOptions struct {
 type composeRunOptions struct {
 	Prompt      string
 	SessionID   string
+	SandboxID   string
 	KeepRunning bool
 }
 
@@ -966,12 +969,16 @@ func runComposeSandboxActionCommand(cmd *cobra.Command, cli cliOptions, action, 
 }
 
 func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRunOptions, args []string) error {
+	normalizedOptions, err := normalizeComposeRunOptions(cmd, options)
+	if err != nil {
+		return err
+	}
 	_, normalized, projectID, err := resolveComposeProject(cli)
 	if err != nil {
 		return err
 	}
 	agentName := strings.TrimSpace(args[0])
-	prompt := strings.TrimSpace(options.Prompt)
+	prompt := strings.TrimSpace(normalizedOptions.Prompt)
 	if prompt == "" && len(args) > 1 {
 		prompt = strings.Join(args[1:], " ")
 	}
@@ -980,7 +987,7 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		return err
 	}
 	cleanupPolicy := agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION
-	if options.KeepRunning {
+	if normalizedOptions.KeepRunning {
 		cleanupPolicy = agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING
 	}
 	client := agentcomposev2connect.NewRunServiceClient(newDaemonHTTPClient(clientConfig), clientConfig.BaseURL)
@@ -989,7 +996,7 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		AgentName:       agentName,
 		Prompt:          prompt,
 		Source:          agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
-		SessionId:       strings.TrimSpace(options.SessionID),
+		SessionId:       strings.TrimSpace(normalizedOptions.SessionID),
 		CleanupPolicy:   cleanupPolicy,
 		ClientRequestId: manualRunClientRequestID(normalized.Name, agentName, prompt),
 	}))
@@ -1038,6 +1045,21 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		return commandExitError{Code: runSummaryExitCode(completed), Err: fmt.Errorf("run %s for project %s agent %s failed: %s", completed.GetRunId(), normalized.Name, agentName, firstNonEmptyString(completed.GetError(), runStatusText(completed.GetStatus())))}
 	}
 	return nil
+}
+
+func normalizeComposeRunOptions(cmd *cobra.Command, options composeRunOptions) (composeRunOptions, error) {
+	if cmd.Flags().Changed("session-id") {
+		if err := writeDeprecatedWarning(cmd.ErrOrStderr(), "agent-compose run --session-id", "agent-compose run --sandbox"); err != nil {
+			return options, err
+		}
+		if strings.TrimSpace(options.SandboxID) == "" {
+			options.SandboxID = options.SessionID
+		}
+	}
+	if strings.TrimSpace(options.SandboxID) != "" {
+		options.SessionID = options.SandboxID
+	}
+	return options, nil
 }
 
 func runComposeLogsCommand(cmd *cobra.Command, cli cliOptions, options composeLogsOptions, args []string) error {
