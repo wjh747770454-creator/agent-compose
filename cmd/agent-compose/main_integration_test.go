@@ -2,6 +2,10 @@ package main
 
 import "testing"
 
+func TestDaemonListenConfigWorkflow(t *testing.T) {
+	testDaemonListenConfigWorkflow(t)
+}
+
 func TestIntegrationDaemonListenConfigWorkflow(t *testing.T) {
 	testDaemonListenConfigWorkflow(t)
 }
@@ -32,9 +36,14 @@ func testDaemonListenConfigWorkflow(t *testing.T) {
 	t.Run("cli run failure returns stable exit code", TestIntegrationCLIRunFailureReturnsStableExitCode)
 	t.Run("cli logs filters run agent session and json", TestIntegrationCLILogsFiltersRunAgentSessionAndJSON)
 	t.Run("cli logs follow polls until terminal", TestIntegrationCLILogsFollowPollsUntilTerminal)
+	t.Run("cli ps table and json", TestIntegrationCLIPSTableAndJSON)
+	t.Run("cli exec streams and json", TestIntegrationCLIExecStreamsAndSupportsJSON)
+	t.Run("cli exec ambiguous session is usage error", TestIntegrationCLIExecAmbiguousSessionIsUsageError)
+	t.Run("cli inspect project agent run session json", TestIntegrationCLIInspectProjectAgentRunSessionJSON)
 	t.Run("cli images aliases and json", TestIntegrationCLIImagesAliasesAndJSON)
 	t.Run("cli image pull aliases and json", TestIntegrationCLIImagePullAliasesAndJSON)
 	t.Run("cli image remove aliases and json", TestIntegrationCLIImageRemoveAliasesAndJSON)
 	t.Run("cli image inspect json", TestIntegrationCLIImageInspectJSON)
+	t.Run("cli images json accepts OCI store status", TestIntegrationCLIImagesJSONAcceptsOCIStoreStatus)
 	t.Run("cli image Docker error is clear", TestIntegrationCLIImageDockerErrorIsClear)
 }

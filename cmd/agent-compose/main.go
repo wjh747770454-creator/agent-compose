@@ -34,7 +34,8 @@ import (
 	"agent-compose/pkg/fxgo/restful"
 	"agent-compose/pkg/fxgo/utils"
 
-	agentcompose "agent-compose/pkg/agentcompose/service"
+	"agent-compose/pkg/agentcompose/api"
+	agentcomposeapp "agent-compose/pkg/agentcompose/app"
 	"agent-compose/pkg/auth"
 	"agent-compose/pkg/compose"
 	"agent-compose/pkg/config"
@@ -131,7 +132,7 @@ func NewDaemonApp(ctx context.Context, opts DaemonOptions) (*DaemonApp, error) {
 	config.Setup(di)
 	do.Provide(di, NewEcho)
 	health.Setup(di)
-	agentcompose.Register(di)
+	agentcomposeapp.Register(di)
 
 	app := do.MustInvoke[*echo.Echo](di)
 	logger := do.MustInvoke[*slog.Logger](di)
@@ -140,7 +141,7 @@ func NewDaemonApp(ctx context.Context, opts DaemonOptions) (*DaemonApp, error) {
 
 	startBackground := opts.StartBackground
 	if startBackground == nil {
-		startBackground = agentcompose.StartBackground
+		startBackground = agentcomposeapp.StartBackground
 	}
 	return &DaemonApp{
 		DI:              di,
@@ -168,7 +169,7 @@ func installDaemonMiddleware(app *echo.Echo, conf *config.Config) {
 		OAuthUserInfoURL:      conf.OAuthUserInfoURL,
 		OAuthClientAuthMethod: conf.OAuthClientAuthMethod,
 		Bypass:                isLocalUnixSocketRequest,
-		Skipper:               agentcompose.IsRuntimeLLMFacadeRequest,
+		Skipper:               agentcomposeapp.IsRuntimeLLMFacadeRequest,
 	})
 	authManager.RegisterRoutes(app)
 	app.Use(authManager.Middleware)
@@ -184,7 +185,7 @@ func installDaemonMiddleware(app *echo.Echo, conf *config.Config) {
 			// Same local-trust rule as AuthManager: CLI requests over the Unix
 			// socket skip basic auth too.
 			Skipper: func(c echo.Context) bool {
-				return isLocalUnixSocketRequest(c.Request()) || agentcompose.IsRuntimeLLMFacadeRequest(c.Request())
+				return isLocalUnixSocketRequest(c.Request()) || agentcomposeapp.IsRuntimeLLMFacadeRequest(c.Request())
 			},
 			Realm: "Password Required",
 			Validator: func(u, p string, c echo.Context) (bool, error) {
@@ -921,7 +922,7 @@ func runComposeUpCommand(cmd *cobra.Command, cli cliOptions) error {
 	}
 	client := agentcomposev2connect.NewProjectServiceClient(newDaemonHTTPClient(clientConfig), clientConfig.BaseURL)
 	resp, err := client.ApplyProject(cmd.Context(), connect.NewRequest(&agentcomposev2.ApplyProjectRequest{
-		Spec: agentcompose.ProjectSpecResponse(normalized),
+		Spec: api.ProjectSpecToProto(normalized),
 		Source: &agentcomposev2.ProjectSource{
 			ComposePath: composePath,
 			ProjectDir:  filepath.Dir(composePath),

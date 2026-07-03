@@ -10,17 +10,17 @@ kept as design documents.
 The current code facts are anchored by these entry points:
 
 - CLI and daemon entrypoint: `cmd/agent-compose/main.go`
-- Daemon service registration: `pkg/agentcompose/service/service.go`
+- Daemon service registration: `pkg/agentcompose/app/app.go`
 - Compose parsing and normalization: `pkg/compose/`
 - v1 API: `proto/agentcompose/v1/agentcompose.proto`
 - v2 API: `proto/agentcompose/v2/agentcompose.proto`
-- Project/run persistence: service-specific methods in
-  `pkg/agentcompose/service/project_schema.go` and
-  `pkg/agentcompose/service/project_store.go`; shared storage helpers in
+- Project/run persistence: `pkg/storage/configstore/project_store.go`,
+  `pkg/storage/configstore/run_coordinator_store.go`; shared storage helpers in
   `pkg/storage/`
-- Jupyter proxy: `pkg/agentcompose/service/proxy.go`
-- Loader runtime and scheduling: owner helpers in `pkg/loaders/`; service
-  orchestration in `pkg/agentcompose/service/loader_manager.go`
+- Jupyter proxy: `pkg/agentcompose/proxy/proxy.go`
+- Loader runtime and scheduling: owner helpers in `pkg/loaders/`; daemon
+  orchestration in `pkg/agentcompose/app/loader_controller.go` and
+  `pkg/agentcompose/adapters/loader_session_runner.go`
 - Domain model helpers: `pkg/model/`
 - Project/run owner helpers: `pkg/projects/` and `pkg/runs/`
 - Session/execution owner helpers: `pkg/sessions/` and `pkg/execution/`
@@ -302,7 +302,7 @@ Besides Connect APIs, the daemon registers these HTTP routes:
 - Jupyter proxy: `<JupyterProxyBasePath>/:sessionID` and
   `<JupyterProxyBasePath>/:sessionID/*`. The default base path is `/jupyter`.
 
-The Jupyter proxy implementation lives in `pkg/agentcompose/service/proxy.go`.
+The Jupyter proxy implementation lives in `pkg/agentcompose/proxy/proxy.go`.
 `GetSessionProxy` returns only proxy entry information; actual HTTP/WebSocket
 forwarding is handled by the HTTP routes above. When a session is created,
 `Config.JupyterProxyBasePath` is written into `proxyPath`; the current code

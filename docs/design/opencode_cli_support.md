@@ -12,8 +12,8 @@ inside the guest, while `runtime/javascript` adapts provider-specific CLIs.
 
 Provider handling is split across four layers:
 
-- Go control plane: `normalizeAgentKind` in `pkg/agentcompose/service/service.go`,
-  `normalizeAgentDefinition` in `pkg/agentcompose/service/agent_definition.go`, loader
+- Go control plane: `NormalizeAgentKind` and `NormalizeAgentDefinition` in
+  `pkg/model/agent_model.go`, loader
   default-agent validation, and run/session orchestration currently pass a
   provider string to the guest runtime.
 - JavaScript runtime: `runtime/javascript/src/provider.ts` normalizes provider
@@ -91,8 +91,8 @@ Agent execution should:
    - `runtime/javascript/src/types.ts`: extend `Provider` with `"opencode"`.
    - `runtime/javascript/src/provider.ts`: map `opencode`, `open-code`, and
      `open_code` to `opencode`.
-   - `pkg/agentcompose/service/service.go`: update `normalizeAgentKind`.
-   - `pkg/agentcompose/service/agent_definition.go`: allow `opencode` in the provider
+   - `pkg/model/agent_model.go`: update `NormalizeAgentKind`.
+   - `pkg/model/agent_model.go`: allow `opencode` in the provider
      whitelist.
 
 2. Add `OpenCodeRunner`.

@@ -2,6 +2,10 @@ package health
 
 import "testing"
 
+func TestHealthServiceWorkflow(t *testing.T) {
+	testHealthServiceWorkflow(t)
+}
+
 func TestIntegrationHealthServiceWorkflow(t *testing.T) {
 	testHealthServiceWorkflow(t)
 }

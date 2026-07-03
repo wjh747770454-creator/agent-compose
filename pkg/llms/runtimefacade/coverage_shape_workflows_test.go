@@ -1,0 +1,11 @@
+package runtimefacade
+
+import "testing"
+
+func TestIntegrationRuntimeFacadeConfigWorkflow(t *testing.T) {
+	TestEnsureSessionLLMFacadeConfigCreatesCodexEnvAndToken(t)
+}
+
+func TestE2ERuntimeFacadeConfigWorkflow(t *testing.T) {
+	TestIntegrationRuntimeFacadeConfigWorkflow(t)
+}

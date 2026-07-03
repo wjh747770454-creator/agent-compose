@@ -2,7 +2,7 @@ import path from "node:path";
 import { readText } from "./fs.js";
 import { warn } from "./mpi.js";
 
-const agentSystemPromptRelativePath = path.join("agents", "system-prompts", "system-prompt.txt"); // keep in sync with pkg/agentcompose/service.go
+const agentSystemPromptRelativePath = path.join("agents", "system-prompts", "system-prompt.txt"); // keep in sync with pkg/execution/agent_files.go
 
 /** Convention path for agent identity under --state-root (MPI uses the same discovery pattern). */
 export function agentSystemPromptPath(stateRoot: string): string {

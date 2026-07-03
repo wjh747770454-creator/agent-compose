@@ -2,6 +2,10 @@ package auth
 
 import "testing"
 
+func TestAuthWorkflows(t *testing.T) {
+	testAuthWorkflows(t)
+}
+
 func TestIntegrationAuthWorkflows(t *testing.T) {
 	testAuthWorkflows(t)
 }

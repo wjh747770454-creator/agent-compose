@@ -6,13 +6,13 @@ This document describes the external event ingress and topic event dispatch
 model currently implemented in code, and records the target design still to be
 completed. Relevant implementation lives mainly in:
 
-- HTTP handler: `pkg/agentcompose/service/webhook.go`
+- HTTP handler: `pkg/events/webhooks/http.go`
 - Topic event model: `pkg/model/`
-- SQLite store: `pkg/agentcompose/service/topic_event_store.go`
-- Dispatcher: `pkg/agentcompose/service/event_dispatcher.go`
+- SQLite store: `pkg/storage/configstore/topic_event_store.go`
+- Dispatcher: `pkg/events/dispatcher.go`
 - Loader bus: `pkg/bus/`
 - Loader JS API: `pkg/loaders/engine.go`
-- Loader run host: `pkg/agentcompose/service/loader_manager.go`
+- Loader run host: `pkg/loaders/run_host.go` with daemon adapters in `pkg/agentcompose/adapters/loader_host.go`
 
 ## Overall Flow
 

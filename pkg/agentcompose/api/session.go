@@ -1,13 +1,51 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
+	"connectrpc.com/connect"
+
 	domain "agent-compose/pkg/model"
+	"agent-compose/pkg/sessions"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 )
+
+type SessionDelegate interface {
+	CreateSession(context.Context, *connect.Request[agentcomposev1.CreateSessionRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
+	ResumeSession(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
+	StopSession(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
+	GetSessionProxy(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error)
+}
+
+type WatchSessionStore interface {
+	GetSession(context.Context, string) (*domain.Session, error)
+	ListSessions(context.Context, domain.SessionListOptions) (domain.SessionListResult, error)
+}
+
+type SessionRuntimeReconciler interface {
+	ReconcileRuntimeState(context.Context, *domain.Session) (*domain.Session, error)
+}
+
+type SessionHandler struct {
+	delegate   SessionDelegate
+	store      WatchSessionStore
+	streams    *sessions.StreamBroker
+	reconciler SessionRuntimeReconciler
+}
+
+func NewSessionHandler(delegate SessionDelegate, store WatchSessionStore, streams *sessions.StreamBroker) *SessionHandler {
+	handler := &SessionHandler{delegate: delegate, store: store, streams: streams}
+	if reconciler, ok := delegate.(SessionRuntimeReconciler); ok {
+		handler.reconciler = reconciler
+	}
+	return handler
+}
 
 func SessionListOptionsFromProto(req *agentcomposev1.ListSessionsRequest) (domain.SessionListOptions, error) {
 	if req == nil {
@@ -46,13 +84,103 @@ func SessionListOptionsFromProto(req *agentcomposev1.ListSessionsRequest) (domai
 }
 
 func ParseOptionalRFC3339(raw, field string) (time.Time, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	value := strings.TrimSpace(raw)
+	if value == "" {
 		return time.Time{}, nil
 	}
-	value, err := time.Parse(time.RFC3339, raw)
+	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid %s: %w", field, err)
+		return time.Time{}, fmt.Errorf("%s must be RFC3339: %w", field, err)
 	}
-	return value.UTC(), nil
+	return parsed, nil
+}
+
+func (h *SessionHandler) CreateSession(ctx context.Context, req *connect.Request[agentcomposev1.CreateSessionRequest]) (*connect.Response[agentcomposev1.SessionResponse], error) {
+	return h.delegate.CreateSession(ctx, req)
+}
+
+func (h *SessionHandler) ResumeSession(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error) {
+	return h.delegate.ResumeSession(ctx, req)
+}
+
+func (h *SessionHandler) StopSession(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error) {
+	return h.delegate.StopSession(ctx, req)
+}
+
+func (h *SessionHandler) GetSession(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error) {
+	session, err := h.store.GetSession(ctx, req.Msg.GetSessionId())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	session = h.reconcileRuntimeState(ctx, session, "get")
+	return connect.NewResponse(&agentcomposev1.SessionResponse{Session: SessionDetailToProto(session)}), nil
+}
+
+func (h *SessionHandler) ListSessions(ctx context.Context, req *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error) {
+	options, err := SessionListOptionsFromProto(req.Msg)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	result, err := h.store.ListSessions(ctx, options)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	resp := &agentcomposev1.ListSessionsResponse{
+		TotalCount: uint32(result.TotalCount),
+		HasMore:    result.HasMore,
+		NextOffset: uint32(result.NextOffset),
+	}
+	for _, session := range result.Sessions {
+		session = h.reconcileRuntimeState(ctx, session, "list")
+		resp.Sessions = append(resp.Sessions, SessionSummaryToProto(&session.Summary))
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (h *SessionHandler) GetSessionProxy(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error) {
+	return h.delegate.GetSessionProxy(ctx, req)
+}
+
+func (h *SessionHandler) WatchSession(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest], stream *connect.ServerStream[agentcomposev1.WatchSessionResponse]) error {
+	PrepareStreamingHeaders(stream.ResponseHeader())
+	session, err := h.store.GetSession(ctx, req.Msg.GetSessionId())
+	if err != nil {
+		return connect.NewError(connect.CodeNotFound, err)
+	}
+	if sendErr := stream.Send(&agentcomposev1.WatchSessionResponse{
+		EventType: agentcomposev1.WatchSessionEventType_WATCH_SESSION_EVENT_TYPE_SESSION_UPDATED,
+		Session:   SessionSummaryToProto(&session.Summary),
+	}); sendErr != nil {
+		return connect.NewError(connect.CodeUnknown, sendErr)
+	}
+	events, cancel := h.streams.Subscribe(session.Summary.ID)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case event, ok := <-events:
+			if !ok {
+				return nil
+			}
+			if sendErr := stream.Send(WatchSessionResponseToProto(event)); sendErr != nil {
+				return connect.NewError(connect.CodeUnknown, sendErr)
+			}
+		}
+	}
+}
+
+func (h *SessionHandler) reconcileRuntimeState(ctx context.Context, session *domain.Session, operation string) *domain.Session {
+	if h.reconciler == nil {
+		return session
+	}
+	reconciled, err := h.reconciler.ReconcileRuntimeState(ctx, session)
+	if err != nil {
+		slog.Warn("failed to reconcile session runtime state during "+operation, "session_id", session.Summary.ID, "error", err)
+		return session
+	}
+	return reconciled
 }

@@ -1,11 +1,11 @@
 package sessions
 
 import (
-	"agent-compose/pkg/agentcompose/workspaces"
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	"agent-compose/pkg/execution"
 	domain "agent-compose/pkg/model"
+	"agent-compose/pkg/workspaces"
 	"context"
 	"net"
 	"time"

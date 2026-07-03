@@ -2,6 +2,10 @@ package config
 
 import "testing"
 
+func TestConfigWorkflows(t *testing.T) {
+	testConfigWorkflows(t)
+}
+
 func TestIntegrationConfigWorkflows(t *testing.T) {
 	testConfigWorkflows(t)
 }

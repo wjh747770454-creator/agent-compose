@@ -2,6 +2,10 @@ package main
 
 import "testing"
 
+func TestCLIConfigAndOutputWorkflow(t *testing.T) {
+	testCLIConfigAndOutputWorkflow(t)
+}
+
 func TestIntegrationCLIConfigAndOutputWorkflow(t *testing.T) {
 	testCLIConfigAndOutputWorkflow(t)
 }

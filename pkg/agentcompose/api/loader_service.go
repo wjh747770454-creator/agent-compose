@@ -1,0 +1,239 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"agent-compose/pkg/loaders"
+	domain "agent-compose/pkg/model"
+	agentcomposev1 "agent-compose/proto/agentcompose/v1"
+)
+
+type LoaderController interface {
+	Validate(ctx context.Context, runtime, script string) (loaders.LoaderValidationResult, error)
+	CreateLoader(ctx context.Context, loader domain.Loader) (domain.Loader, error)
+	UpdateLoader(ctx context.Context, loader domain.Loader) (domain.Loader, error)
+	DeleteLoader(ctx context.Context, loaderID string) error
+	SetLoaderEnabled(ctx context.Context, loaderID string, enabled bool) (domain.Loader, error)
+	SetLoaderTriggerEnabled(ctx context.Context, loaderID, triggerID string, enabled bool) (domain.Loader, error)
+	RunNow(ctx context.Context, loaderID, triggerID, payloadJSON string, timeout time.Duration) (domain.LoaderRunSummary, error)
+}
+
+type LoaderStore interface {
+	ListLoaderSummaries(ctx context.Context) ([]domain.LoaderSummary, error)
+	GetLoader(ctx context.Context, loaderID string) (domain.Loader, error)
+	ListLoaderRuns(ctx context.Context, loaderID string, limit int) ([]domain.LoaderRunSummary, error)
+	GetLoaderRun(ctx context.Context, loaderID, runID string) (domain.LoaderRunSummary, error)
+	ListLoaderEvents(ctx context.Context, loaderID string, limit int) ([]domain.LoaderEvent, error)
+	GetAgentDefinition(ctx context.Context, id string) (domain.AgentDefinition, error)
+}
+
+type LoaderHandler struct {
+	controller LoaderController
+	store      LoaderStore
+}
+
+func NewLoaderHandler(controller LoaderController, store LoaderStore) *LoaderHandler {
+	return &LoaderHandler{controller: controller, store: store}
+}
+
+func (s *LoaderHandler) ValidateLoader(ctx context.Context, req *connect.Request[agentcomposev1.ValidateLoaderRequest]) (*connect.Response[agentcomposev1.ValidateLoaderResponse], error) {
+	result, err := s.controller.Validate(ctx, req.Msg.GetRuntime(), req.Msg.GetScript())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	resp := &agentcomposev1.ValidateLoaderResponse{Warnings: append([]string(nil), result.Warnings...)}
+	for _, trigger := range result.Triggers {
+		resp.Triggers = append(resp.Triggers, LoaderTriggerToProto(trigger))
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (s *LoaderHandler) ListLoaders(ctx context.Context, req *connect.Request[emptypb.Empty]) (*connect.Response[agentcomposev1.ListLoadersResponse], error) {
+	_ = req
+	items, err := s.store.ListLoaderSummaries(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	resp := &agentcomposev1.ListLoadersResponse{}
+	for _, item := range items {
+		resp.Loaders = append(resp.Loaders, LoaderSummaryToProto(item))
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (s *LoaderHandler) GetLoader(ctx context.Context, req *connect.Request[agentcomposev1.LoaderIDRequest]) (*connect.Response[agentcomposev1.LoaderResponse], error) {
+	item, err := s.store.GetLoader(ctx, req.Msg.GetLoaderId())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	return connect.NewResponse(&agentcomposev1.LoaderResponse{Loader: LoaderDetailToProto(item)}), nil
+}
+
+func (s *LoaderHandler) CreateLoader(ctx context.Context, req *connect.Request[agentcomposev1.CreateLoaderRequest]) (*connect.Response[agentcomposev1.LoaderResponse], error) {
+	defaultAgent, err := s.resolveDefaultAgent(ctx, req.Msg.GetAgentId(), req.Msg.GetDefaultAgent())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	item, err := s.controller.CreateLoader(ctx, domain.Loader{
+		Summary: domain.LoaderSummary{
+			Name:              req.Msg.GetName(),
+			Description:       req.Msg.GetDescription(),
+			Enabled:           req.Msg.GetEnabled(),
+			Runtime:           req.Msg.GetRuntime(),
+			WorkspaceID:       req.Msg.GetWorkspaceId(),
+			AgentID:           req.Msg.GetAgentId(),
+			Driver:            req.Msg.GetDriver(),
+			GuestImage:        req.Msg.GetGuestImage(),
+			DefaultAgent:      defaultAgent,
+			SessionPolicy:     req.Msg.GetSessionPolicy(),
+			ConcurrencyPolicy: req.Msg.GetConcurrencyPolicy(),
+			CapsetIDs:         req.Msg.GetCapsetIds(),
+		},
+		Script:   req.Msg.GetScript(),
+		EnvItems: protoEnvItemsToModel(req.Msg.GetEnvItems()),
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	return connect.NewResponse(&agentcomposev1.LoaderResponse{Loader: LoaderDetailToProto(item)}), nil
+}
+
+func (s *LoaderHandler) UpdateLoader(ctx context.Context, req *connect.Request[agentcomposev1.UpdateLoaderRequest]) (*connect.Response[agentcomposev1.LoaderResponse], error) {
+	defaultAgent, err := s.resolveDefaultAgent(ctx, req.Msg.GetAgentId(), req.Msg.GetDefaultAgent())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	item, err := s.controller.UpdateLoader(ctx, domain.Loader{
+		Summary: domain.LoaderSummary{
+			ID:                req.Msg.GetLoaderId(),
+			Name:              req.Msg.GetName(),
+			Description:       req.Msg.GetDescription(),
+			Enabled:           req.Msg.GetEnabled(),
+			Runtime:           req.Msg.GetRuntime(),
+			WorkspaceID:       req.Msg.GetWorkspaceId(),
+			AgentID:           req.Msg.GetAgentId(),
+			Driver:            req.Msg.GetDriver(),
+			GuestImage:        req.Msg.GetGuestImage(),
+			DefaultAgent:      defaultAgent,
+			SessionPolicy:     req.Msg.GetSessionPolicy(),
+			ConcurrencyPolicy: req.Msg.GetConcurrencyPolicy(),
+			CapsetIDs:         req.Msg.GetCapsetIds(),
+		},
+		Script:   req.Msg.GetScript(),
+		EnvItems: protoEnvItemsToModel(req.Msg.GetEnvItems()),
+	})
+	if err != nil {
+		return nil, loaderServiceConnectError(err)
+	}
+	return connect.NewResponse(&agentcomposev1.LoaderResponse{Loader: LoaderDetailToProto(item)}), nil
+}
+
+func (s *LoaderHandler) DeleteLoader(ctx context.Context, req *connect.Request[agentcomposev1.LoaderIDRequest]) (*connect.Response[emptypb.Empty], error) {
+	if err := s.controller.DeleteLoader(ctx, req.Msg.GetLoaderId()); err != nil {
+		return nil, loaderServiceConnectError(err)
+	}
+	return connect.NewResponse(&emptypb.Empty{}), nil
+}
+
+func (s *LoaderHandler) SetLoaderEnabled(ctx context.Context, req *connect.Request[agentcomposev1.SetLoaderEnabledRequest]) (*connect.Response[agentcomposev1.LoaderResponse], error) {
+	item, err := s.controller.SetLoaderEnabled(ctx, req.Msg.GetLoaderId(), req.Msg.GetEnabled())
+	if err != nil {
+		return nil, loaderServiceConnectError(err)
+	}
+	return connect.NewResponse(&agentcomposev1.LoaderResponse{Loader: LoaderDetailToProto(item)}), nil
+}
+
+func (s *LoaderHandler) SetLoaderTriggerEnabled(ctx context.Context, req *connect.Request[agentcomposev1.SetLoaderTriggerEnabledRequest]) (*connect.Response[agentcomposev1.LoaderResponse], error) {
+	item, err := s.controller.SetLoaderTriggerEnabled(ctx, req.Msg.GetLoaderId(), req.Msg.GetTriggerId(), req.Msg.GetEnabled())
+	if err != nil {
+		return nil, loaderServiceConnectError(err)
+	}
+	return connect.NewResponse(&agentcomposev1.LoaderResponse{Loader: LoaderDetailToProto(item)}), nil
+}
+
+func (s *LoaderHandler) RunLoaderNow(ctx context.Context, req *connect.Request[agentcomposev1.RunLoaderNowRequest]) (*connect.Response[agentcomposev1.LoaderRunResponse], error) {
+	timeout, err := loaders.ParseRunTimeout(req.Msg.GetTimeout())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	run, err := s.controller.RunNow(ctx, req.Msg.GetLoaderId(), req.Msg.GetTriggerId(), req.Msg.GetPayloadJson(), timeout)
+	if err != nil {
+		return nil, loaderServiceConnectError(err)
+	}
+	return connect.NewResponse(&agentcomposev1.LoaderRunResponse{Run: LoaderRunDetailToProto(run)}), nil
+}
+
+func (s *LoaderHandler) ListLoaderRuns(ctx context.Context, req *connect.Request[agentcomposev1.ListLoaderRunsRequest]) (*connect.Response[agentcomposev1.ListLoaderRunsResponse], error) {
+	runs, err := s.store.ListLoaderRuns(ctx, req.Msg.GetLoaderId(), int(req.Msg.GetLimit()))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	resp := &agentcomposev1.ListLoaderRunsResponse{}
+	for _, item := range runs {
+		resp.Runs = append(resp.Runs, LoaderRunSummaryToProto(item))
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (s *LoaderHandler) GetLoaderRun(ctx context.Context, req *connect.Request[agentcomposev1.LoaderRunIDRequest]) (*connect.Response[agentcomposev1.LoaderRunResponse], error) {
+	run, err := s.store.GetLoaderRun(ctx, req.Msg.GetLoaderId(), req.Msg.GetRunId())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	return connect.NewResponse(&agentcomposev1.LoaderRunResponse{Run: LoaderRunDetailToProto(run)}), nil
+}
+
+func (s *LoaderHandler) ListLoaderEvents(ctx context.Context, req *connect.Request[agentcomposev1.ListLoaderEventsRequest]) (*connect.Response[agentcomposev1.ListLoaderEventsResponse], error) {
+	events, err := s.store.ListLoaderEvents(ctx, req.Msg.GetLoaderId(), int(req.Msg.GetLimit()))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	resp := &agentcomposev1.ListLoaderEventsResponse{}
+	for _, item := range events {
+		resp.Events = append(resp.Events, LoaderEventToProto(item))
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (s *LoaderHandler) resolveDefaultAgent(ctx context.Context, agentID, provider string) (string, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return provider, nil
+	}
+	agent, err := s.store.GetAgentDefinition(ctx, agentID)
+	if err != nil {
+		return "", err
+	}
+	if !agent.Enabled {
+		return "", fmt.Errorf("agent definition %s is disabled", agentID)
+	}
+	if strings.TrimSpace(provider) != "" && domain.NormalizeAgentKind(provider) == "" {
+		return "", fmt.Errorf("loader default agent provider %q is not supported", provider)
+	}
+	return agent.Provider, nil
+}
+
+func loaderServiceConnectError(err error) error {
+	if errors.Is(err, domain.ErrNotFound) {
+		return connect.NewError(connect.CodeNotFound, err)
+	}
+	return connect.NewError(connect.CodeInvalidArgument, err)
+}
+
+func protoEnvItemsToModel(items []*agentcomposev1.SessionEnvVar) []domain.SessionEnvVar {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]domain.SessionEnvVar, 0, len(items))
+	for _, item := range items {
+		result = append(result, domain.SessionEnvVar{Name: item.GetName(), Value: item.GetValue(), Secret: item.GetSecret()})
+	}
+	return domain.NormalizeEnvItems(result)
+}
