@@ -444,6 +444,104 @@ agents:
 	}
 }
 
+func TestConfigCommandDiscoversDefaultYAMLComposeFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "yaml-project")
+	writeComposeFileNamed(t, dir, "agent-compose.yaml", `
+name: yaml-project
+agents:
+  reviewer:
+    provider: codex
+`)
+	withWorkingDir(t, dir)
+	t.Setenv("AGENT_COMPOSE_SOCKET", filepath.Join(t.TempDir(), "missing.sock"))
+	t.Setenv("AGENT_COMPOSE_HOST", "")
+
+	stdout, stderr, runCount, err := executeCommand("config", "--json")
+	if err != nil {
+		t.Fatalf("config with default yaml returned error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("config with default yaml stderr = %q, want empty", stderr)
+	}
+	if runCount != 0 {
+		t.Fatalf("daemon runner called %d times, want 0", runCount)
+	}
+	var decoded struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("config yaml JSON output is not JSON: %v\n%s", err, stdout)
+	}
+	if decoded.Name != "yaml-project" {
+		t.Fatalf("config project name = %q, want yaml-project", decoded.Name)
+	}
+}
+
+func TestConfigCommandAmbiguousDefaultComposeFilesIsUsageError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ambiguous-project")
+	writeComposeFileNamed(t, dir, "agent-compose.yml", `
+name: yml-project
+agents:
+  reviewer:
+    provider: codex
+`)
+	writeComposeFileNamed(t, dir, "agent-compose.yaml", `
+name: yaml-project
+agents:
+  reviewer:
+    provider: codex
+`)
+	withWorkingDir(t, dir)
+
+	stdout, stderr, runCount, exitCode := executeCLICommand("config")
+	if exitCode != exitCodeUsage {
+		t.Fatalf("config ambiguous files exit code = %d, want %d; stderr=%q", exitCode, exitCodeUsage, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("config ambiguous files stdout = %q, want empty", stdout)
+	}
+	for _, want := range []string{"agent-compose.yml", "agent-compose.yaml", "--file"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("config ambiguous files stderr %q does not contain %q", stderr, want)
+		}
+	}
+	if runCount != 0 {
+		t.Fatalf("daemon runner called %d times, want 0", runCount)
+	}
+}
+
+func TestConfigCommandExplicitYAMLFileUsesFileDirectoryAsProjectRoot(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "explicit-yaml-project")
+	composePath := writeComposeFileNamed(t, dir, "agent-compose.yaml", `
+agents:
+  reviewer:
+    provider: codex
+`)
+	withWorkingDir(t, t.TempDir())
+	t.Setenv("AGENT_COMPOSE_SOCKET", filepath.Join(t.TempDir(), "missing.sock"))
+	t.Setenv("AGENT_COMPOSE_HOST", "")
+
+	stdout, stderr, runCount, err := executeCommand("config", "--file", composePath, "--json")
+	if err != nil {
+		t.Fatalf("config with explicit yaml returned error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("config with explicit yaml stderr = %q, want empty", stderr)
+	}
+	if runCount != 0 {
+		t.Fatalf("daemon runner called %d times, want 0", runCount)
+	}
+	var decoded struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("config explicit yaml JSON output is not JSON: %v\n%s", err, stdout)
+	}
+	if decoded.Name != "explicit-yaml-project" {
+		t.Fatalf("config project name = %q, want explicit-yaml-project", decoded.Name)
+	}
+}
+
 func TestConfigCommandMissingComposeFileWritesStderrAndExitCode(t *testing.T) {
 	missingPath := filepath.Join(t.TempDir(), "missing-agent-compose.yml")
 	stdout, stderr, runCount, exitCode := executeCLICommand("config", "--file", missingPath)
@@ -2119,11 +2217,15 @@ func freeTCPListenAddress(t *testing.T) string {
 }
 
 func writeComposeFile(t *testing.T, dir string, content string) string {
+	return writeComposeFileNamed(t, dir, "agent-compose.yml", content)
+}
+
+func writeComposeFileNamed(t *testing.T, dir string, name string, content string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("create compose dir: %v", err)
 	}
-	path := filepath.Join(dir, "agent-compose.yml")
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write compose file: %v", err)
 	}

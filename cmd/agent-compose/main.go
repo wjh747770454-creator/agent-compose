@@ -1211,9 +1211,39 @@ func resolveComposePath(pathFlag string) (string, error) {
 	}
 	wd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("find agent-compose.yml: %w", err)
+		return "", fmt.Errorf("find agent-compose.yml or agent-compose.yaml: %w", err)
 	}
-	return filepath.Join(wd, "agent-compose.yml"), nil
+	ymlPath := filepath.Join(wd, "agent-compose.yml")
+	yamlPath := filepath.Join(wd, "agent-compose.yaml")
+	ymlExists, err := fileExists(ymlPath)
+	if err != nil {
+		return "", fmt.Errorf("find %s: %w", ymlPath, err)
+	}
+	yamlExists, err := fileExists(yamlPath)
+	if err != nil {
+		return "", fmt.Errorf("find %s: %w", yamlPath, err)
+	}
+	switch {
+	case ymlExists && yamlExists:
+		return "", commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("both %s and %s exist; use --file to choose one", ymlPath, yamlPath)}
+	case ymlExists:
+		return ymlPath, nil
+	case yamlExists:
+		return yamlPath, nil
+	default:
+		return ymlPath, nil
+	}
+}
+
+func fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func writeCommandOutput(out io.Writer, data []byte) error {
