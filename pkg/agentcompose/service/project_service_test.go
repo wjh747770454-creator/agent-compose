@@ -466,6 +466,10 @@ func testProjectServiceGetProjectAndListProjects(t *testing.T) {
 	if listResp.Msg.GetTotalCount() != 1 || len(listResp.Msg.GetProjects()) != 1 || listResp.Msg.GetProjects()[0].GetProjectId() != projectID {
 		t.Fatalf("ListProjects response = %#v", listResp.Msg)
 	}
+	summary := listResp.Msg.GetProjects()[0]
+	if summary.GetAgentCount() != 2 || summary.GetSchedulerCount() != 1 {
+		t.Fatalf("ListProjects summary counts = agents %d schedulers %d, want agents 2 schedulers 1", summary.GetAgentCount(), summary.GetSchedulerCount())
+	}
 }
 
 func TestProjectServiceManagedSchedulerCompileCoversTriggerKinds(t *testing.T) {

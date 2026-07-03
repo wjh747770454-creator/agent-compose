@@ -284,7 +284,15 @@ func (s *Service) ListProjects(ctx context.Context, req *connect.Request[agentco
 		NextOffset: uint32(result.NextOffset),
 	}
 	for _, project := range result.Projects {
-		resp.Projects = append(resp.Projects, api.ProjectSummaryToProto(project, nil, nil))
+		agents, err := s.configDB.ListProjectAgents(ctx, project.ID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list project %s agents: %w", project.Name, err))
+		}
+		schedulers, err := s.configDB.ListProjectSchedulers(ctx, project.ID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list project %s schedulers: %w", project.Name, err))
+		}
+		resp.Projects = append(resp.Projects, api.ProjectSummaryToProto(project, agents, schedulers))
 	}
 	return connect.NewResponse(resp), nil
 }
