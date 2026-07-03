@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -162,5 +163,5 @@ func (h *AgentHandler) publishLoaderTopic(topic string, payload map[string]any) 
 	if h == nil || h.publisher == nil {
 		return
 	}
-	h.publisher.Publish(domain.LoaderTopicEvent{Topic: topic, Payload: payload})
+	h.publisher.Publish(domain.LoaderTopicEvent{Topic: topic, Payload: payload, CreatedAt: time.Now().UTC()})
 }

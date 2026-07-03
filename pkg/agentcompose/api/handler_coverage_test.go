@@ -37,6 +37,9 @@ func TestKernelAndAgentUnaryHandlerWorkflows(t *testing.T) {
 	if resp.Msg.GetCell().GetId() != "cell-1" || len(publisher.events) == 0 {
 		t.Fatalf("kernel resp=%#v publisher=%#v", resp.Msg, publisher.events)
 	}
+	if publisher.events[0].CreatedAt.IsZero() || publisher.events[0].CreatedAt.Location() != time.UTC {
+		t.Fatalf("kernel loader topic CreatedAt = %v", publisher.events[0].CreatedAt)
+	}
 	listResp, err := kernel.ListCells(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: "session-1"}))
 	if err != nil || len(listResp.Msg.GetCells()) != 1 {
 		t.Fatalf("ListCells resp=%#v err=%v", listResp, err)
@@ -55,6 +58,9 @@ func TestKernelAndAgentUnaryHandlerWorkflows(t *testing.T) {
 	}
 	if sendResp.Msg.GetAssistantEvent().GetMessage() == "" {
 		t.Fatalf("send response = %#v", sendResp.Msg)
+	}
+	if len(publisher.events) < 2 || publisher.events[1].CreatedAt.IsZero() || publisher.events[1].CreatedAt.Location() != time.UTC {
+		t.Fatalf("agent loader topic events = %#v", publisher.events)
 	}
 	if _, err := agent.SendAgentMessage(ctx, connect.NewRequest(&agentcomposev1.SendAgentMessageRequest{SessionId: "session-1", Message: " "})); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("expected empty message error, got %v", err)

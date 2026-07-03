@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -126,7 +127,7 @@ func (h *KernelHandler) publishLoaderTopic(topic string, payload map[string]any)
 	if h == nil || h.publisher == nil {
 		return
 	}
-	h.publisher.Publish(domain.LoaderTopicEvent{Topic: topic, Payload: payload})
+	h.publisher.Publish(domain.LoaderTopicEvent{Topic: topic, Payload: payload, CreatedAt: time.Now().UTC()})
 }
 
 func PrepareStreamingHeaders(headers http.Header) {
