@@ -1,4 +1,4 @@
-package agentcompose
+package loaders_test
 
 import (
 	"agent-compose/pkg/loaders"
