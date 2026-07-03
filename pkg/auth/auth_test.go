@@ -127,6 +127,91 @@ func testAuthManagerRoutesAndMiddleware(t *testing.T) {
 	assertAuthManagerRoutesAndMiddleware(t)
 }
 
+func TestAuthManagerProtectsV2ConnectAPIPaths(t *testing.T) {
+	manager := NewAuthManager(&Config{
+		AuthUsername:   "admin",
+		AuthPassword:   "secret",
+		AuthSecret:     "test-secret",
+		AuthSessionTTL: time.Hour,
+	})
+	app := echo.New()
+	app.Use(manager.Middleware)
+	for _, path := range []string{
+		"/agentcompose.v2.ProjectService/ValidateProject",
+		"/agentcompose.v2.RunService/RunAgent",
+		"/agentcompose.v2.ExecService/Exec",
+		"/agentcompose.v2.ImageService/ListImages",
+		"/agentcompose.v2.SandboxService/RemoveSandbox",
+	} {
+		app.POST(path, func(c echo.Context) error {
+			return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
+		})
+
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s unauthenticated status = %d, want %d", path, rec.Code, http.StatusUnauthorized)
+		}
+	}
+}
+
+func TestAuthManagerBasicAuth(t *testing.T) {
+	manager := NewAuthManager(&Config{
+		AuthUsername:   "cli",
+		AuthPassword:   "secret",
+		AuthSecret:     "test-secret",
+		AuthSessionTTL: time.Hour,
+	})
+	app := echo.New()
+	app.Use(manager.Middleware)
+	app.POST("/agentcompose.v2.ProjectService/ValidateProject", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/agentcompose.v2.ProjectService/ValidateProject", nil)
+	req.SetBasicAuth("cli", "secret")
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("basic auth status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/agentcompose.v2.ProjectService/ValidateProject", nil)
+	req.SetBasicAuth("cli", "bad")
+	rec = httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad basic auth status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	req = httptest.NewRequest(http.MethodPost, "/agentcompose.v2.ProjectService/ValidateProject", nil)
+	req.AddCookie(manager.cookie(manager.signedValue("cli", expiresAt), expiresAt))
+	rec = httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cookie auth status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthManagerBasicAuthRequiresConfiguredPassword(t *testing.T) {
+	manager := NewAuthManager(&Config{
+		AuthUsername:     "cli",
+		AuthSecret:       "test-secret",
+		AuthSessionTTL:   time.Hour,
+		OAuthAPIKey:      "client-id",
+		OAuthCallbackURL: "/oauth/callback",
+		OAuthAuthURL:     "https://example.invalid/authorize",
+		OAuthTokenURL:    "https://example.invalid/token",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/agentcompose.v2.ProjectService/ValidateProject", nil)
+	req.SetBasicAuth("cli", "")
+	if _, _, ok := manager.validateRequest(req); ok {
+		t.Fatal("empty basic auth password should not validate when AuthPassword is not configured")
+	}
+}
+
 func TestAuthManagerOAuthFlowSetsAuthCookie(t *testing.T) {
 	testAuthManagerOAuthFlowSetsAuthCookie(t)
 }

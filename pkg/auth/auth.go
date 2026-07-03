@@ -333,6 +333,13 @@ func (a *AuthManager) validateRequest(r *http.Request) (string, time.Time, bool)
 	if !a.enabled {
 		return "", time.Time{}, true
 	}
+	if username, password, ok := r.BasicAuth(); ok && a.password != "" {
+		if subtle.ConstantTimeCompare([]byte(username), []byte(a.username)) == 1 &&
+			subtle.ConstantTimeCompare([]byte(password), []byte(a.password)) == 1 {
+			return a.username, time.Now().UTC().Add(a.ttl), true
+		}
+		return "", time.Time{}, false
+	}
 	cookie, err := r.Cookie(authCookieName)
 	if err != nil || cookie.Value == "" {
 		return "", time.Time{}, false
@@ -368,7 +375,7 @@ func (a *AuthManager) validateRequest(r *http.Request) (string, time.Time, bool)
 }
 
 func (a *AuthManager) protectsPath(path string, accept string) bool {
-	if strings.HasPrefix(path, "/agentcompose.v1.") || strings.HasPrefix(path, "/agent-compose/session/") {
+	if strings.HasPrefix(path, "/agentcompose.v1.") || strings.HasPrefix(path, "/agentcompose.v2.") || strings.HasPrefix(path, "/agent-compose/session/") {
 		return true
 	}
 	if strings.HasPrefix(path, "/api/") {

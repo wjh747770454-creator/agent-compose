@@ -16,7 +16,9 @@
 远程 daemon 认证：
 
 - 使用 `--host` 或 `AGENT_COMPOSE_HOST` 连接 HTTP(S) daemon 时，CLI 从 `AUTH_USERNAME` 和 `AUTH_PASSWORD` 读取 Basic Auth 凭据并注入请求。
+- daemon 侧 AuthManager 使用同一组 `AUTH_USERNAME` / `AUTH_PASSWORD` 校验 CLI Basic Auth，并覆盖 v1/v2 Connect API、`/api/` 和 Jupyter proxy 等远程访问路径；Web cookie 登录仍保留。
 - 使用 Unix socket 本地连接时不注入 Basic Auth。
+- 兼容历史部署的全局 `HTTP_BASIC_AUTH` 外层 Basic Auth；如果同时启用，远程请求需要同时满足外层认证和 AuthManager 认证。
 
 当前 project 解析逻辑：
 

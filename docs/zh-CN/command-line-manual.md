@@ -37,7 +37,8 @@ agent-compose --host http://10.0.0.12:7410 ls --json
 - 未指定 `-f` 时，CLI 在当前目录查找 `agent-compose.yml` 或 `agent-compose.yaml`。
 - 使用 `-f` 时，不需要切换到 project root。
 - `--host` 只决定 CLI 连接哪个 daemon；sandbox 实际运行在 daemon 所在环境中。
-- 使用 `--host` 或 `AGENT_COMPOSE_HOST` 连接 HTTP(S) daemon 时，CLI 会从 `AUTH_USERNAME` 和 `AUTH_PASSWORD` 读取 Basic Auth 凭据；Unix socket 本地连接不使用该认证。
+- 使用 `--host` 或 `AGENT_COMPOSE_HOST` 连接 HTTP(S) daemon 时，CLI 会从本机环境变量 `AUTH_USERNAME` 和 `AUTH_PASSWORD` 读取 Basic Auth 凭据，并由 daemon 的 AuthManager 使用同名配置校验；Unix socket 本地连接不使用该认证。
+- 如果部署侧同时启用了兼容的全局 `HTTP_BASIC_AUTH`，请求还需要通过该外层 Basic Auth；新部署优先使用 `AUTH_USERNAME` / `AUTH_PASSWORD` 作为 CLI 远程认证凭据。
 - 自动化场景应使用 `--json`，不要解析人类可读表格。
 
 ## 常见工作流
