@@ -998,6 +998,118 @@ agents:
 	}
 }
 
+func TestIntegrationCLIRunRemoveSandboxOnSuccess(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-rm
+agents:
+  reviewer:
+    provider: codex
+`)
+	type removedRequest struct {
+		sandbox string
+		force   bool
+	}
+	var removed []removedRequest
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION {
+					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
+				}
+				if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
+					RunId:     "run-rm",
+					Chunk:     "done\n",
+				}); err != nil {
+					return err
+				}
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-rm",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-rm",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SessionId: "sandbox-rm",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-rm", "reviewer", "sandbox-rm", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "done\n")}), nil
+			},
+		},
+		sandbox: sandboxServiceStub{
+			removeSandbox: func(ctx context.Context, req *connect.Request[agentcomposev2.RemoveSandboxRequest]) (*connect.Response[agentcomposev2.RemoveSandboxResponse], error) {
+				removed = append(removed, removedRequest{sandbox: req.Msg.GetSandboxId(), force: req.Msg.GetForce()})
+				return connect.NewResponse(&agentcomposev2.RemoveSandboxResponse{
+					SandboxId: req.Msg.GetSandboxId(),
+					Removed:   true,
+				}), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "reviewer", "--prompt", "clean")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("run --rm code/stderr = %d / %q", exitCode, stderr)
+	}
+	if stdout != "done\nremoved sandbox sandbox-rm\n" {
+		t.Fatalf("run --rm stdout = %q", stdout)
+	}
+	if len(removed) != 1 || removed[0].sandbox != "sandbox-rm" || !removed[0].force {
+		t.Fatalf("removed requests = %#v", removed)
+	}
+}
+
+func TestIntegrationCLIRunRemoveSandboxUsesDetailSandbox(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-rm-detail
+agents:
+  reviewer:
+    provider: codex
+`)
+	var removed []string
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-rm-detail",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-rm-detail",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-rm-detail", "reviewer", "sandbox-from-detail", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+		sandbox: sandboxServiceStub{
+			removeSandbox: func(ctx context.Context, req *connect.Request[agentcomposev2.RemoveSandboxRequest]) (*connect.Response[agentcomposev2.RemoveSandboxResponse], error) {
+				removed = append(removed, req.Msg.GetSandboxId())
+				return connect.NewResponse(&agentcomposev2.RemoveSandboxResponse{SandboxId: req.Msg.GetSandboxId(), Removed: true}), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "--json", "reviewer")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("run --rm --json code/stderr = %d / %q", exitCode, stderr)
+	}
+	if strings.Contains(stdout, "removed sandbox") {
+		t.Fatalf("run --rm --json stdout contains text cleanup output: %q", stdout)
+	}
+	if len(removed) != 1 || removed[0] != "sandbox-from-detail" {
+		t.Fatalf("removed sandboxes = %#v", removed)
+	}
+}
+
 func TestIntegrationCLIRunFailureReturnsStableExitCode(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-run-failure
@@ -1046,6 +1158,99 @@ agents:
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("run failure stderr %q does not contain %q", stderr, want)
 		}
+	}
+}
+
+func TestIntegrationCLIRunRemoveSandboxSkipsFailedRun(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-rm-failed
+agents:
+  reviewer:
+    provider: codex
+`)
+	var removeCalled bool
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-rm-failed",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-rm-failed",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_FAILED,
+						SessionId: "sandbox-failed",
+						ExitCode:  9,
+						Error:     "failed before cleanup",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-rm-failed", "reviewer", "sandbox-failed", agentcomposev2.RunStatus_RUN_STATUS_FAILED, 9, "")}), nil
+			},
+		},
+		sandbox: sandboxServiceStub{
+			removeSandbox: func(ctx context.Context, req *connect.Request[agentcomposev2.RemoveSandboxRequest]) (*connect.Response[agentcomposev2.RemoveSandboxResponse], error) {
+				removeCalled = true
+				return connect.NewResponse(&agentcomposev2.RemoveSandboxResponse{}), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "reviewer")
+	if exitCode != 9 {
+		t.Fatalf("run --rm failed exit code = %d, want 9; stderr=%q", exitCode, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "failed before cleanup") {
+		t.Fatalf("run --rm failed stdout/stderr = %q / %q", stdout, stderr)
+	}
+	if removeCalled {
+		t.Fatal("RemoveSandbox was called for a failed run")
+	}
+}
+
+func TestIntegrationCLIRunRemoveSandboxError(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-rm-error
+agents:
+  reviewer:
+    provider: codex
+`)
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-rm-error",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-rm-error",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SessionId: "sandbox-rm-error",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-rm-error", "reviewer", "sandbox-rm-error", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+		sandbox: sandboxServiceStub{
+			removeSandbox: func(ctx context.Context, req *connect.Request[agentcomposev2.RemoveSandboxRequest]) (*connect.Response[agentcomposev2.RemoveSandboxResponse], error) {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("remove failed"))
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "reviewer")
+	if exitCode == 0 {
+		t.Fatalf("run --rm cleanup error exit code = %d, want non-zero", exitCode)
+	}
+	if stdout != "" || !strings.Contains(stderr, "remove sandbox sandbox-rm-error after run run-rm-error") || !strings.Contains(stderr, "remove failed") {
+		t.Fatalf("run --rm cleanup error stdout/stderr = %q / %q", stdout, stderr)
 	}
 }
 

@@ -515,6 +515,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	// Deprecated: use --sandbox instead.
 	runCmd.Flags().StringVar(&runOptions.SessionID, "session-id", "", "Reuse an existing session")
 	runCmd.Flags().BoolVar(&runOptions.KeepRunning, "keep-running", false, "Keep the session runtime running after completion")
+	runCmd.Flags().BoolVar(&runOptions.Remove, "rm", false, "Remove the sandbox after a successful run")
 
 	logsOptions := composeLogsOptions{}
 	logsCmd := &cobra.Command{
@@ -722,6 +723,7 @@ type composeRunOptions struct {
 	SessionID   string
 	SandboxID   string
 	KeepRunning bool
+	Remove      bool
 }
 
 type composeLogsOptions struct {
@@ -996,11 +998,7 @@ func runComposeSandboxRemoveCommand(cmd *cobra.Command, cli cliOptions, options 
 		if sandbox == "" {
 			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("rm requires non-empty sandbox")}
 		}
-		_, err := clients.sandbox.RemoveSandbox(cmd.Context(), connect.NewRequest(&agentcomposev2.RemoveSandboxRequest{
-			SandboxId: sandbox,
-			Force:     options.Force,
-		}))
-		if err != nil {
+		if err := removeSandbox(cmd.Context(), clients.sandbox, sandbox, options.Force); err != nil {
 			return commandExitErrorForConnect(fmt.Errorf("rm sandbox %s: %w", sandbox, err))
 		}
 		output.Results = append(output.Results, composeSandboxActionResult{
@@ -1021,6 +1019,14 @@ func runComposeSandboxRemoveCommand(cmd *cobra.Command, cli cliOptions, options 
 		}
 	}
 	return nil
+}
+
+func removeSandbox(ctx context.Context, client agentcomposev2connect.SandboxServiceClient, sandboxID string, force bool) error {
+	_, err := client.RemoveSandbox(ctx, connect.NewRequest(&agentcomposev2.RemoveSandboxRequest{
+		SandboxId: sandboxID,
+		Force:     force,
+	}))
+	return err
 }
 
 func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRunOptions, args []string) error {
@@ -1098,6 +1104,27 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 	}
 	if runSummaryFailed(completed) {
 		return commandExitError{Code: runSummaryExitCode(completed), Err: fmt.Errorf("run %s for project %s agent %s failed: %s", completed.GetRunId(), normalized.Name, agentName, firstNonEmptyString(completed.GetError(), runStatusText(completed.GetStatus())))}
+	}
+	if normalizedOptions.Remove {
+		sandboxID := strings.TrimSpace(completed.GetSessionId())
+		if sandboxID == "" && detail.Msg.GetRun() != nil {
+			sandboxID = strings.TrimSpace(detail.Msg.GetRun().GetSummary().GetSessionId())
+		}
+		if sandboxID == "" {
+			return fmt.Errorf("run %s for project %s agent %s completed without sandbox id for --rm", completed.GetRunId(), normalized.Name, agentName)
+		}
+		clients, err := newCLIServiceClients(cli)
+		if err != nil {
+			return err
+		}
+		if err := removeSandbox(cmd.Context(), clients.sandbox, sandboxID, true); err != nil {
+			return commandExitErrorForConnect(fmt.Errorf("remove sandbox %s after run %s: %w", sandboxID, completed.GetRunId(), err))
+		}
+		if !cli.JSON {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "removed sandbox %s\n", sandboxID); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
