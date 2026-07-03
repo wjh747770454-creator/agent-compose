@@ -1387,9 +1387,16 @@ agents:
     provider: codex
 `)
 	var sawSelector bool
+	var sawSandbox bool
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		exec: execServiceStub{
 			execStream: func(ctx context.Context, req *connect.Request[agentcomposev2.ExecRequest], stream *connect.ServerStream[agentcomposev2.ExecStreamResponse]) error {
+				if req.Msg.GetSessionId() == "sandbox-exec" {
+					sawSandbox = true
+					if req.Msg.GetCommand().GetCommand() != "bash" || req.Msg.GetCommand().GetArgs()[0] != "-lc" {
+						t.Fatalf("ExecStream sandbox request = %#v", req.Msg)
+					}
+				}
 				if selector := req.Msg.GetSelector(); selector != nil {
 					sawSelector = true
 					if selector.GetAgentName() != "reviewer" || req.Msg.GetCommand().GetCommand() != "bash" || req.Msg.GetCommand().GetArgs()[0] != "-lc" {
@@ -1438,20 +1445,34 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--agent", "reviewer", "--cwd", "/workspace", "--", "bash", "-lc", "pwd")
+	stdout, stderr, _, exitCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--cwd", "/workspace", "--", "sandbox-exec", "bash", "-lc", "pwd")
 	if exitCode != 0 {
 		t.Fatalf("exec exit code = %d, stderr=%q", exitCode, stderr)
 	}
 	if stdout != "exec stdout\n" || stderr != "exec stderr\n" {
 		t.Fatalf("exec stdout/stderr = %q / %q", stdout, stderr)
 	}
+	if !sawSandbox {
+		t.Fatal("ExecStream sandbox target was not used")
+	}
+
+	legacyOut, legacyErr, _, legacyCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--agent", "reviewer", "--cwd", "/workspace", "--", "bash", "-lc", "pwd")
+	if legacyCode != 0 {
+		t.Fatalf("exec --agent exit code = %d, stderr=%q", legacyCode, legacyErr)
+	}
+	if legacyOut != "exec stdout\n" || !strings.Contains(legacyErr, "agent-compose exec --agent is deprecated") || !strings.Contains(legacyErr, "exec stderr\n") {
+		t.Fatalf("exec --agent stdout/stderr = %q / %q", legacyOut, legacyErr)
+	}
 	if !sawSelector {
 		t.Fatal("ExecStream selector was not used")
 	}
 
 	jsonOut, jsonErr, _, jsonCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--json", "--session-id", "session-exec", "bash")
-	if jsonCode != 0 || jsonErr != "" {
+	if jsonCode != 0 {
 		t.Fatalf("exec --json code/stderr = %d / %q", jsonCode, jsonErr)
+	}
+	if !strings.Contains(jsonErr, "agent-compose exec --session-id is deprecated") || strings.Contains(jsonOut, "deprecated") {
+		t.Fatalf("exec --session-id json stdout/stderr = %q / %q", jsonOut, jsonErr)
 	}
 	var decoded composeExecOutput
 	if err := json.Unmarshal([]byte(jsonOut), &decoded); err != nil {
@@ -1459,6 +1480,25 @@ agents:
 	}
 	if decoded.ExecID != "exec-cli" || decoded.SessionID != "session-exec" || decoded.Stdout != "exec stdout\n" || !decoded.Success {
 		t.Fatalf("exec JSON = %#v", decoded)
+	}
+}
+
+func TestCLIExecRejectsEmptySandboxUsageError(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-exec-empty
+agents:
+  reviewer:
+    provider: codex
+`)
+	stdout, stderr, _, exitCode := executeCLICommand("exec", "--file", composePath, " ")
+	if exitCode != exitCodeUsage {
+		t.Fatalf("exec empty sandbox exit code = %d, want %d", exitCode, exitCodeUsage)
+	}
+	if stdout != "" {
+		t.Fatalf("exec empty sandbox stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "requires non-empty sandbox") {
+		t.Fatalf("exec empty sandbox stderr = %q", stderr)
 	}
 }
 

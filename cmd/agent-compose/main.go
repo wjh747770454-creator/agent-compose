@@ -563,15 +563,18 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 
 	execOptions := composeExecOptions{}
 	execCmd := &cobra.Command{
-		Use:   "exec [flags] <command> [args...]",
-		Short: "Execute a command in a running project session",
+		Use:   "exec <sandbox> [command] [args...]",
+		Short: "Execute a command in a running sandbox",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeExecCommand(cmd, options, execOptions, args)
 		},
 	}
+	// Deprecated: use `agent-compose exec <sandbox>` instead.
 	execCmd.Flags().StringVar(&execOptions.AgentName, "agent", "", "Select a running session by agent")
+	// Deprecated: use `agent-compose exec <sandbox>` instead.
 	execCmd.Flags().StringVar(&execOptions.RunID, "run-id", "", "Execute in the session linked to a run")
+	// Deprecated: use `agent-compose exec <sandbox>` instead.
 	execCmd.Flags().StringVar(&execOptions.SessionID, "session-id", "", "Execute in a specific session")
 	execCmd.Flags().StringVar(&execOptions.Cwd, "cwd", "", "Guest working directory")
 
@@ -1123,21 +1126,9 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 	if err != nil {
 		return err
 	}
-	req := &agentcomposev2.ExecRequest{
-		Command: &agentcomposev2.ExecCommand{Command: args[0], Args: append([]string(nil), args[1:]...)},
-		Cwd:     strings.TrimSpace(options.Cwd),
-	}
-	switch {
-	case strings.TrimSpace(options.SessionID) != "":
-		req.Target = &agentcomposev2.ExecRequest_SessionId{SessionId: strings.TrimSpace(options.SessionID)}
-	case strings.TrimSpace(options.RunID) != "":
-		req.Target = &agentcomposev2.ExecRequest_RunId{RunId: strings.TrimSpace(options.RunID)}
-	default:
-		req.Target = &agentcomposev2.ExecRequest_Selector{Selector: &agentcomposev2.ExecSessionSelector{
-			ProjectId:   projectID,
-			ProjectName: normalized.Name,
-			AgentName:   strings.TrimSpace(options.AgentName),
-		}}
+	req, err := normalizeComposeExecRequest(cmd, normalized.Name, projectID, options, args)
+	if err != nil {
+		return err
 	}
 	stream, err := clients.exec.ExecStream(cmd.Context(), connect.NewRequest(req))
 	if err != nil {
@@ -1181,6 +1172,73 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 		return commandExitError{Code: execResultExitCode(result), Err: fmt.Errorf("exec %s in session %s failed: %s", result.GetExecId(), result.GetSessionId(), firstNonEmptyString(result.GetError(), result.GetStderr(), result.GetOutput(), "command failed"))}
 	}
 	return nil
+}
+
+func normalizeComposeExecRequest(cmd *cobra.Command, projectName, projectID string, options composeExecOptions, args []string) (*agentcomposev2.ExecRequest, error) {
+	legacyTargetFlags := []string{}
+	if cmd.Flags().Changed("session-id") {
+		legacyTargetFlags = append(legacyTargetFlags, "--session-id")
+	}
+	if cmd.Flags().Changed("run-id") {
+		legacyTargetFlags = append(legacyTargetFlags, "--run-id")
+	}
+	if cmd.Flags().Changed("agent") {
+		legacyTargetFlags = append(legacyTargetFlags, "--agent")
+	}
+	if len(legacyTargetFlags) > 1 {
+		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec target can only be specified once")}
+	}
+	if len(legacyTargetFlags) > 0 {
+		if err := writeDeprecatedWarning(cmd.ErrOrStderr(), "agent-compose exec "+legacyTargetFlags[0], "agent-compose exec <sandbox>"); err != nil {
+			return nil, err
+		}
+		commandArgs := append([]string(nil), args...)
+		if len(commandArgs) == 0 {
+			commandArgs = []string{"sh"}
+		}
+		req := &agentcomposev2.ExecRequest{
+			Command: &agentcomposev2.ExecCommand{Command: commandArgs[0], Args: append([]string(nil), commandArgs[1:]...)},
+			Cwd:     strings.TrimSpace(options.Cwd),
+		}
+		switch legacyTargetFlags[0] {
+		case "--session-id":
+			sessionID := strings.TrimSpace(options.SessionID)
+			if sessionID == "" {
+				return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --session-id requires a value")}
+			}
+			req.Target = &agentcomposev2.ExecRequest_SessionId{SessionId: sessionID}
+		case "--run-id":
+			runID := strings.TrimSpace(options.RunID)
+			if runID == "" {
+				return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --run-id requires a value")}
+			}
+			req.Target = &agentcomposev2.ExecRequest_RunId{RunId: runID}
+		case "--agent":
+			agentName := strings.TrimSpace(options.AgentName)
+			if agentName == "" {
+				return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --agent requires a value")}
+			}
+			req.Target = &agentcomposev2.ExecRequest_Selector{Selector: &agentcomposev2.ExecSessionSelector{
+				ProjectId:   projectID,
+				ProjectName: projectName,
+				AgentName:   agentName,
+			}}
+		}
+		return req, nil
+	}
+	sandbox := strings.TrimSpace(args[0])
+	if sandbox == "" {
+		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires non-empty sandbox")}
+	}
+	commandArgs := append([]string(nil), args[1:]...)
+	if len(commandArgs) == 0 {
+		commandArgs = []string{"sh"}
+	}
+	return &agentcomposev2.ExecRequest{
+		Command: &agentcomposev2.ExecCommand{Command: commandArgs[0], Args: append([]string(nil), commandArgs[1:]...)},
+		Cwd:     strings.TrimSpace(options.Cwd),
+		Target:  &agentcomposev2.ExecRequest_SessionId{SessionId: sandbox},
+	}, nil
 }
 
 func runComposeImageListCommand(cmd *cobra.Command, cli cliOptions, options composeImageListOptions) error {
