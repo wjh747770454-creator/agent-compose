@@ -2,13 +2,13 @@
 
 本文档描述当前代码里的外部事件入口和 topic event 分发模型，并记录需要补齐的目标设计。对应实现主要在：
 
-- HTTP handler：`pkg/agentcompose/webhook.go`
-- topic event model：`pkg/agentcompose/topic_event_model.go`
-- SQLite store：`pkg/agentcompose/topic_event_store.go`
-- dispatcher：`pkg/agentcompose/event_dispatcher.go`
-- loader bus：`pkg/agentcompose/loader_bus.go`
-- loader JS API：`pkg/agentcompose/loader_engine.go`
-- loader run host：`pkg/agentcompose/loader_manager.go`
+- HTTP handler：`pkg/agentcompose/service/webhook.go`
+- topic event model：`pkg/model/`
+- SQLite store：`pkg/agentcompose/service/topic_event_store.go`
+- dispatcher：`pkg/agentcompose/service/event_dispatcher.go`
+- loader bus：`pkg/bus/`
+- loader JS API：`pkg/loaders/engine.go`
+- loader run host：`pkg/agentcompose/service/loader_manager.go`
 
 ## 总体链路
 

@@ -5,13 +5,16 @@
 当前代码事实以以下入口为准：
 
 - CLI 和 daemon 入口：`cmd/agent-compose/main.go`
-- daemon 服务注册：`pkg/agentcompose/service.go`
+- daemon 服务注册：`pkg/agentcompose/service/service.go`
 - compose 解析和规范化：`pkg/compose/`
 - v1 API：`proto/agentcompose/v1/agentcompose.proto`
 - v2 API：`proto/agentcompose/v2/agentcompose.proto`
-- project/run 持久化：`pkg/agentcompose/project_schema.go`、`pkg/agentcompose/project_store.go`
-- Jupyter 代理：`pkg/agentcompose/proxy.go`
-- loader 运行时和调度：`pkg/agentcompose/loader_engine.go`、`pkg/agentcompose/loader_manager.go`
+- project/run 持久化：`pkg/agentcompose/service/project_schema.go`、`pkg/agentcompose/service/project_store.go`
+- Jupyter 代理：`pkg/agentcompose/service/proxy.go`
+- loader 运行时和调度：`pkg/loaders/engine.go`、`pkg/agentcompose/service/loader_manager.go`
+- 领域模型：`pkg/model/`
+- project/run owner helper：`pkg/projects/`、`pkg/runs/`
+- session/execution owner helper：`pkg/sessions/`、`pkg/execution/`
 - 独立前端镜像：`nginx/Dockerfile`
 
 ## 架构目标
@@ -235,7 +238,7 @@ v2 `ProjectSpec` 是 CLI 和 API 客户端传递 compose 当前态的 wire shape
 - file workspace 辅助路由：`/api/agent-compose/workspaces/:workspaceID/files`、`upload`、`download`
 - Jupyter proxy：`<JupyterProxyBasePath>/:sessionID` 和 `<JupyterProxyBasePath>/:sessionID/*`。当前配置默认 base path 是 `/jupyter`。
 
-Jupyter proxy 的实现位于 `pkg/agentcompose/proxy.go`。`GetSessionProxy` 只返回 proxy 入口信息；真实 HTTP/WebSocket 转发由上述 HTTP routes 完成。session 创建时会把 `Config.JupyterProxyBasePath` 写入 `proxyPath`，当前代码默认值是 `/jupyter`。
+Jupyter proxy 的实现位于 `pkg/agentcompose/service/proxy.go`。`GetSessionProxy` 只返回 proxy 入口信息；真实 HTTP/WebSocket 转发由上述 HTTP routes 完成。session 创建时会把 `Config.JupyterProxyBasePath` 写入 `proxyPath`，当前代码默认值是 `/jupyter`。
 
 ## Project 应用和调度
 

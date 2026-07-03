@@ -6,7 +6,8 @@ This repo contains the agent-compose session control plane. It creates, resumes,
 
 Main entrypoints:
 - `cmd/agent-compose/main.go`: starts the HTTP/Connect service, registers agent-compose routes, and handles graceful shutdown.
-- `pkg/agentcompose/`: session lifecycle, runtime drivers, Jupyter proxying, loader scheduling, config persistence, LLM client, and service setup.
+- `pkg/agentcompose/service/`: service graph setup, Connect handlers, HTTP routes, Jupyter proxying, runtime orchestration, and background managers.
+- Owner packages under `pkg/` contain shared domain code: `model`, `storage`, `loaders`, `projects`, `runs`, `sessions`, `execution`, `llms`, `events`, `images`, `dashboard`, `capabilities`, and `bus`.
 - `proto/agentcompose/v1/`: agent-compose Connect API definitions and generated Go code.
 - `proto/agentcompose/v2/`: agent-compose v2 Connect API definitions and generated Go code.
 - `proto/health/v1/`: health Connect API definitions and generated Go code.
@@ -24,7 +25,7 @@ Main entrypoints:
 - calls `agentcompose.Setup(di)` to register Connect handlers and background managers
 - gracefully shuts down Echo on process exit
 
-`pkg/agentcompose.Setup(di)` owns the agent-compose service graph and background runtime components.
+`pkg/agentcompose/service.Setup(di)` owns the agent-compose service graph and background runtime components.
 
 ## Core Services
 
@@ -36,7 +37,7 @@ The active Connect services are:
 - `ConfigService`
 - `LoaderService`
 
-Jupyter proxying is handled by HTTP routes in `pkg/agentcompose/proxy.go` under `/agent-compose/session/<session_id>`.
+Jupyter proxying is handled by HTTP routes in `pkg/agentcompose/service/proxy.go` under `/agent-compose/session/<session_id>`.
 
 ## Runtime Drivers
 
@@ -64,9 +65,9 @@ Daemon LLM client (`LLMService`, `scheduler.llm`, SDK `runtime.llm`):
 
 ## Persistence
 
-Session metadata, notebook cells, event history, runtime state, and proxy state are stored under `SESSION_ROOT`.
+Session metadata, notebook cells, event history, runtime state, and proxy state are stored under `SESSION_ROOT`. Session file storage helpers live in `pkg/storage/sessionstore`.
 
-Global environment variables, workspace configs, loader definitions, loader triggers, loader runs, and loader events are stored in `DATA_ROOT/data.db`.
+Global environment variables, workspace configs, loader definitions, loader triggers, loader runs, and loader events are stored in `DATA_ROOT/data.db`. SQLite config-store helpers live in `pkg/storage/configstore` and service-specific store methods remain under `pkg/agentcompose/service`.
 
 ## Docker Deployment
 
