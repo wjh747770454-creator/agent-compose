@@ -2109,6 +2109,21 @@ agents:
 		t.Fatalf("exec JSON = %#v", decoded)
 	}
 
+	commandAliasOut, commandAliasErr, _, commandAliasCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--json", "--session-id", "session-exec", "--command", "printf alias")
+	if commandAliasCode != 0 {
+		t.Fatalf("exec --session-id --command code/stderr = %d / %q", commandAliasCode, commandAliasErr)
+	}
+	if !strings.Contains(commandAliasErr, "agent-compose exec --session-id is deprecated") || strings.Contains(commandAliasOut, "deprecated") {
+		t.Fatalf("exec --session-id --command json stdout/stderr = %q / %q", commandAliasOut, commandAliasErr)
+	}
+	var commandAliasDecoded composeExecOutput
+	if err := json.Unmarshal([]byte(commandAliasOut), &commandAliasDecoded); err != nil {
+		t.Fatalf("exec --session-id --command JSON decode failed: %v\n%s", err, commandAliasOut)
+	}
+	if commandAliasDecoded.ExecID != "exec-cli" || !commandAliasDecoded.Success {
+		t.Fatalf("exec --session-id --command JSON = %#v", commandAliasDecoded)
+	}
+
 	ambiguousOut, ambiguousErr, _, ambiguousCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "sandbox-command", "--command", "pwd", "whoami")
 	if ambiguousCode != exitCodeUsage {
 		t.Fatalf("exec --command ambiguous exit code = %d, want %d", ambiguousCode, exitCodeUsage)

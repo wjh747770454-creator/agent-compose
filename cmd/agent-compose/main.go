@@ -587,7 +587,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	execCmd := &cobra.Command{
 		Use:   "exec <sandbox> [command] [args...]",
 		Short: "Execute a command in a running sandbox",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  composeExecArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeExecCommand(cmd, options, execOptions, args)
 		},
@@ -1270,6 +1270,13 @@ func normalizeComposeLogsOptions(cmd *cobra.Command, options composeLogsOptions,
 		return options, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("logs --tail must be -1 or greater")}
 	}
 	return options, nil
+}
+
+func composeExecArgs(cmd *cobra.Command, args []string) error {
+	if cmd.Flags().Changed("session-id") || cmd.Flags().Changed("run-id") || cmd.Flags().Changed("agent") {
+		return nil
+	}
+	return cobra.MinimumNArgs(1)(cmd, args)
 }
 
 func runComposePSCommand(cmd *cobra.Command, cli cliOptions, options composePSOptions) error {
