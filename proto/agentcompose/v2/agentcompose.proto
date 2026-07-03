@@ -33,6 +33,10 @@ service ImageService {
   rpc RemoveImage(RemoveImageRequest) returns (RemoveImageResponse);
 }
 
+service SandboxService {
+  rpc RemoveSandbox(RemoveSandboxRequest) returns (RemoveSandboxResponse);
+}
+
 enum ProjectValidationSeverity {
   PROJECT_VALIDATION_SEVERITY_UNSPECIFIED = 0;
   PROJECT_VALIDATION_SEVERITY_WARNING = 1;
@@ -397,6 +401,17 @@ message StopRunRequest {
 message StopRunResponse {
   RunDetail run = 1;
   bool stop_requested = 2;
+}
+
+message RemoveSandboxRequest {
+  string sandbox_id = 1;
+  bool force = 2;
+}
+
+message RemoveSandboxResponse {
+  string sandbox_id = 1;
+  bool stopped = 2;
+  bool removed = 3;
 }
 
 message RunSummary {

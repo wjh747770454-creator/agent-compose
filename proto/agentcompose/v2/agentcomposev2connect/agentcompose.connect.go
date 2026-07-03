@@ -29,6 +29,8 @@ const (
 	ExecServiceName = "agentcompose.v2.ExecService"
 	// ImageServiceName is the fully-qualified name of the ImageService service.
 	ImageServiceName = "agentcompose.v2.ImageService"
+	// SandboxServiceName is the fully-qualified name of the SandboxService service.
+	SandboxServiceName = "agentcompose.v2.SandboxService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -82,6 +84,9 @@ const (
 	// ImageServiceRemoveImageProcedure is the fully-qualified name of the ImageService's RemoveImage
 	// RPC.
 	ImageServiceRemoveImageProcedure = "/agentcompose.v2.ImageService/RemoveImage"
+	// SandboxServiceRemoveSandboxProcedure is the fully-qualified name of the SandboxService's
+	// RemoveSandbox RPC.
+	SandboxServiceRemoveSandboxProcedure = "/agentcompose.v2.SandboxService/RemoveSandbox"
 )
 
 // ProjectServiceClient is a client for the agentcompose.v2.ProjectService service.
@@ -700,4 +705,74 @@ func (UnimplementedImageServiceHandler) InspectImage(context.Context, *connect.R
 
 func (UnimplementedImageServiceHandler) RemoveImage(context.Context, *connect.Request[v2.RemoveImageRequest]) (*connect.Response[v2.RemoveImageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.ImageService.RemoveImage is not implemented"))
+}
+
+// SandboxServiceClient is a client for the agentcompose.v2.SandboxService service.
+type SandboxServiceClient interface {
+	RemoveSandbox(context.Context, *connect.Request[v2.RemoveSandboxRequest]) (*connect.Response[v2.RemoveSandboxResponse], error)
+}
+
+// NewSandboxServiceClient constructs a client for the agentcompose.v2.SandboxService service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewSandboxServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) SandboxServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	sandboxServiceMethods := v2.File_proto_agentcompose_v2_agentcompose_proto.Services().ByName("SandboxService").Methods()
+	return &sandboxServiceClient{
+		removeSandbox: connect.NewClient[v2.RemoveSandboxRequest, v2.RemoveSandboxResponse](
+			httpClient,
+			baseURL+SandboxServiceRemoveSandboxProcedure,
+			connect.WithSchema(sandboxServiceMethods.ByName("RemoveSandbox")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// sandboxServiceClient implements SandboxServiceClient.
+type sandboxServiceClient struct {
+	removeSandbox *connect.Client[v2.RemoveSandboxRequest, v2.RemoveSandboxResponse]
+}
+
+// RemoveSandbox calls agentcompose.v2.SandboxService.RemoveSandbox.
+func (c *sandboxServiceClient) RemoveSandbox(ctx context.Context, req *connect.Request[v2.RemoveSandboxRequest]) (*connect.Response[v2.RemoveSandboxResponse], error) {
+	return c.removeSandbox.CallUnary(ctx, req)
+}
+
+// SandboxServiceHandler is an implementation of the agentcompose.v2.SandboxService service.
+type SandboxServiceHandler interface {
+	RemoveSandbox(context.Context, *connect.Request[v2.RemoveSandboxRequest]) (*connect.Response[v2.RemoveSandboxResponse], error)
+}
+
+// NewSandboxServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewSandboxServiceHandler(svc SandboxServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	sandboxServiceMethods := v2.File_proto_agentcompose_v2_agentcompose_proto.Services().ByName("SandboxService").Methods()
+	sandboxServiceRemoveSandboxHandler := connect.NewUnaryHandler(
+		SandboxServiceRemoveSandboxProcedure,
+		svc.RemoveSandbox,
+		connect.WithSchema(sandboxServiceMethods.ByName("RemoveSandbox")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/agentcompose.v2.SandboxService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case SandboxServiceRemoveSandboxProcedure:
+			sandboxServiceRemoveSandboxHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedSandboxServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedSandboxServiceHandler struct{}
+
+func (UnimplementedSandboxServiceHandler) RemoveSandbox(context.Context, *connect.Request[v2.RemoveSandboxRequest]) (*connect.Response[v2.RemoveSandboxResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.SandboxService.RemoveSandbox is not implemented"))
 }
