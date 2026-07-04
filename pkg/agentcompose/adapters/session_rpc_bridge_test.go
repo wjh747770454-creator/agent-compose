@@ -279,6 +279,10 @@ func TestSessionRuntimeLivenessAndNotifierBranches(t *testing.T) {
 	if alive, checked, err := (sessionRuntimeLiveness{runtimes: fakeRuntimeProvider{runtime: fakeSessionRuntime{}}}).IsSessionAlive(ctx, "boxlite", session, domain.VMState{}); err != nil || alive || checked {
 		t.Fatalf("runtime without liveness = alive %v checked %v err %v", alive, checked, err)
 	}
+	runtime := driverRuntimeAdapter{runtime: fakeDriverRuntime{alive: true}}
+	if alive, checked, err := (sessionRuntimeLiveness{runtimes: fakeRuntimeProvider{runtime: runtime}}).IsSessionAlive(ctx, "microsandbox", session, domain.VMState{}); err != nil || !alive || !checked {
+		t.Fatalf("driver runtime adapter liveness = alive %v checked %v err %v", alive, checked, err)
+	}
 
 	streams := sessions.NewStreamBrokerForTest()
 	events, unsubscribe := streams.Subscribe("session-1")

@@ -103,3 +103,13 @@ func (r driverRuntimeAdapter) ExecStream(ctx context.Context, session *domain.Se
 	result, err := r.runtime.ExecStream(ctx, execution.ToDriverSession(session), execution.ToDriverVMState(vmState), execution.ToDriverExecSpec(spec), driverStream)
 	return execution.FromDriverExecResult(result), err
 }
+
+func (r driverRuntimeAdapter) IsSessionAlive(ctx context.Context, session *domain.Session, vmState domain.VMState) (bool, error) {
+	aliveRuntime, ok := r.runtime.(interface {
+		IsSessionAlive(context.Context, *driverpkg.Session, driverpkg.VMState) (bool, error)
+	})
+	if !ok {
+		return false, fmt.Errorf("runtime does not support session liveness checks")
+	}
+	return aliveRuntime.IsSessionAlive(ctx, execution.ToDriverSession(session), execution.ToDriverVMState(vmState))
+}

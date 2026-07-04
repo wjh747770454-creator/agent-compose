@@ -32,6 +32,30 @@ func (r fakeSessionRuntime) ExecStream(context.Context, *domain.Session, domain.
 	return domain.ExecResult{}, nil
 }
 
+type fakeDriverRuntime struct {
+	alive bool
+}
+
+func (r fakeDriverRuntime) EnsureSession(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ProxyState) (driverpkg.SessionVMInfo, error) {
+	return driverpkg.SessionVMInfo{}, nil
+}
+
+func (r fakeDriverRuntime) StopSession(context.Context, *driverpkg.Session, driverpkg.VMState) (bool, error) {
+	return false, nil
+}
+
+func (r fakeDriverRuntime) Exec(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ExecSpec) (driverpkg.ExecResult, error) {
+	return driverpkg.ExecResult{}, nil
+}
+
+func (r fakeDriverRuntime) ExecStream(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ExecSpec, driverpkg.ExecStreamWriter) (driverpkg.ExecResult, error) {
+	return driverpkg.ExecResult{}, nil
+}
+
+func (r fakeDriverRuntime) IsSessionAlive(context.Context, *driverpkg.Session, driverpkg.VMState) (bool, error) {
+	return r.alive, nil
+}
+
 type fakeRuntimeProvider struct {
 	runtime BoxRuntime
 }
