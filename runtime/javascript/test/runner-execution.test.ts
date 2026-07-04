@@ -9,6 +9,7 @@ const codexState = vi.hoisted(() => ({
   constructorOptions: [] as Array<Record<string, unknown>>,
   events: [] as Array<Record<string, unknown>>,
   threadId: "thread-new",
+  resumedThreadId: "thread-resumed",
   resumed: "",
   runStreamedCalls: [] as Array<{ input: unknown; options: unknown }>,
 }));
@@ -33,7 +34,7 @@ vi.mock("@openai/codex-sdk", () => ({
       resumeThread: vi.fn((sessionId: string) => {
         codexState.resumed = sessionId;
         return {
-          id: "thread-resumed",
+          id: codexState.resumedThreadId,
           runStreamed: vi.fn(async (input: unknown, options: unknown) => {
             codexState.runStreamedCalls.push({ input, options });
             return {
@@ -118,9 +119,19 @@ describe("runner execution", () => {
     codexState.constructorOptions = [];
     codexState.events = [];
     codexState.threadId = "thread-new";
+    codexState.resumedThreadId = "thread-resumed";
     codexState.resumed = "";
     codexState.runStreamedCalls = [];
+    claudeState.messages = [];
+    claudeState.closed = false;
     claudeState.hangAfterMessages = false;
+    claudeState.queryCalls = [];
+    childProcessState.stdoutLines = [];
+    childProcessState.stderrChunks = [];
+    childProcessState.exitCode = 0;
+    childProcessState.error = null;
+    childProcessState.spawnCalls = [];
+    childProcessState.spawnSyncStdout = "";
   });
 
   it("runs a new Codex thread and persists the resulting session", async () => {
@@ -196,6 +207,28 @@ describe("runner execution", () => {
     });
   });
 
+  it("reuses the same Codex provider session file across two prompt turns", async () => {
+    const { CodexRunner } = await import("../src/runners/codex.js");
+    await withTempSession(async (root) => {
+      codexState.threadId = "codex-session";
+      codexState.resumedThreadId = "codex-session";
+      codexState.events = [{ type: "item.completed", item: { id: "a1", type: "agent_message", text: "first" } }];
+      const stdio = captureStdio();
+      try {
+        await new CodexRunner(runnerOptions(root)).runPrompt("first prompt");
+        codexState.events = [{ type: "item.completed", item: { id: "a2", type: "agent_message", text: "second" } }];
+        await new CodexRunner(runnerOptions(root)).runPrompt("second prompt");
+      } finally {
+        stdio.restore();
+      }
+
+      const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "codex.json"), "utf8"));
+      expect(stored.sessionId).toBe("codex-session");
+      expect(codexState.resumed).toBe("codex-session");
+      expect(codexState.runStreamedCalls.map((call) => call.input)).toEqual(["first prompt", "second prompt"]);
+    });
+  });
+
   it("runs Claude stream messages, persists state, and closes the stream", async () => {
     const { ClaudeRunner } = await import("../src/runners/claude.js");
     await withTempSession(async (root) => {
@@ -228,6 +261,32 @@ describe("runner execution", () => {
       expect(claudeState.closed).toBe(true);
       const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "claude.json"), "utf8"));
       expect(stored.sessionId).toBe("claude-session");
+    });
+  });
+
+  it("reuses the same Claude provider session file across two prompt turns", async () => {
+    const { ClaudeRunner } = await import("../src/runners/claude.js");
+    await withTempSession(async (root) => {
+      claudeState.closed = false;
+      claudeState.messages = [
+        { type: "stream_event", session_id: "claude-session", event: { type: "content_block_delta", delta: { type: "text_delta", text: "first" } } },
+        { type: "result", subtype: "success", stop_reason: "end_turn", result: "first" },
+      ];
+      const stdio = captureStdio();
+      try {
+        await new ClaudeRunner(runnerOptions(root, "", "claude")).runPrompt("first prompt");
+        claudeState.messages = [
+          { type: "stream_event", session_id: "claude-session", event: { type: "content_block_delta", delta: { type: "text_delta", text: "second" } } },
+          { type: "result", subtype: "success", stop_reason: "end_turn", result: "second" },
+        ];
+        await new ClaudeRunner(runnerOptions(root, "", "claude")).runPrompt("second prompt");
+      } finally {
+        stdio.restore();
+      }
+
+      const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "claude.json"), "utf8"));
+      expect(stored.sessionId).toBe("claude-session");
+      expect(claudeState.queryCalls.at(1)?.options).toMatchObject({ resume: "claude-session" });
     });
   });
 
@@ -415,6 +474,35 @@ describe("runner execution", () => {
       } finally {
         stdio.restore();
       }
+    });
+  });
+
+  it("reuses the same OpenCode provider session file across two prompt turns", async () => {
+    const { OpenCodeRunner } = await import("../src/runners/opencode.js");
+    await withTempSession(async (root) => {
+      childProcessState.exitCode = 0;
+      childProcessState.error = null;
+      childProcessState.stderrChunks = [];
+      childProcessState.stdoutLines = [
+        JSON.stringify({ type: "message", sessionID: "opencode-session", message: { content: "first" } }),
+        JSON.stringify({ type: "result", response: "first" }),
+      ];
+      const stdio = captureStdio();
+      try {
+        await new OpenCodeRunner(runnerOptions(root, "", "opencode")).runPrompt("first prompt");
+        childProcessState.stdoutLines = [
+          JSON.stringify({ type: "message", sessionID: "opencode-session", message: { content: "second" } }),
+          JSON.stringify({ type: "result", response: "second" }),
+        ];
+        await new OpenCodeRunner(runnerOptions(root, "", "opencode")).runPrompt("second prompt");
+      } finally {
+        stdio.restore();
+      }
+
+      const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "opencode.json"), "utf8"));
+      expect(stored.sessionId).toBe("opencode-session");
+      expect(childProcessState.spawnCalls.at(1)?.args).toContain("--session");
+      expect(childProcessState.spawnCalls.at(1)?.args).toContain("opencode-session");
     });
   });
 

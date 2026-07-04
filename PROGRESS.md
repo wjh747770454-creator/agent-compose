@@ -782,7 +782,7 @@
     - prompt provider conversation 复用和 Gemini unsupported 语义留给 9.2；本阶段只保证 CLI REPL 的 session/sandbox 复用与每轮独立 run。
   - 下一目标：9.2。
 
-- [ ] 9.2 实现 prompt REPL provider 复用和 unsupported 语义
+- [x] 9.2 实现 prompt REPL provider 复用和 unsupported 语义
 
   依赖：9.1。
 
@@ -813,10 +813,21 @@
   - Gemini 明确 unsupported。
 
   完成总结：
-  - 状态：待完成。
-  - 变更：待记录。
-  - 验证：待记录。
-  - 审计与例外：待记录。
+  - 状态：已完成。
+  - 变更：
+    - CLI `run -i --prompt` 在进入 REPL 前按 normalized agent provider 校验支持范围；空 provider 继续按默认 Codex 处理。
+    - Codex、Claude/cc、OpenCode 允许 prompt REPL；Gemini 和其他不在支持集内的 provider 返回 unsupported，并提示支持 provider 为 `codex, claude, opencode`。
+    - JS runtime 补充 Codex、Claude、OpenCode 连续两轮 prompt 测试，断言第二轮读取并复用 `state/agents/providers/<provider>.json` 中的 provider session id。
+    - runner execution 测试隔离补强，重置 mocked Codex/Claude/child process 状态，避免跨用例调用记录污染。
+  - 验证：
+    - `go test ./cmd/agent-compose -run 'TestCLIRunInteractivePromptProviderUnsupported|TestIntegrationCLIRunInteractivePromptDefaultProviderAllowed|TestIntegrationCLIRunInteractivePromptReusesSession'`：通过。
+    - `cd runtime/javascript && TEST_SHAPE=unit npm run test:unit`：通过，10 个 test files / 107 个 tests。
+    - `go test ./cmd/agent-compose ./pkg/agentcompose/api ./pkg/agentcompose/app ./pkg/runs`：通过。
+    - `task build`：通过。
+  - 审计与例外：
+    - 本阶段没有新增 proto 字段或重新生成 proto-client。
+    - 本阶段没有新增 durable conversation resource；conversation 复用仍由 guest runtime 的 provider session state file 承载。
+    - Gemini runtime runner 仍保留一次性 prompt 能力；只有 CLI prompt REPL 明确返回 unsupported。
   - 下一目标：9.3。
 
 - [ ] 9.3 实现 command REPL 复用 workspace 和 JS runtime transcript

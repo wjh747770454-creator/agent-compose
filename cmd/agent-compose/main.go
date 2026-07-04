@@ -1158,6 +1158,11 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		return err
 	}
 	agentName := strings.TrimSpace(args[0])
+	if normalizedOptions.Interactive && promptFlagChanged {
+		if err := validateInteractivePromptProvider(normalized, agentName); err != nil {
+			return err
+		}
+	}
 	if !normalizedOptions.Interactive && cmd.Flags().Changed("command") && commandText == "" {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --command requires a non-empty command")}
 	}
@@ -1491,6 +1496,40 @@ func normalizeOptionalRunModeValue(value string) string {
 		return ""
 	}
 	return strings.TrimSpace(value)
+}
+
+func validateInteractivePromptProvider(project *compose.NormalizedProjectSpec, agentName string) error {
+	provider := "codex"
+	for _, agent := range project.Agents {
+		if strings.TrimSpace(agent.Name) == strings.TrimSpace(agentName) {
+			if normalized := normalizeInteractivePromptProvider(agent.Provider); normalized != "" {
+				provider = normalized
+			}
+			break
+		}
+	}
+	switch provider {
+	case "codex", "claude", "opencode":
+		return nil
+	default:
+		return commandExitError{
+			Code: exitCodeUnsupported,
+			Err:  fmt.Errorf("run -i --prompt is unsupported for provider %s; supported providers: codex, claude, opencode", provider),
+		}
+	}
+}
+
+func normalizeInteractivePromptProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "":
+		return ""
+	case "claude-code", "claude_code":
+		return "claude"
+	case "open-code", "open_code":
+		return "opencode"
+	default:
+		return strings.ToLower(strings.TrimSpace(provider))
+	}
 }
 
 func runComposeLogsCommand(cmd *cobra.Command, cli cliOptions, options composeLogsOptions, args []string) error {

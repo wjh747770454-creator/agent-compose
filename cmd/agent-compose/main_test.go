@@ -1627,6 +1627,61 @@ agents:
 	}
 }
 
+func TestCLIRunInteractivePromptProviderUnsupported(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-interactive-gemini
+agents:
+  reviewer:
+    provider: gemini
+`)
+	stdout, stderr, _, exitCode := executeCLICommandWithInput("hello\n", "run", "--file", composePath, "reviewer", "-i", "--prompt")
+	if exitCode != exitCodeUnsupported {
+		t.Fatalf("run -i --prompt gemini exit code = %d, want %d; stderr=%q", exitCode, exitCodeUnsupported, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "unsupported for provider gemini") || !strings.Contains(stderr, "codex, claude, opencode") {
+		t.Fatalf("run -i --prompt gemini stdout/stderr = %q / %q", stdout, stderr)
+	}
+}
+
+func TestIntegrationCLIRunInteractivePromptDefaultProviderAllowed(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-interactive-default-provider
+agents:
+  reviewer: {}
+`)
+	var sawRun bool
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				sawRun = true
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-default-provider",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-default-provider",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SessionId: "sandbox-default-provider",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), req.Msg.GetRunId(), "reviewer", "sandbox-default-provider", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommandWithInput("", "run", "--host", server.URL, "--file", composePath, "reviewer", "-i", "--prompt", "hello")
+	if exitCode != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("run -i --prompt default provider code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+	}
+	if !sawRun {
+		t.Fatal("RunAgentStream was not called")
+	}
+}
+
 func TestIntegrationCLIRunTrigger(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-run-trigger
