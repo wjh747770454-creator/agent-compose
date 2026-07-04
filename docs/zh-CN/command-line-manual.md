@@ -150,7 +150,7 @@ agent-compose run <agent> --sandbox <sandbox> --prompt "..."
 | --- | --- | --- |
 | trigger | `run <agent> --trigger <trigger>` | 运行配置中定义的 trigger。 |
 | prompt | `run <agent> --prompt "..."` | 向 agent provider 发送 prompt。 |
-| command | `run <agent> --command "..."` | 启动或复用该 agent 的 sandbox 后执行 `bash -lc` 命令；命令 stdout/stderr 会实时输出，并写入该次 run 记录。 |
+| command | `run <agent> --command "..."` | 启动或复用该 agent 的 sandbox 后通过 guest `agent-compose-runtime exec` 执行 shell 命令；命令 transcript 会实时输出，并写入该次 run 记录。 |
 | prompt REPL | `run <agent> -i --prompt` | 从 stdin 逐行读取 prompt；每条非空输入创建一次 run，并复用同一个 sandbox。 |
 | command REPL | `run <agent> -i --command` | 从 stdin 逐行读取 command；每条非空输入创建一次 run，并复用同一个 sandbox。 |
 | sandbox 复用 | `run <agent> --sandbox <sandbox> --prompt "..."` | 在指定 sandbox 中继续运行。 |
@@ -195,6 +195,8 @@ agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the note
 - REPL 中空行不会创建 run；输入 `/exit` 或 Ctrl+D 退出。
 - REPL 不是 TTY/PTY 或运行中 stdin 透传；每条输入都是一次独立 `RunAgentStream`，但复用同一个 sandbox。
 - detached run 可通过输出的 `agent-compose logs --run-id <run-id> --follow` 命令观察输出，也可继续使用 `stop`/`logs` 操作该 run。
+- `run -i --prompt` 仅支持可复用 provider session 的 Codex、Claude/cc 和 OpenCode；Gemini 当前会返回 unsupported。
+- `StopRun` 会请求 daemon 内当前活动 run 取消；daemon 重启后遗留的 running/pending run 会在启动 reconcile 中标记为 failed，并带 `daemon interrupted` 错误。
 
 ## `ps`：查看 sandbox
 
@@ -335,6 +337,8 @@ agent-compose exec sandbox_123 --command "git status --short"
 agent-compose exec sandbox_123 --cwd /workspace --command "pwd"
 ```
 
+`exec` 与 `run --command` 使用同一套 guest `agent-compose-runtime exec` command transcript。文本模式会实时输出 transcript；`--json` 不输出流式 transcript，只输出最终 result。`exec` 不创建 `ProjectRun`；需要 run 审计、`logs` 或 run artifact 时使用 `run --command`。
+
 ## `logs`：查看日志
 
 查看当前 project 下 agent、sandbox 或 run 的日志。默认展示 project 下所有 agent 日志。
@@ -412,7 +416,7 @@ agent-compose inspect image <image>
 
 - `images`：列出镜像。
 - `pull`：拉取当前 project 中所有 agent 引用的镜像。
-- `pull <image>`：拉取指定镜像。
+- `pull <image>`：拉取指定镜像；如果本地 OCI image backend/store 已存在该镜像，会直接成功并输出 skipped/already exists warning，不会再次 pull。
 - `rmi <image>`：删除镜像。
 - `inspect image <image>`：查看镜像详情。
 

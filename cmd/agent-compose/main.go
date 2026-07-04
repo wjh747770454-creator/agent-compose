@@ -30,6 +30,7 @@ import (
 	"github.com/samber/do/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/proto"
 
 	"agent-compose/pkg/fxgo/echofn"
 	"agent-compose/pkg/fxgo/restful"
@@ -1379,7 +1380,7 @@ func runInteractiveComposeRun(cmd *cobra.Command, options composeRunOptions, pro
 		if input == "/exit" {
 			return nil
 		}
-		runReq := *baseReq
+		runReq := proto.Clone(baseReq).(*agentcomposev2.RunAgentRequest)
 		runReq.SessionId = sessionID
 		runReq.ClientRequestId = manualRunClientRequestID(projectName, baseReq.GetAgentName(), input)
 		if promptMode {
@@ -1389,7 +1390,7 @@ func runInteractiveComposeRun(cmd *cobra.Command, options composeRunOptions, pro
 			runReq.Prompt = ""
 			runReq.Command = input
 		}
-		detail, completed, warnings, runErr := runComposeRunStreamAndDetail(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, baseReq.GetProjectId(), projectName, &runReq, false)
+		detail, completed, warnings, runErr := runComposeRunStreamAndDetail(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, baseReq.GetProjectId(), projectName, runReq, false)
 		if runErr != nil {
 			return runErr
 		}

@@ -2,6 +2,8 @@
 
 本文面向研发和评审，记录 agent-compose CLI 从当前代码状态迁移到目标命令体系的实施计划。最终用户文档见 [命令行使用手册](../command-line-manual.md)。
 
+> 状态说明：本文是历史实施设计，部分“暂缓”或“后续设计”条目已被 `cli-runtime-capabilities` 阶段实现覆盖。以根目录 `PROGRESS.md` 和 [命令行使用手册](../command-line-manual.md) 为当前权威：`stats`、`run -d/--detach`、`run -i/--interactive`、`--jupyter`、`--jupyter-expose`、command transcript、日志 follow 和 `run --rm` service 端清理已经落地；`build`、`push`、`up` 前台 attach/detach、TTY/PTY/WebSocket TTY、terminal resize、Connect bidi stdin、运行中 stdin 透传和 `ExecInteractive` 仍不在本轮范围内。
+
 ## 当前代码依据
 
 当前 CLI 入口集中在 [cmd/agent-compose/main.go](/data/src/github.com/kingfs/agent-compose/cmd/agent-compose/main.go:405) 的 `newRootCommand`。

@@ -877,7 +877,7 @@
 
 ## 阶段 10：文档和最终质量门禁
 
-- [ ] 10.1 同步 CLI 手册、旧设计说明和完整质量门禁
+- [x] 10.1 同步 CLI 手册、旧设计说明和完整质量门禁
 
   依赖：1.1、2.1、3.1、4.2、5.1、6.2、7.2、8.3、9.3。
 
@@ -913,10 +913,26 @@
   - CI 对应 Go、coverage、runtime、proto-client 任务可通过。
 
   完成总结：
-  - 状态：待完成。
-  - 变更：待记录。
-  - 验证：待记录。
-  - 审计与例外：待记录。
+  - 状态：已完成。
+  - 变更：
+    - 同步 `docs/zh-CN/command-line-manual.md`，补齐 `pull <image>` inspect-and-skip warning、`run --command`/`exec` guest command transcript、`run -i` prompt/command REPL provider 限制、`StopRun` daemon 内取消和 daemon interrupted reconcile 语义。
+    - 校准手册中 `up`、`build`、`push` 和 stdin/TTY 范围：`up` 只 apply 后返回，不提供 attach/detach；`build`/`push` 仍暂缓；REPL 不是 TTY/PTY 或运行中 stdin 透传。
+    - 在 `docs/zh-CN/design/agent-compose-cli-improvement-plan.md` 顶部追加 supersede/status 说明，明确当前权威为 `PROGRESS.md` 和 CLI 手册，并列明已落地能力与仍不在范围内的能力。
+    - 扩展 E2E shape 覆盖：`cmd/agent-compose/main_integration_test.go` 复用既有 CLI workflows，覆盖 list/up/run/logs/ps/stats/stop/resume/rm/exec/inspect/image/pull 等用户路径；`pkg/agentcompose/api/handler_coverage_test.go` 增加 API handler runtime workflow wrapper，覆盖 stats、kernel/agent unary、exec、run stop 和 follow logs 等 public handler 行为。
+    - 修正最终 lint/test 问题：interactive run request 改用 `proto.Clone` 避免复制 proto message state；session RPC bridge 测试对齐 Jupyter 默认关闭后的 proxy error；移除未使用的 `metricUnavailable` helper。
+  - 验证：
+    - `task lint`：通过。
+    - `task build`：通过；包含 Go `agent-compose` binary、v2 proto package build、runtime SDK build 和 packaging check。
+    - `task test`：通过；coverage summary 为 Unit `69.54%`、Integration `64.96%`、E2E `66.22%`、Combined `72.16%`。
+    - `cd proto-client && npm ci && npm run gen && npm run build`：通过。
+    - `cd runtime/javascript && npm ci && TEST_SHAPE=unit npm run test:unit`：通过，10 files / 107 tests。
+    - `cd runtime/agent-compose-runtime-sdk && npm ci && npm test && npm run test:packaging`：通过，5 files / 31 tests，并验证 offline install packaging。
+    - `git diff --check`：通过。
+  - 审计与例外：
+    - `proto/` 和 `proto-client/src/` 无最终 dirty diff；本任务未新增 proto 字段或 generated source 变更。
+    - 未实现 `build`、`push`、`up` attach/detach、TTY/PTY/WebSocket TTY、terminal resize、Connect bidi stdin、运行中 stdin 透传或 `ExecInteractive`。
+    - runtime/javascript `npm ci` 仍报告 2 个 high severity audit warnings，但命令退出成功；本轮未修改该 dependency graph。
+    - subagent 池在本轮已达到 thread limit，未能新增 10.1 sidecar audit；最终审计由主 agent 本地完成。
   - 下一目标：无。
 
 ## 风险和停止条件

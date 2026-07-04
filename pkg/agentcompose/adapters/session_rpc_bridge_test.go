@@ -116,16 +116,8 @@ func TestSessionRPCBridgeCallJSONSupportsSessionRPCs(t *testing.T) {
 		t.Fatalf("listed sessions = %#v, want one session %s", listed.GetSessions(), sessionID)
 	}
 
-	proxyJSON, err := bridge.CallJSON(ctx, "GetSessionProxy", `{"sessionId":"`+sessionID+`"}`)
-	if err != nil {
-		t.Fatalf("GetSessionProxy returned error: %v", err)
-	}
-	var proxy agentcomposev1.SessionProxyResponse
-	if err := protojson.Unmarshal([]byte(proxyJSON), &proxy); err != nil {
-		t.Fatalf("unmarshal proxy response: %v", err)
-	}
-	if proxy.GetSessionId() != sessionID || proxy.GetProxyPath() == "" || proxy.GetNotebookUrl() == "" {
-		t.Fatalf("proxy response session=%q path=%q notebook=%q", proxy.GetSessionId(), proxy.GetProxyPath(), proxy.GetNotebookUrl())
+	if _, err := bridge.CallJSON(ctx, "GetSessionProxy", `{"sessionId":"`+sessionID+`"}`); err == nil || !strings.Contains(err.Error(), "jupyter is not enabled") {
+		t.Fatalf("GetSessionProxy error = %v, want jupyter disabled error", err)
 	}
 
 	stopJSON, err := bridge.CallJSON(ctx, "StopSession", `{"sessionId":"`+sessionID+`"}`)
@@ -154,8 +146,8 @@ func TestSessionRPCBridgeCallJSONSupportsSessionRPCs(t *testing.T) {
 	if got, want := resumed.GetSession().GetSummary().GetVmStatus(), domain.VMStatusRunning; got != want {
 		t.Fatalf("ResumeSession vm status = %q, want %q", got, want)
 	}
-	if len(driver.startCalls) != 3 {
-		t.Fatalf("StartSessionVM call count after resume = %d, want 3", len(driver.startCalls))
+	if len(driver.startCalls) != 2 {
+		t.Fatalf("StartSessionVM call count after resume = %d, want 2", len(driver.startCalls))
 	}
 
 	if _, err := bridge.CallJSON(ctx, "MissingRPC", `{}`); err == nil || !strings.Contains(err.Error(), "unsupported session rpc") {

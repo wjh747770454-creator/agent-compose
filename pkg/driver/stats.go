@@ -16,10 +16,6 @@ func metricUnknown(unit, message string) MetricValue {
 	return MetricValue{Unit: unit, Status: MetricStatusUnknown, Message: message}
 }
 
-func metricUnavailable(unit, message string) MetricValue {
-	return MetricValue{Unit: unit, Status: MetricStatusUnavailable, Message: message}
-}
-
 func float64Ptr(value float64) *float64 {
 	return &value
 }

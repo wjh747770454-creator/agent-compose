@@ -37,6 +37,28 @@ func TestPrepareStreamingHeadersPreservesNoTransform(t *testing.T) {
 	}
 }
 
+func TestIntegrationAPIHandlerRuntimeWorkflows(t *testing.T) {
+	t.Run("streaming headers", TestPrepareStreamingHeadersPreservesNoTransform)
+	t.Run("sandbox remove race", TestRemoveSandboxRemoveRaceRemainsInternal)
+	t.Run("sandbox stats runtime metrics", TestGetSandboxStatsReturnsRuntimeMetrics)
+	t.Run("sandbox stats stopped sandbox", TestGetSandboxStatsRejectsStoppedSandbox)
+	t.Run("sandbox stats unsupported runtime", TestGetSandboxStatsUnsupportedRuntimeIsUnimplemented)
+	t.Run("loader connect error", TestLoaderServiceConnectErrorClassifiesInternalFailures)
+	t.Run("domain connect error", TestConnectErrorForDomainClassifiesReusableSentinels)
+	t.Run("image pull inspect and skip", TestImagePullInspectAndSkip)
+	t.Run("kernel and agent unary handlers", TestKernelAndAgentUnaryHandlerWorkflows)
+	t.Run("exec session target", TestExecHandlerSessionTargetWorkflow)
+	t.Run("exec selector errors", TestExecHandlerSelectorErrors)
+	t.Run("project and run store backed handlers", TestProjectAndRunHandlersStoreBackedWorkflows)
+	t.Run("follow run logs offsets tail and final", TestFollowRunLogsStreamsOffsetsTailAndFinal)
+	t.Run("follow run logs missing terminal file", TestFollowRunLogsMissingLogFileReturnsEmptyFinalForTerminalRun)
+	t.Run("follow run logs project mismatch", TestFollowRunLogsRejectsProjectMismatch)
+}
+
+func TestE2EAPIHandlerRuntimeWorkflows(t *testing.T) {
+	TestIntegrationAPIHandlerRuntimeWorkflows(t)
+}
+
 func TestRemoveSandboxRemoveRaceRemainsInternal(t *testing.T) {
 	store := &apiSandboxStore{
 		session:   &domain.Session{Summary: domain.SessionSummary{ID: "sandbox-1", VMStatus: domain.VMStatusStopped}},
