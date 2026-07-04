@@ -2874,6 +2874,7 @@ type RunAgentRequest struct {
 	OutputSchemaJson string                  `protobuf:"bytes,10,opt,name=output_schema_json,json=outputSchemaJson,proto3" json:"output_schema_json,omitempty"`
 	ClientRequestId  string                  `protobuf:"bytes,11,opt,name=client_request_id,json=clientRequestId,proto3" json:"client_request_id,omitempty"`
 	Command          string                  `protobuf:"bytes,12,opt,name=command,proto3" json:"command,omitempty"`
+	Jupyter          *RunJupyterSpec         `protobuf:"bytes,13,opt,name=jupyter,proto3" json:"jupyter,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -2990,6 +2991,13 @@ func (x *RunAgentRequest) GetCommand() string {
 		return x.Command
 	}
 	return ""
+}
+
+func (x *RunAgentRequest) GetJupyter() *RunJupyterSpec {
+	if x != nil {
+		return x.Jupyter
+	}
+	return nil
 }
 
 type RunAgentResponse struct {
@@ -6010,6 +6018,66 @@ func (x *JupyterSpec) GetGuestPort() uint32 {
 	return 0
 }
 
+type RunJupyterSpec struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	GuestPort     uint32                 `protobuf:"varint,2,opt,name=guest_port,json=guestPort,proto3" json:"guest_port,omitempty"`
+	Expose        bool                   `protobuf:"varint,3,opt,name=expose,proto3" json:"expose,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunJupyterSpec) Reset() {
+	*x = RunJupyterSpec{}
+	mi := &file_proto_agentcompose_v2_agentcompose_proto_msgTypes[73]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunJupyterSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunJupyterSpec) ProtoMessage() {}
+
+func (x *RunJupyterSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agentcompose_v2_agentcompose_proto_msgTypes[73]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunJupyterSpec.ProtoReflect.Descriptor instead.
+func (*RunJupyterSpec) Descriptor() ([]byte, []int) {
+	return file_proto_agentcompose_v2_agentcompose_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *RunJupyterSpec) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *RunJupyterSpec) GetGuestPort() uint32 {
+	if x != nil {
+		return x.GuestPort
+	}
+	return 0
+}
+
+func (x *RunJupyterSpec) GetExpose() bool {
+	if x != nil {
+		return x.Expose
+	}
+	return false
+}
+
 var File_proto_agentcompose_v2_agentcompose_proto protoreflect.FileDescriptor
 
 const file_proto_agentcompose_v2_agentcompose_proto_rawDesc = "" +
@@ -6201,7 +6269,7 @@ const file_proto_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x10DockerDriverSpec\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\"2\n" +
 	"\x16MicrosandboxDriverSpec\x12\x18\n" +
-	"\aprofile\x18\x01 \x01(\tR\aprofile\"\xf0\x03\n" +
+	"\aprofile\x18\x01 \x01(\tR\aprofile\"\xab\x04\n" +
 	"\x0fRunAgentRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
@@ -6219,7 +6287,8 @@ const file_proto_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x12output_schema_json\x18\n" +
 	" \x01(\tR\x10outputSchemaJson\x12*\n" +
 	"\x11client_request_id\x18\v \x01(\tR\x0fclientRequestId\x12\x18\n" +
-	"\acommand\x18\f \x01(\tR\acommand\"\\\n" +
+	"\acommand\x18\f \x01(\tR\acommand\x129\n" +
+	"\ajupyter\x18\r \x01(\v2\x1f.agentcompose.v2.RunJupyterSpecR\ajupyter\"\\\n" +
 	"\x10RunAgentResponse\x12,\n" +
 	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\x12\x1a\n" +
 	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"\x95\x02\n" +
@@ -6510,7 +6579,12 @@ const file_proto_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\vJupyterSpec\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1d\n" +
 	"\n" +
-	"guest_port\x18\x02 \x01(\rR\tguestPort*\x98\x01\n" +
+	"guest_port\x18\x02 \x01(\rR\tguestPort\"a\n" +
+	"\x0eRunJupyterSpec\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1d\n" +
+	"\n" +
+	"guest_port\x18\x02 \x01(\rR\tguestPort\x12\x16\n" +
+	"\x06expose\x18\x03 \x01(\bR\x06expose*\x98\x01\n" +
 	"\x19ProjectValidationSeverity\x12+\n" +
 	"'PROJECT_VALIDATION_SEVERITY_UNSPECIFIED\x10\x00\x12'\n" +
 	"#PROJECT_VALIDATION_SEVERITY_WARNING\x10\x01\x12%\n" +
@@ -6615,7 +6689,7 @@ func file_proto_agentcompose_v2_agentcompose_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_agentcompose_v2_agentcompose_proto_enumTypes = make([]protoimpl.EnumInfo, 12)
-var file_proto_agentcompose_v2_agentcompose_proto_msgTypes = make([]protoimpl.MessageInfo, 74)
+var file_proto_agentcompose_v2_agentcompose_proto_msgTypes = make([]protoimpl.MessageInfo, 75)
 var file_proto_agentcompose_v2_agentcompose_proto_goTypes = []any{
 	(ProjectValidationSeverity)(0),  // 0: agentcompose.v2.ProjectValidationSeverity
 	(ProjectChangeAction)(0),        // 1: agentcompose.v2.ProjectChangeAction
@@ -6702,7 +6776,8 @@ var file_proto_agentcompose_v2_agentcompose_proto_goTypes = []any{
 	(*OCIImageStatus)(nil),          // 82: agentcompose.v2.OCIImageStatus
 	(*ImagePullProgress)(nil),       // 83: agentcompose.v2.ImagePullProgress
 	(*JupyterSpec)(nil),             // 84: agentcompose.v2.JupyterSpec
-	nil,                             // 85: agentcompose.v2.Image.LabelsEntry
+	(*RunJupyterSpec)(nil),          // 85: agentcompose.v2.RunJupyterSpec
+	nil,                             // 86: agentcompose.v2.Image.LabelsEntry
 }
 var file_proto_agentcompose_v2_agentcompose_proto_depIdxs = []int32{
 	33,  // 0: agentcompose.v2.ValidateProjectRequest.spec:type_name -> agentcompose.v2.ProjectSpec
@@ -6749,100 +6824,101 @@ var file_proto_agentcompose_v2_agentcompose_proto_depIdxs = []int32{
 	4,   // 41: agentcompose.v2.RunAgentRequest.source:type_name -> agentcompose.v2.RunSource
 	35,  // 42: agentcompose.v2.RunAgentRequest.env:type_name -> agentcompose.v2.EnvVarSpec
 	6,   // 43: agentcompose.v2.RunAgentRequest.cleanup_policy:type_name -> agentcompose.v2.RunSessionCleanupPolicy
-	63,  // 44: agentcompose.v2.RunAgentResponse.run:type_name -> agentcompose.v2.RunDetail
-	5,   // 45: agentcompose.v2.RunAgentStreamResponse.event_type:type_name -> agentcompose.v2.RunAgentStreamEventType
-	62,  // 46: agentcompose.v2.RunAgentStreamResponse.run:type_name -> agentcompose.v2.RunSummary
-	63,  // 47: agentcompose.v2.GetRunResponse.run:type_name -> agentcompose.v2.RunDetail
-	3,   // 48: agentcompose.v2.ListRunsRequest.status:type_name -> agentcompose.v2.RunStatus
-	4,   // 49: agentcompose.v2.ListRunsRequest.source:type_name -> agentcompose.v2.RunSource
-	62,  // 50: agentcompose.v2.ListRunsResponse.runs:type_name -> agentcompose.v2.RunSummary
-	3,   // 51: agentcompose.v2.RunLogChunk.run_status:type_name -> agentcompose.v2.RunStatus
-	63,  // 52: agentcompose.v2.StopRunResponse.run:type_name -> agentcompose.v2.RunDetail
-	61,  // 53: agentcompose.v2.GetSandboxStatsResponse.stats:type_name -> agentcompose.v2.SandboxStats
-	11,  // 54: agentcompose.v2.MetricValue.status:type_name -> agentcompose.v2.MetricStatus
-	60,  // 55: agentcompose.v2.SandboxStats.cpu_percent:type_name -> agentcompose.v2.MetricValue
-	60,  // 56: agentcompose.v2.SandboxStats.memory_usage_bytes:type_name -> agentcompose.v2.MetricValue
-	60,  // 57: agentcompose.v2.SandboxStats.memory_limit_bytes:type_name -> agentcompose.v2.MetricValue
-	60,  // 58: agentcompose.v2.SandboxStats.memory_percent:type_name -> agentcompose.v2.MetricValue
-	60,  // 59: agentcompose.v2.SandboxStats.network_rx_bytes:type_name -> agentcompose.v2.MetricValue
-	60,  // 60: agentcompose.v2.SandboxStats.network_tx_bytes:type_name -> agentcompose.v2.MetricValue
-	60,  // 61: agentcompose.v2.SandboxStats.block_read_bytes:type_name -> agentcompose.v2.MetricValue
-	60,  // 62: agentcompose.v2.SandboxStats.block_write_bytes:type_name -> agentcompose.v2.MetricValue
-	60,  // 63: agentcompose.v2.SandboxStats.uptime_seconds:type_name -> agentcompose.v2.MetricValue
-	4,   // 64: agentcompose.v2.RunSummary.source:type_name -> agentcompose.v2.RunSource
-	3,   // 65: agentcompose.v2.RunSummary.status:type_name -> agentcompose.v2.RunStatus
-	62,  // 66: agentcompose.v2.RunDetail.summary:type_name -> agentcompose.v2.RunSummary
-	65,  // 67: agentcompose.v2.ExecRequest.selector:type_name -> agentcompose.v2.ExecSessionSelector
-	66,  // 68: agentcompose.v2.ExecRequest.command:type_name -> agentcompose.v2.ExecCommand
-	35,  // 69: agentcompose.v2.ExecRequest.env:type_name -> agentcompose.v2.EnvVarSpec
-	69,  // 70: agentcompose.v2.ExecResponse.result:type_name -> agentcompose.v2.ExecResult
-	7,   // 71: agentcompose.v2.ExecStreamResponse.event_type:type_name -> agentcompose.v2.ExecStreamEventType
-	69,  // 72: agentcompose.v2.ExecStreamResponse.result:type_name -> agentcompose.v2.ExecResult
-	66,  // 73: agentcompose.v2.ExecResult.command:type_name -> agentcompose.v2.ExecCommand
-	8,   // 74: agentcompose.v2.ListImagesRequest.store:type_name -> agentcompose.v2.ImageStoreKind
-	78,  // 75: agentcompose.v2.ListImagesResponse.images:type_name -> agentcompose.v2.Image
-	80,  // 76: agentcompose.v2.ListImagesResponse.store_status:type_name -> agentcompose.v2.ImageStoreStatus
-	8,   // 77: agentcompose.v2.PullImageRequest.store:type_name -> agentcompose.v2.ImageStoreKind
-	79,  // 78: agentcompose.v2.PullImageRequest.platform:type_name -> agentcompose.v2.ImagePlatform
-	78,  // 79: agentcompose.v2.PullImageResponse.image:type_name -> agentcompose.v2.Image
-	10,  // 80: agentcompose.v2.PullImageResponse.status:type_name -> agentcompose.v2.ImageOperationStatus
-	83,  // 81: agentcompose.v2.PullImageResponse.progress:type_name -> agentcompose.v2.ImagePullProgress
-	8,   // 82: agentcompose.v2.InspectImageRequest.store:type_name -> agentcompose.v2.ImageStoreKind
-	78,  // 83: agentcompose.v2.InspectImageResponse.image:type_name -> agentcompose.v2.Image
-	80,  // 84: agentcompose.v2.InspectImageResponse.store_status:type_name -> agentcompose.v2.ImageStoreStatus
-	8,   // 85: agentcompose.v2.RemoveImageRequest.store:type_name -> agentcompose.v2.ImageStoreKind
-	8,   // 86: agentcompose.v2.Image.store:type_name -> agentcompose.v2.ImageStoreKind
-	9,   // 87: agentcompose.v2.Image.availability_status:type_name -> agentcompose.v2.ImageAvailabilityStatus
-	79,  // 88: agentcompose.v2.Image.platform:type_name -> agentcompose.v2.ImagePlatform
-	81,  // 89: agentcompose.v2.Image.docker:type_name -> agentcompose.v2.DockerImageStatus
-	82,  // 90: agentcompose.v2.Image.oci:type_name -> agentcompose.v2.OCIImageStatus
-	85,  // 91: agentcompose.v2.Image.labels:type_name -> agentcompose.v2.Image.LabelsEntry
-	8,   // 92: agentcompose.v2.ImageStoreStatus.store:type_name -> agentcompose.v2.ImageStoreKind
-	12,  // 93: agentcompose.v2.ProjectService.ValidateProject:input_type -> agentcompose.v2.ValidateProjectRequest
-	14,  // 94: agentcompose.v2.ProjectService.ApplyProject:input_type -> agentcompose.v2.ApplyProjectRequest
-	16,  // 95: agentcompose.v2.ProjectService.GetProject:input_type -> agentcompose.v2.GetProjectRequest
-	18,  // 96: agentcompose.v2.ProjectService.ListProjects:input_type -> agentcompose.v2.ListProjectsRequest
-	20,  // 97: agentcompose.v2.ProjectService.RemoveProject:input_type -> agentcompose.v2.RemoveProjectRequest
-	22,  // 98: agentcompose.v2.ProjectService.WatchProject:input_type -> agentcompose.v2.WatchProjectRequest
-	45,  // 99: agentcompose.v2.RunService.RunAgent:input_type -> agentcompose.v2.RunAgentRequest
-	45,  // 100: agentcompose.v2.RunService.RunAgentStream:input_type -> agentcompose.v2.RunAgentRequest
-	48,  // 101: agentcompose.v2.RunService.GetRun:input_type -> agentcompose.v2.GetRunRequest
-	50,  // 102: agentcompose.v2.RunService.ListRuns:input_type -> agentcompose.v2.ListRunsRequest
-	52,  // 103: agentcompose.v2.RunService.FollowRunLogs:input_type -> agentcompose.v2.FollowRunLogsRequest
-	54,  // 104: agentcompose.v2.RunService.StopRun:input_type -> agentcompose.v2.StopRunRequest
-	64,  // 105: agentcompose.v2.ExecService.Exec:input_type -> agentcompose.v2.ExecRequest
-	64,  // 106: agentcompose.v2.ExecService.ExecStream:input_type -> agentcompose.v2.ExecRequest
-	70,  // 107: agentcompose.v2.ImageService.ListImages:input_type -> agentcompose.v2.ListImagesRequest
-	72,  // 108: agentcompose.v2.ImageService.PullImage:input_type -> agentcompose.v2.PullImageRequest
-	74,  // 109: agentcompose.v2.ImageService.InspectImage:input_type -> agentcompose.v2.InspectImageRequest
-	76,  // 110: agentcompose.v2.ImageService.RemoveImage:input_type -> agentcompose.v2.RemoveImageRequest
-	56,  // 111: agentcompose.v2.SandboxService.RemoveSandbox:input_type -> agentcompose.v2.RemoveSandboxRequest
-	58,  // 112: agentcompose.v2.SandboxService.GetSandboxStats:input_type -> agentcompose.v2.GetSandboxStatsRequest
-	13,  // 113: agentcompose.v2.ProjectService.ValidateProject:output_type -> agentcompose.v2.ValidateProjectResponse
-	15,  // 114: agentcompose.v2.ProjectService.ApplyProject:output_type -> agentcompose.v2.ApplyProjectResponse
-	17,  // 115: agentcompose.v2.ProjectService.GetProject:output_type -> agentcompose.v2.GetProjectResponse
-	19,  // 116: agentcompose.v2.ProjectService.ListProjects:output_type -> agentcompose.v2.ListProjectsResponse
-	21,  // 117: agentcompose.v2.ProjectService.RemoveProject:output_type -> agentcompose.v2.RemoveProjectResponse
-	23,  // 118: agentcompose.v2.ProjectService.WatchProject:output_type -> agentcompose.v2.WatchProjectResponse
-	46,  // 119: agentcompose.v2.RunService.RunAgent:output_type -> agentcompose.v2.RunAgentResponse
-	47,  // 120: agentcompose.v2.RunService.RunAgentStream:output_type -> agentcompose.v2.RunAgentStreamResponse
-	49,  // 121: agentcompose.v2.RunService.GetRun:output_type -> agentcompose.v2.GetRunResponse
-	51,  // 122: agentcompose.v2.RunService.ListRuns:output_type -> agentcompose.v2.ListRunsResponse
-	53,  // 123: agentcompose.v2.RunService.FollowRunLogs:output_type -> agentcompose.v2.RunLogChunk
-	55,  // 124: agentcompose.v2.RunService.StopRun:output_type -> agentcompose.v2.StopRunResponse
-	67,  // 125: agentcompose.v2.ExecService.Exec:output_type -> agentcompose.v2.ExecResponse
-	68,  // 126: agentcompose.v2.ExecService.ExecStream:output_type -> agentcompose.v2.ExecStreamResponse
-	71,  // 127: agentcompose.v2.ImageService.ListImages:output_type -> agentcompose.v2.ListImagesResponse
-	73,  // 128: agentcompose.v2.ImageService.PullImage:output_type -> agentcompose.v2.PullImageResponse
-	75,  // 129: agentcompose.v2.ImageService.InspectImage:output_type -> agentcompose.v2.InspectImageResponse
-	77,  // 130: agentcompose.v2.ImageService.RemoveImage:output_type -> agentcompose.v2.RemoveImageResponse
-	57,  // 131: agentcompose.v2.SandboxService.RemoveSandbox:output_type -> agentcompose.v2.RemoveSandboxResponse
-	59,  // 132: agentcompose.v2.SandboxService.GetSandboxStats:output_type -> agentcompose.v2.GetSandboxStatsResponse
-	113, // [113:133] is the sub-list for method output_type
-	93,  // [93:113] is the sub-list for method input_type
-	93,  // [93:93] is the sub-list for extension type_name
-	93,  // [93:93] is the sub-list for extension extendee
-	0,   // [0:93] is the sub-list for field type_name
+	85,  // 44: agentcompose.v2.RunAgentRequest.jupyter:type_name -> agentcompose.v2.RunJupyterSpec
+	63,  // 45: agentcompose.v2.RunAgentResponse.run:type_name -> agentcompose.v2.RunDetail
+	5,   // 46: agentcompose.v2.RunAgentStreamResponse.event_type:type_name -> agentcompose.v2.RunAgentStreamEventType
+	62,  // 47: agentcompose.v2.RunAgentStreamResponse.run:type_name -> agentcompose.v2.RunSummary
+	63,  // 48: agentcompose.v2.GetRunResponse.run:type_name -> agentcompose.v2.RunDetail
+	3,   // 49: agentcompose.v2.ListRunsRequest.status:type_name -> agentcompose.v2.RunStatus
+	4,   // 50: agentcompose.v2.ListRunsRequest.source:type_name -> agentcompose.v2.RunSource
+	62,  // 51: agentcompose.v2.ListRunsResponse.runs:type_name -> agentcompose.v2.RunSummary
+	3,   // 52: agentcompose.v2.RunLogChunk.run_status:type_name -> agentcompose.v2.RunStatus
+	63,  // 53: agentcompose.v2.StopRunResponse.run:type_name -> agentcompose.v2.RunDetail
+	61,  // 54: agentcompose.v2.GetSandboxStatsResponse.stats:type_name -> agentcompose.v2.SandboxStats
+	11,  // 55: agentcompose.v2.MetricValue.status:type_name -> agentcompose.v2.MetricStatus
+	60,  // 56: agentcompose.v2.SandboxStats.cpu_percent:type_name -> agentcompose.v2.MetricValue
+	60,  // 57: agentcompose.v2.SandboxStats.memory_usage_bytes:type_name -> agentcompose.v2.MetricValue
+	60,  // 58: agentcompose.v2.SandboxStats.memory_limit_bytes:type_name -> agentcompose.v2.MetricValue
+	60,  // 59: agentcompose.v2.SandboxStats.memory_percent:type_name -> agentcompose.v2.MetricValue
+	60,  // 60: agentcompose.v2.SandboxStats.network_rx_bytes:type_name -> agentcompose.v2.MetricValue
+	60,  // 61: agentcompose.v2.SandboxStats.network_tx_bytes:type_name -> agentcompose.v2.MetricValue
+	60,  // 62: agentcompose.v2.SandboxStats.block_read_bytes:type_name -> agentcompose.v2.MetricValue
+	60,  // 63: agentcompose.v2.SandboxStats.block_write_bytes:type_name -> agentcompose.v2.MetricValue
+	60,  // 64: agentcompose.v2.SandboxStats.uptime_seconds:type_name -> agentcompose.v2.MetricValue
+	4,   // 65: agentcompose.v2.RunSummary.source:type_name -> agentcompose.v2.RunSource
+	3,   // 66: agentcompose.v2.RunSummary.status:type_name -> agentcompose.v2.RunStatus
+	62,  // 67: agentcompose.v2.RunDetail.summary:type_name -> agentcompose.v2.RunSummary
+	65,  // 68: agentcompose.v2.ExecRequest.selector:type_name -> agentcompose.v2.ExecSessionSelector
+	66,  // 69: agentcompose.v2.ExecRequest.command:type_name -> agentcompose.v2.ExecCommand
+	35,  // 70: agentcompose.v2.ExecRequest.env:type_name -> agentcompose.v2.EnvVarSpec
+	69,  // 71: agentcompose.v2.ExecResponse.result:type_name -> agentcompose.v2.ExecResult
+	7,   // 72: agentcompose.v2.ExecStreamResponse.event_type:type_name -> agentcompose.v2.ExecStreamEventType
+	69,  // 73: agentcompose.v2.ExecStreamResponse.result:type_name -> agentcompose.v2.ExecResult
+	66,  // 74: agentcompose.v2.ExecResult.command:type_name -> agentcompose.v2.ExecCommand
+	8,   // 75: agentcompose.v2.ListImagesRequest.store:type_name -> agentcompose.v2.ImageStoreKind
+	78,  // 76: agentcompose.v2.ListImagesResponse.images:type_name -> agentcompose.v2.Image
+	80,  // 77: agentcompose.v2.ListImagesResponse.store_status:type_name -> agentcompose.v2.ImageStoreStatus
+	8,   // 78: agentcompose.v2.PullImageRequest.store:type_name -> agentcompose.v2.ImageStoreKind
+	79,  // 79: agentcompose.v2.PullImageRequest.platform:type_name -> agentcompose.v2.ImagePlatform
+	78,  // 80: agentcompose.v2.PullImageResponse.image:type_name -> agentcompose.v2.Image
+	10,  // 81: agentcompose.v2.PullImageResponse.status:type_name -> agentcompose.v2.ImageOperationStatus
+	83,  // 82: agentcompose.v2.PullImageResponse.progress:type_name -> agentcompose.v2.ImagePullProgress
+	8,   // 83: agentcompose.v2.InspectImageRequest.store:type_name -> agentcompose.v2.ImageStoreKind
+	78,  // 84: agentcompose.v2.InspectImageResponse.image:type_name -> agentcompose.v2.Image
+	80,  // 85: agentcompose.v2.InspectImageResponse.store_status:type_name -> agentcompose.v2.ImageStoreStatus
+	8,   // 86: agentcompose.v2.RemoveImageRequest.store:type_name -> agentcompose.v2.ImageStoreKind
+	8,   // 87: agentcompose.v2.Image.store:type_name -> agentcompose.v2.ImageStoreKind
+	9,   // 88: agentcompose.v2.Image.availability_status:type_name -> agentcompose.v2.ImageAvailabilityStatus
+	79,  // 89: agentcompose.v2.Image.platform:type_name -> agentcompose.v2.ImagePlatform
+	81,  // 90: agentcompose.v2.Image.docker:type_name -> agentcompose.v2.DockerImageStatus
+	82,  // 91: agentcompose.v2.Image.oci:type_name -> agentcompose.v2.OCIImageStatus
+	86,  // 92: agentcompose.v2.Image.labels:type_name -> agentcompose.v2.Image.LabelsEntry
+	8,   // 93: agentcompose.v2.ImageStoreStatus.store:type_name -> agentcompose.v2.ImageStoreKind
+	12,  // 94: agentcompose.v2.ProjectService.ValidateProject:input_type -> agentcompose.v2.ValidateProjectRequest
+	14,  // 95: agentcompose.v2.ProjectService.ApplyProject:input_type -> agentcompose.v2.ApplyProjectRequest
+	16,  // 96: agentcompose.v2.ProjectService.GetProject:input_type -> agentcompose.v2.GetProjectRequest
+	18,  // 97: agentcompose.v2.ProjectService.ListProjects:input_type -> agentcompose.v2.ListProjectsRequest
+	20,  // 98: agentcompose.v2.ProjectService.RemoveProject:input_type -> agentcompose.v2.RemoveProjectRequest
+	22,  // 99: agentcompose.v2.ProjectService.WatchProject:input_type -> agentcompose.v2.WatchProjectRequest
+	45,  // 100: agentcompose.v2.RunService.RunAgent:input_type -> agentcompose.v2.RunAgentRequest
+	45,  // 101: agentcompose.v2.RunService.RunAgentStream:input_type -> agentcompose.v2.RunAgentRequest
+	48,  // 102: agentcompose.v2.RunService.GetRun:input_type -> agentcompose.v2.GetRunRequest
+	50,  // 103: agentcompose.v2.RunService.ListRuns:input_type -> agentcompose.v2.ListRunsRequest
+	52,  // 104: agentcompose.v2.RunService.FollowRunLogs:input_type -> agentcompose.v2.FollowRunLogsRequest
+	54,  // 105: agentcompose.v2.RunService.StopRun:input_type -> agentcompose.v2.StopRunRequest
+	64,  // 106: agentcompose.v2.ExecService.Exec:input_type -> agentcompose.v2.ExecRequest
+	64,  // 107: agentcompose.v2.ExecService.ExecStream:input_type -> agentcompose.v2.ExecRequest
+	70,  // 108: agentcompose.v2.ImageService.ListImages:input_type -> agentcompose.v2.ListImagesRequest
+	72,  // 109: agentcompose.v2.ImageService.PullImage:input_type -> agentcompose.v2.PullImageRequest
+	74,  // 110: agentcompose.v2.ImageService.InspectImage:input_type -> agentcompose.v2.InspectImageRequest
+	76,  // 111: agentcompose.v2.ImageService.RemoveImage:input_type -> agentcompose.v2.RemoveImageRequest
+	56,  // 112: agentcompose.v2.SandboxService.RemoveSandbox:input_type -> agentcompose.v2.RemoveSandboxRequest
+	58,  // 113: agentcompose.v2.SandboxService.GetSandboxStats:input_type -> agentcompose.v2.GetSandboxStatsRequest
+	13,  // 114: agentcompose.v2.ProjectService.ValidateProject:output_type -> agentcompose.v2.ValidateProjectResponse
+	15,  // 115: agentcompose.v2.ProjectService.ApplyProject:output_type -> agentcompose.v2.ApplyProjectResponse
+	17,  // 116: agentcompose.v2.ProjectService.GetProject:output_type -> agentcompose.v2.GetProjectResponse
+	19,  // 117: agentcompose.v2.ProjectService.ListProjects:output_type -> agentcompose.v2.ListProjectsResponse
+	21,  // 118: agentcompose.v2.ProjectService.RemoveProject:output_type -> agentcompose.v2.RemoveProjectResponse
+	23,  // 119: agentcompose.v2.ProjectService.WatchProject:output_type -> agentcompose.v2.WatchProjectResponse
+	46,  // 120: agentcompose.v2.RunService.RunAgent:output_type -> agentcompose.v2.RunAgentResponse
+	47,  // 121: agentcompose.v2.RunService.RunAgentStream:output_type -> agentcompose.v2.RunAgentStreamResponse
+	49,  // 122: agentcompose.v2.RunService.GetRun:output_type -> agentcompose.v2.GetRunResponse
+	51,  // 123: agentcompose.v2.RunService.ListRuns:output_type -> agentcompose.v2.ListRunsResponse
+	53,  // 124: agentcompose.v2.RunService.FollowRunLogs:output_type -> agentcompose.v2.RunLogChunk
+	55,  // 125: agentcompose.v2.RunService.StopRun:output_type -> agentcompose.v2.StopRunResponse
+	67,  // 126: agentcompose.v2.ExecService.Exec:output_type -> agentcompose.v2.ExecResponse
+	68,  // 127: agentcompose.v2.ExecService.ExecStream:output_type -> agentcompose.v2.ExecStreamResponse
+	71,  // 128: agentcompose.v2.ImageService.ListImages:output_type -> agentcompose.v2.ListImagesResponse
+	73,  // 129: agentcompose.v2.ImageService.PullImage:output_type -> agentcompose.v2.PullImageResponse
+	75,  // 130: agentcompose.v2.ImageService.InspectImage:output_type -> agentcompose.v2.InspectImageResponse
+	77,  // 131: agentcompose.v2.ImageService.RemoveImage:output_type -> agentcompose.v2.RemoveImageResponse
+	57,  // 132: agentcompose.v2.SandboxService.RemoveSandbox:output_type -> agentcompose.v2.RemoveSandboxResponse
+	59,  // 133: agentcompose.v2.SandboxService.GetSandboxStats:output_type -> agentcompose.v2.GetSandboxStatsResponse
+	114, // [114:134] is the sub-list for method output_type
+	94,  // [94:114] is the sub-list for method input_type
+	94,  // [94:94] is the sub-list for extension type_name
+	94,  // [94:94] is the sub-list for extension extendee
+	0,   // [0:94] is the sub-list for field type_name
 }
 
 func init() { file_proto_agentcompose_v2_agentcompose_proto_init() }
@@ -6862,7 +6938,7 @@ func file_proto_agentcompose_v2_agentcompose_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_agentcompose_v2_agentcompose_proto_rawDesc), len(file_proto_agentcompose_v2_agentcompose_proto_rawDesc)),
 			NumEnums:      12,
-			NumMessages:   74,
+			NumMessages:   75,
 			NumExtensions: 0,
 			NumServices:   5,
 		},

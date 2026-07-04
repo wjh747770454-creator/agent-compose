@@ -1156,6 +1156,49 @@ agents:
 	}
 }
 
+func TestIntegrationCLIRunSendsJupyterExpose(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-jupyter
+agents:
+  reviewer:
+    provider: codex
+`)
+	var sawRequest bool
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				sawRequest = true
+				if req.Msg.GetJupyter() == nil || !req.Msg.GetJupyter().GetEnabled() || !req.Msg.GetJupyter().GetExpose() {
+					t.Fatalf("RunAgentStream jupyter request = %#v", req.Msg)
+				}
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-jupyter",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-jupyter",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SessionId: "sandbox-jupyter",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-jupyter", "reviewer", "sandbox-jupyter", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "reviewer", "--jupyter-expose", "--prompt", "inspect")
+	if exitCode != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("run --jupyter-expose code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+	}
+	if !sawRequest {
+		t.Fatal("RunAgentStream was not called")
+	}
+}
+
 func TestIntegrationCLIRunCommandSendsCommandAndStreamsOutput(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-run-command

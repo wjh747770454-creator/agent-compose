@@ -7,6 +7,7 @@ import (
 	domain "agent-compose/pkg/model"
 	"agent-compose/pkg/workspaces"
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -69,6 +70,9 @@ func (l Lifecycle) ReconcileRuntimeState(ctx context.Context, session *domain.Se
 	if err != nil {
 		return nil, err
 	}
+	if !proxyState.Enabled {
+		return session, nil
+	}
 	if JupyterTargetReachable(proxyState, 250*time.Millisecond) {
 		return session, nil
 	}
@@ -121,6 +125,9 @@ func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*dom
 	proxyState, err := l.Store.GetProxyState(session.Summary.ID)
 	if err != nil {
 		return nil, domain.ProxyState{}, err
+	}
+	if !proxyState.Enabled {
+		return nil, domain.ProxyState{}, fmt.Errorf("jupyter is not enabled for session %s", session.Summary.ID)
 	}
 	if session.Summary.VMStatus == domain.VMStatusRunning && JupyterTargetReachable(proxyState, 1500*time.Millisecond) {
 		return session, proxyState, nil

@@ -35,11 +35,17 @@ func jupyterBaseURL(proxyState ProxyState) string {
 }
 
 func jupyterDirectURL(proxyState ProxyState) string {
+	if !jupyterEnabled(proxyState) {
+		return ""
+	}
 	baseURL := strings.TrimRight(jupyterBaseURL(proxyState), "/")
 	return fmt.Sprintf("http://127.0.0.1:%d%s/lab?token=%s", proxyState.HostPort, baseURL, url.QueryEscape(proxyState.Token))
 }
 
 func jupyterConnectTarget(proxyState ProxyState) (host string, port int) {
+	if !jupyterEnabled(proxyState) {
+		return "127.0.0.1", 0
+	}
 	guestHost := strings.TrimSpace(proxyState.GuestHost)
 	if guestHost != "" && guestHost != "127.0.0.1" && proxyState.GuestPort > 0 {
 		return guestHost, proxyState.GuestPort
@@ -58,6 +64,10 @@ func jupyterConnectAddress(proxyState ProxyState) string {
 
 func JupyterConnectAddress(proxyState ProxyState) string {
 	return jupyterConnectAddress(proxyState)
+}
+
+func jupyterEnabled(proxyState ProxyState) bool {
+	return proxyState.Enabled && proxyState.GuestPort > 0
 }
 
 func jupyterKernelspecsURL(proxyState ProxyState) string {
@@ -162,7 +172,7 @@ func jupyterLaunchCommand(config *appconfig.Config, proxyState ProxyState, backg
 	appconfig.ApplyDefaultGuestPaths(config)
 	logDir := jupyterLogDir(config)
 	logPath := jupyterLogPath(config)
-	launch := "python3 -m jupyterlab --ServerApp.ip=0.0.0.0 --ServerApp.port=" + fmt.Sprintf("%d", config.JupyterGuestPort) +
+	launch := "python3 -m jupyterlab --ServerApp.ip=0.0.0.0 --ServerApp.port=" + fmt.Sprintf("%d", proxyState.GuestPort) +
 		" --ServerApp.root_dir=\"" + config.GuestWorkspacePath + "\"" +
 		" --ServerApp.base_url=\"" + strings.TrimRight(jupyterBaseURL(proxyState), "/") + "\"" +
 		" --IdentityProvider.token=\"" + proxyState.Token + "\"" +

@@ -124,6 +124,7 @@ func runAgentRequestFromProto(msg *agentcomposev2.RunAgentRequest) runs.RunAgent
 		SessionID:        msg.GetSessionId(),
 		OutputSchemaJSON: msg.GetOutputSchemaJson(),
 		CleanupPolicy:    msg.GetCleanupPolicy(),
+		Jupyter:          msg.GetJupyter(),
 	}
 }
 

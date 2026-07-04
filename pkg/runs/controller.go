@@ -127,6 +127,7 @@ type RunAgentRequest struct {
 	SessionID        string
 	OutputSchemaJSON string
 	CleanupPolicy    agentcomposev2.RunSessionCleanupPolicy
+	Jupyter          *agentcomposev2.RunJupyterSpec
 }
 
 type StreamSink struct {
@@ -183,7 +184,7 @@ func (c *Controller) RunProjectAgent(ctx context.Context, req RunAgentRequest, s
 		run = withRunWarnings(run, warnings)
 		return run, err, nil
 	}
-	sessionResult, err := c.ensureProjectRunSession(ctx, run, prepared, req.SessionID)
+	sessionResult, err := c.ensureProjectRunSession(ctx, run, prepared, req)
 	if err != nil {
 		transition := TransitionRequest{
 			RunID: run.RunID,
@@ -503,19 +504,46 @@ func (c *Controller) prepareProjectRun(ctx context.Context, run domain.ProjectRu
 	return PrepareProjectRun(ctx, c.configDB, projectRunWorkspaceResolver{controller: c}, run, requestEnv)
 }
 
-func (c *Controller) ensureProjectRunSession(ctx context.Context, run domain.ProjectRunRecord, prepared Preparation, requestedSessionID string) (SessionResult, error) {
+func resolveRunJupyterOptions(base sessionstore.CreateSessionOptions, override *agentcomposev2.RunJupyterSpec) (sessionstore.CreateSessionOptions, error) {
+	result := base
+	if override == nil {
+		return result, nil
+	}
+	if override.GetGuestPort() > 65535 {
+		return sessionstore.CreateSessionOptions{}, fmt.Errorf("%w: jupyter guest_port must be 0 or a valid TCP port between 1 and 65535", ErrInvalidRequest)
+	}
+	if override.GetEnabled() || override.GetExpose() {
+		result.JupyterEnabled = true
+	}
+	if override.GetGuestPort() != 0 {
+		result.JupyterGuestPort = int(override.GetGuestPort())
+	}
+	if override.GetExpose() {
+		result.JupyterExpose = true
+	}
+	return result, nil
+}
+
+func (c *Controller) ensureProjectRunSession(ctx context.Context, run domain.ProjectRunRecord, prepared Preparation, req RunAgentRequest) (SessionResult, error) {
 	if c == nil || c.config == nil || c.store == nil || c.driver == nil {
 		return SessionResult{}, fmt.Errorf("session runtime dependencies are required")
+	}
+	jupyterOptions, err := resolveRunJupyterOptions(prepared.Jupyter, req.Jupyter)
+	if err != nil {
+		return SessionResult{}, err
 	}
 	tags := SessionTags(run)
 	capabilityVars, capabilityTags := capabilities.BuildGatewaySessionVars(capabilities.ProxyTarget(c.cap), prepared.CapsetIDs)
 	tags = append(tags, capabilityTags...)
-	if sessionID := strings.TrimSpace(requestedSessionID); sessionID != "" {
+	if sessionID := strings.TrimSpace(req.SessionID); sessionID != "" {
 		session, err := c.store.GetSession(ctx, sessionID)
 		if err != nil {
 			return SessionResult{}, fmt.Errorf("load session %s: %w", sessionID, err)
 		}
 		if session.Summary.VMStatus != domain.VMStatusRunning {
+			if err := c.applyJupyterOptionsToSession(session.Summary.ID, jupyterOptions); err != nil {
+				return SessionResult{Session: session}, err
+			}
 			driver, err := driverpkg.ResolveSessionRuntimeDriver(session.Summary.Driver, c.config.RuntimeDriver)
 			if err != nil {
 				return SessionResult{}, err
@@ -555,7 +583,7 @@ func (c *Controller) ensureProjectRunSession(ctx context.Context, run domain.Pro
 	}); err != nil {
 		return SessionResult{}, err
 	}
-	session, err := c.store.CreateSession(ctx,
+	session, err := c.store.CreateSessionWithOptions(ctx,
 		SessionTitle(run),
 		"",
 		driver,
@@ -565,6 +593,7 @@ func (c *Controller) ensureProjectRunSession(ctx context.Context, run domain.Pro
 		prepared.Workspace,
 		domain.MergeEnvItems(prepared.EnvItems, capabilityVars),
 		tags,
+		jupyterOptions,
 	)
 	if err != nil {
 		return SessionResult{}, err
@@ -574,6 +603,40 @@ func (c *Controller) ensureProjectRunSession(ctx context.Context, run domain.Pro
 		return SessionResult{Session: session, Created: true}, err
 	}
 	return SessionResult{Session: session, Created: true}, nil
+}
+
+func (c *Controller) applyJupyterOptionsToSession(sessionID string, options sessionstore.CreateSessionOptions) error {
+	proxyState, err := c.store.GetProxyState(sessionID)
+	if err != nil {
+		return err
+	}
+	if !options.JupyterEnabled && !options.JupyterExpose && options.JupyterGuestPort == 0 {
+		return nil
+	}
+	proxyState.Enabled = proxyState.Enabled || options.JupyterEnabled || options.JupyterExpose
+	proxyState.Exposed = proxyState.Exposed || options.JupyterExpose
+	if options.JupyterGuestPort != 0 {
+		proxyState.GuestPort = options.JupyterGuestPort
+	}
+	if proxyState.Enabled {
+		if proxyState.GuestPort == 0 {
+			proxyState.GuestPort = c.config.JupyterGuestPort
+		}
+		if proxyState.HostPort == 0 {
+			hostPort, err := c.store.AllocateHostPortForJupyter()
+			if err != nil {
+				return err
+			}
+			proxyState.HostPort = hostPort
+		}
+		if strings.TrimSpace(proxyState.Token) == "" {
+			proxyState.Token = uuid.NewString()
+		}
+		if strings.TrimSpace(proxyState.JupyterURL) == "" {
+			proxyState.JupyterURL = proxyState.ProxyPath
+		}
+	}
+	return c.store.SaveProxyState(sessionID, proxyState)
 }
 
 func (c *Controller) startProjectRunSession(ctx context.Context, session *domain.Session, eventType, eventMessage string) error {

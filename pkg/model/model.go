@@ -309,6 +309,8 @@ type ProxyState struct {
 	GuestPort  int    `json:"guest_port"`
 	JupyterURL string `json:"jupyter_url,omitempty"`
 	Token      string `json:"token,omitempty"`
+	Enabled    bool   `json:"enabled,omitempty"`
+	Exposed    bool   `json:"exposed,omitempty"`
 }
 
 type SessionVMInfo struct {

@@ -435,7 +435,7 @@
     - YAML 和 proto API 均不提供 host bind、host port 或 expose 字段；后续 6.2 的访问路径仍必须走 agent-compose proxy。
   - 下一目标：6.2。
 
-- [ ] 6.2 将 Jupyter resolved config 接入 run/session/proxy 和 CLI expose intent
+- [x] 6.2 将 Jupyter resolved config 接入 run/session/proxy 和 CLI expose intent
 
   依赖：6.1。
 
@@ -467,10 +467,26 @@
   - Docker、BoxLite、MicroSandbox runtime 创建请求均不包含 Jupyter host port mapping。
 
   完成总结：
-  - 状态：待完成。
-  - 变更：待记录。
-  - 验证：待记录。
-  - 审计与例外：待记录。
+  - 状态：已完成。
+  - 变更：
+    - v2 `RunAgentRequest` 新增 `RunJupyterSpec jupyter`，支持 run-level `enabled`、`guest_port`、`expose` intent，并重新生成 Go proto/Connect Go 与 `proto-client` TS 产物。
+    - CLI `run` 新增 `--jupyter` 和 `--jupyter-expose`；`--jupyter-expose` 会携带 expose intent 并同时启用 Jupyter，不新增 runtime-driver 级外部发布参数。
+    - `runs.Controller` 从 project revision 中解析 agent YAML Jupyter 默认值，并叠加 run request 覆盖；scheduler/trigger-created run 通过同一 pipeline 使用 YAML 默认配置。
+    - `sessionstore` 新增 `CreateSessionWithOptions` 和 Jupyter session options；默认 `CreateSession` 不启用 Jupyter，enabled 时写入 proxy state 的 guest port、token、proxy path 和 expose marker。
+    - `ProxyState`/driver proxy state 增加 `enabled`、`exposed`；disabled session 不启动或探测 Jupyter，proxy route对 disabled session 返回明确错误。
+    - Docker、BoxLite、MicroSandbox driver 仅在 resolved Jupyter enabled 时启动 Jupyter/等待 ready；disabled session 使用 idle runtime，不创建 Jupyter port config。
+    - CLI 手册更新 `--jupyter`、`--jupyter-expose` 说明，并移除其“暂未稳定发布”的说明。
+    - 补充 CLI request mapping、app request adapter、session/proxy state、runs controller YAML+CLI resolution 和 driver proxy state 覆盖。
+  - 验证：
+    - `protoc -I . --go_out=. --go_opt=module=agent-compose --connect-go_out=. --connect-go_opt=module=agent-compose proto/agentcompose/v2/agentcompose.proto`：通过。
+    - `cd proto-client && npm ci && npm run gen && npm run build`：通过。
+    - `go test ./cmd/agent-compose ./pkg/agentcompose/api ./pkg/agentcompose/app ./pkg/runs ./pkg/storage/sessionstore ./pkg/config ./pkg/driver ./pkg/sessions`：通过。
+    - `task build`：通过。
+  - 审计与例外：
+    - 本阶段没有实现 `--no-jupyter`；当前只支持 YAML default 和 CLI/API enable/expose 的正向覆盖。
+    - `--jupyter-expose` 只写入 agent-compose proxy expose intent，不传递用户可控 host bind/host port 给 runtime driver。
+    - Docker、BoxLite、MicroSandbox 在 Jupyter enabled 时仍保留既有 daemon-internal loopback/SDK connector，用于 agent-compose proxy 访问 guest Jupyter；该端口不来自 YAML/CLI host bind，不作为外部暴露语义。
+    - 已避免在 disabled 默认路径启动 Jupyter 或创建 Jupyter driver port config；后续如要完全移除 driver-local connector，需要先替换 daemon 到 guest 的 proxy reachability 机制。
   - 下一目标：7.1。
 
 ## 阶段 7：`run -d/--detach` 和统一取消

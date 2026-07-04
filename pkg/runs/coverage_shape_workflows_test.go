@@ -271,8 +271,74 @@ func TestRunsControllerRunProjectAgentSuccessWorkflow(t *testing.T) {
 	if data, err := os.ReadFile(run.LogsPath); err != nil || string(data) != "chunk" {
 		t.Fatalf("agent run logs_path content = %q err=%v", string(data), err)
 	}
+	proxyState, err := store.GetProxyState(run.SessionID)
+	if err != nil {
+		t.Fatalf("GetProxyState returned error: %v", err)
+	}
+	if proxyState.Enabled {
+		t.Fatalf("proxy state = %+v, want default jupyter disabled", proxyState)
+	}
 	if len(bus.events) == 0 || len(dashboard.reasons) == 0 {
 		t.Fatalf("bus=%#v dashboard=%#v", bus.events, dashboard.reasons)
+	}
+}
+
+func TestRunsControllerRunProjectAgentResolvesJupyterConfig(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	config := &appconfig.Config{
+		DataRoot:             root,
+		SessionRoot:          filepath.Join(root, "sessions"),
+		RuntimeDriver:        "boxlite",
+		DefaultImage:         "guest:latest",
+		JupyterGuestPort:     8888,
+		JupyterProxyBasePath: "/jupyter",
+	}
+	store, err := sessionstore.NewWithConfig(config)
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	configDB := &fakeControllerStore{
+		project: domain.ProjectRecord{ID: "project-1", Name: "Project", CurrentRevision: 1},
+		projectAgent: domain.ProjectAgentRecord{
+			ProjectID: "project-1", AgentName: "worker", ManagedAgentID: "agent-1", Driver: "boxlite", Image: "guest:latest",
+		},
+		managed: ManagedAgentDefinition{
+			ID: "agent-1", Enabled: true, Driver: "boxlite", GuestImage: "guest:latest", ManagedProjectID: "project-1", ManagedAgentName: "worker",
+		},
+		revision: domain.ProjectRevisionRecord{
+			ProjectID: "project-1",
+			Revision:  1,
+			SpecJSON:  `{"agents":[{"name":"worker","jupyter":{"enabled":true,"guest_port":9999}}]}`,
+		},
+		agent: domain.AgentDefinition{ID: "agent-1", Provider: "codex", Model: "gpt"},
+		runs:  map[string]domain.ProjectRunRecord{},
+	}
+	controller := NewController(ControllerDependencies{
+		Config:   config,
+		Store:    store,
+		ConfigDB: configDB,
+		Driver:   &fakeControllerDriver{store: store},
+		Executor: &fakeControllerExecutor{},
+		Images:   fakeControllerImages{},
+	})
+	run, execErr, err := controller.RunProjectAgent(ctx, RunAgentRequest{
+		ProjectID:       "project-1",
+		AgentName:       "worker",
+		Prompt:          "do work",
+		Source:          domain.ProjectRunSourceScheduler,
+		ClientRequestID: "request-jupyter",
+		Jupyter:         &agentcomposev2.RunJupyterSpec{Expose: true},
+	}, nil)
+	if err != nil || execErr != nil {
+		t.Fatalf("RunProjectAgent err=%v execErr=%v run=%#v", err, execErr, run)
+	}
+	proxyState, err := store.GetProxyState(run.SessionID)
+	if err != nil {
+		t.Fatalf("GetProxyState returned error: %v", err)
+	}
+	if !proxyState.Enabled || !proxyState.Exposed || proxyState.GuestPort != 9999 || proxyState.HostPort == 0 || proxyState.Token == "" {
+		t.Fatalf("proxy state = %+v, want YAML guest port with CLI expose", proxyState)
 	}
 }
 

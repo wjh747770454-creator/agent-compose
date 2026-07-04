@@ -364,6 +364,7 @@ message RunAgentRequest {
   string output_schema_json = 10;
   string client_request_id = 11;
   string command = 12;
+  RunJupyterSpec jupyter = 13;
 }
 
 message RunAgentResponse {
@@ -680,4 +681,10 @@ message ImagePullProgress {
 message JupyterSpec {
   bool enabled = 1;
   uint32 guest_port = 2;
+}
+
+message RunJupyterSpec {
+  bool enabled = 1;
+  uint32 guest_port = 2;
+  bool expose = 3;
 }

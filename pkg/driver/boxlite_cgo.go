@@ -398,17 +398,19 @@ func (r *cgoBoxRuntime) EnsureSession(ctx context.Context, session *Session, vmS
 		slog.Info("agent-compose boxlite box started", "session_id", session.Summary.ID, "elapsed_ms", time.Since(startedAt).Milliseconds())
 	}
 
-	slog.Info("agent-compose boxlite checking jupyter", "session_id", session.Summary.ID, "host_port", proxyState.HostPort)
-	if err := waitForJupyterProxy(ctx, proxyState); err != nil {
+	if jupyterEnabled(proxyState) {
+		slog.Info("agent-compose boxlite checking jupyter", "session_id", session.Summary.ID, "host_port", proxyState.HostPort)
 		if err := waitForJupyterProxy(ctx, proxyState); err != nil {
-			logText, _ := r.readJupyterLog(ctx, box)
-			if strings.TrimSpace(logText) != "" {
-				return SessionVMInfo{}, fmt.Errorf("%w\nGuest log:\n%s", err, logText)
+			if err := waitForJupyterProxy(ctx, proxyState); err != nil {
+				logText, _ := r.readJupyterLog(ctx, box)
+				if strings.TrimSpace(logText) != "" {
+					return SessionVMInfo{}, fmt.Errorf("%w\nGuest log:\n%s", err, logText)
+				}
+				return SessionVMInfo{}, err
 			}
-			return SessionVMInfo{}, err
 		}
+		slog.Info("agent-compose boxlite jupyter ready", "session_id", session.Summary.ID, "elapsed_ms", time.Since(startedAt).Milliseconds())
 	}
-	slog.Info("agent-compose boxlite jupyter ready", "session_id", session.Summary.ID, "elapsed_ms", time.Since(startedAt).Milliseconds())
 
 	boxID, err := r.boxID(box)
 	if err != nil {
@@ -948,15 +950,19 @@ func (r *cgoBoxRuntime) buildBoxOptions(ctx context.Context, session *Session, v
 		C.free(unsafe.Pointer(guestPathCString))
 	}
 
-	if proxyState.HostPort > 0 && r.config.JupyterGuestPort > 0 {
-		C.boxlite_options_add_port(options, C.int(r.config.JupyterGuestPort), C.int(proxyState.HostPort))
+	if jupyterEnabled(proxyState) && proxyState.HostPort > 0 {
+		C.boxlite_options_add_port(options, C.int(proxyState.GuestPort), C.int(proxyState.HostPort))
 	}
 
 	entrypoint, entrypointLen, freeEntrypoint := cStringArray([]string{"sh", "-lc"})
 	defer freeEntrypoint()
 	C.boxlite_options_set_entrypoint(options, entrypoint, C.int(entrypointLen))
 
-	command, commandLen, freeCommand := cStringArray([]string{jupyterLaunchCommand(r.config, proxyState, false)})
+	commandText := "sleep infinity"
+	if jupyterEnabled(proxyState) {
+		commandText = jupyterLaunchCommand(r.config, proxyState, false)
+	}
+	command, commandLen, freeCommand := cStringArray([]string{commandText})
 	defer freeCommand()
 	C.boxlite_options_set_cmd(options, command, C.int(commandLen))
 

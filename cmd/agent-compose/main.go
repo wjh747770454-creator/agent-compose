@@ -523,6 +523,8 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	runCmd.Flags().StringVar(&runOptions.SessionID, "session-id", "", "Reuse an existing session")
 	runCmd.Flags().BoolVar(&runOptions.KeepRunning, "keep-running", false, "Keep the session runtime running after completion")
 	runCmd.Flags().BoolVar(&runOptions.Remove, "rm", false, "Remove the sandbox after a successful run")
+	runCmd.Flags().BoolVar(&runOptions.Jupyter, "jupyter", false, "Enable Jupyter for this run")
+	runCmd.Flags().BoolVar(&runOptions.JupyterExpose, "jupyter-expose", false, "Mark the Jupyter proxy endpoint for this run as user-accessible")
 
 	logsOptions := composeLogsOptions{}
 	logsCmd := &cobra.Command{
@@ -744,13 +746,15 @@ type composeListProjectsOptions struct {
 }
 
 type composeRunOptions struct {
-	Prompt      string
-	Trigger     string
-	Command     string
-	SessionID   string
-	SandboxID   string
-	KeepRunning bool
-	Remove      bool
+	Prompt        string
+	Trigger       string
+	Command       string
+	SessionID     string
+	SandboxID     string
+	KeepRunning   bool
+	Remove        bool
+	Jupyter       bool
+	JupyterExpose bool
 }
 
 type composeLogsOptions struct {
@@ -1160,6 +1164,13 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		cleanupPolicy = agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION
 	}
 	client := agentcomposev2connect.NewRunServiceClient(newDaemonHTTPClient(clientConfig), clientConfig.BaseURL)
+	var jupyter *agentcomposev2.RunJupyterSpec
+	if normalizedOptions.Jupyter || normalizedOptions.JupyterExpose {
+		jupyter = &agentcomposev2.RunJupyterSpec{
+			Enabled: normalizedOptions.Jupyter || normalizedOptions.JupyterExpose,
+			Expose:  normalizedOptions.JupyterExpose,
+		}
+	}
 	stream, err := client.RunAgentStream(cmd.Context(), connect.NewRequest(&agentcomposev2.RunAgentRequest{
 		ProjectId:       projectID,
 		AgentName:       agentName,
@@ -1170,6 +1181,7 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		TriggerId:       triggerID,
 		CleanupPolicy:   cleanupPolicy,
 		ClientRequestId: manualRunClientRequestID(normalized.Name, agentName, firstNonEmptyString(prompt, triggerID, commandText)),
+		Jupyter:         jupyter,
 	}))
 	if err != nil {
 		return commandExitErrorForConnect(fmt.Errorf("run project %s agent %s: %w", normalized.Name, agentName, err))

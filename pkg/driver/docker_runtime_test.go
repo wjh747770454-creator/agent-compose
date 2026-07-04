@@ -297,10 +297,11 @@ func TestDockerRuntimeSessionProxyStateUsesContainerNameAndGuestPort(t *testing.
 		HostPort:  39000,
 		GuestPort: 9999,
 		Token:     "secret",
+		Enabled:   true,
 	})
 
-	if got.GuestHost != "runtime-ref" || got.GuestPort != 8888 {
-		t.Fatalf("dockerSessionProxyState target = %s:%d, want runtime-ref:8888", got.GuestHost, got.GuestPort)
+	if got.GuestHost != "runtime-ref" || got.GuestPort != 9999 {
+		t.Fatalf("dockerSessionProxyState target = %s:%d, want runtime-ref:9999", got.GuestHost, got.GuestPort)
 	}
 	if got.HostPort != 39000 || got.Token != "secret" {
 		t.Fatalf("dockerSessionProxyState did not preserve host port/token: %+v", got)

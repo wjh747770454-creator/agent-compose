@@ -12,6 +12,7 @@ import (
 	"agent-compose/pkg/compose"
 	"agent-compose/pkg/llms"
 	domain "agent-compose/pkg/model"
+	"agent-compose/pkg/storage/sessionstore"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 )
 
@@ -32,6 +33,7 @@ type Preparation struct {
 	CapsetIDs        []string
 	WorkspaceConfig  *domain.WorkspaceConfig
 	Workspace        *domain.SessionWorkspace
+	Jupyter          sessionstore.CreateSessionOptions
 }
 
 func PrepareProjectRun(ctx context.Context, store PreparationStore, resolver WorkspaceResolver, run domain.ProjectRunRecord, requestEnv []*agentcomposev2.EnvVarSpec) (Preparation, error) {
@@ -74,6 +76,7 @@ func PrepareProjectRun(ctx context.Context, store PreparationStore, resolver Wor
 		EnvItems:         envItems,
 		ProviderEnvItems: providerEnvItems,
 		CapsetIDs:        capabilities.NormalizeCapsetIDs(agent.CapsetIDs),
+		Jupyter:          jupyterOptionsFromAgentSpec(agentSpec),
 	}
 	if resolver == nil {
 		return prepared, nil
@@ -87,6 +90,17 @@ func PrepareProjectRun(ctx context.Context, store PreparationStore, resolver Wor
 		prepared.Workspace = workspaceSnapshot
 	}
 	return prepared, nil
+}
+
+func jupyterOptionsFromAgentSpec(agent *agentcomposev2.AgentSpec) sessionstore.CreateSessionOptions {
+	if agent == nil || agent.GetJupyter() == nil {
+		return sessionstore.CreateSessionOptions{}
+	}
+	jupyter := agent.GetJupyter()
+	return sessionstore.CreateSessionOptions{
+		JupyterEnabled:   jupyter.GetEnabled(),
+		JupyterGuestPort: int(jupyter.GetGuestPort()),
+	}
 }
 
 func DecodeRevisionSpec(raw string) (*agentcomposev2.ProjectSpec, error) {

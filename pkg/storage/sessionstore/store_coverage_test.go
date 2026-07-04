@@ -56,10 +56,34 @@ func TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t *testing.T) {
 	if proxyState.ProxyPath != wantProxyPath {
 		t.Fatalf("proxy state path = %q, want %q", proxyState.ProxyPath, wantProxyPath)
 	}
+	if proxyState.Enabled || proxyState.GuestPort != 0 || proxyState.HostPort != 0 || proxyState.Token != "" {
+		t.Fatalf("default proxy state = %+v, want jupyter disabled without ports/token", proxyState)
+	}
+}
+
+func TestStoreCreateSessionWithJupyterOptions(t *testing.T) {
+	ctx := context.Background()
+	store := newCoverageStore(t)
+	session, err := store.CreateSessionWithOptions(ctx, "Jupyter", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil, CreateSessionOptions{
+		JupyterEnabled:   true,
+		JupyterGuestPort: 9999,
+		JupyterExpose:    true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithOptions returned error: %v", err)
+	}
+	proxyState, err := store.GetProxyState(session.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetProxyState returned error: %v", err)
+	}
+	if !proxyState.Enabled || !proxyState.Exposed || proxyState.GuestPort != 9999 || proxyState.HostPort == 0 || proxyState.Token == "" {
+		t.Fatalf("proxy state = %+v, want enabled/exposed guest port 9999 with host port/token", proxyState)
+	}
 }
 
 func TestIntegrationStoreCreateAndRemoveWorkflows(t *testing.T) {
 	TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t)
+	TestStoreCreateSessionWithJupyterOptions(t)
 	TestRemoveSessionDeletesSessionDirectory(t)
 	TestRemoveSessionRejectsUnsafeIDs(t)
 	TestRemoveSessionMissingDirectoryReturnsError(t)

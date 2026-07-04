@@ -72,6 +72,8 @@ func ToDriverProxyState(state domain.ProxyState) driverpkg.ProxyState {
 		GuestPort:  state.GuestPort,
 		JupyterURL: state.JupyterURL,
 		Token:      state.Token,
+		Enabled:    state.Enabled,
+		Exposed:    state.Exposed,
 	}
 }
 
@@ -101,6 +103,8 @@ func FromDriverProxyState(state driverpkg.ProxyState) domain.ProxyState {
 		GuestPort:  state.GuestPort,
 		JupyterURL: state.JupyterURL,
 		Token:      state.Token,
+		Enabled:    state.Enabled,
+		Exposed:    state.Exposed,
 	}
 }
 

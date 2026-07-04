@@ -107,6 +107,9 @@ func (r *dockerRuntime) EnsureSession(ctx context.Context, session *Session, vmS
 			return SessionVMInfo{}, fmt.Errorf("start docker container %s: %w", containerInfo.ID, err)
 		}
 	}
+	if !jupyterEnabled(proxyState) {
+		return SessionVMInfo{BoxID: containerInfo.ID, ProxyState: &proxyState}, nil
+	}
 
 	readyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	readyErr := waitForJupyterProxy(readyCtx, proxyState)
@@ -288,14 +291,22 @@ func (r *dockerRuntime) getOrCreateContainer(ctx context.Context, dockerClient *
 		return containerapi.InspectResponse{}, false, err
 	}
 	networkMode := r.dockerGuestNetworkMode(ctx, dockerClient)
-	port := nat.Port(strconv.Itoa(r.config.JupyterGuestPort) + "/tcp")
+	var exposedPorts nat.PortSet
+	var portBindings nat.PortMap
+	cmdText := "tail -f /dev/null"
+	if jupyterEnabled(proxyState) {
+		port := nat.Port(strconv.Itoa(proxyState.GuestPort) + "/tcp")
+		exposedPorts = nat.PortSet{port: struct{}{}}
+		portBindings = nat.PortMap{port: []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: strconv.Itoa(proxyState.HostPort)}}}
+		cmdText = jupyterLaunchCommand(r.config, proxyState, false)
+	}
 	containerConfig := &containerapi.Config{
 		Image:        resolveSessionGuestImage(vmState.Image, session.Summary.GuestImage, defaultGuestImageForDriver(r.config, RuntimeDriverDocker)),
 		WorkingDir:   r.config.GuestWorkspacePath,
 		Env:          r.containerEnv(session, proxyState),
 		Entrypoint:   []string{"sh", "-lc"},
-		Cmd:          []string{jupyterLaunchCommand(r.config, proxyState, false)},
-		ExposedPorts: nat.PortSet{port: struct{}{}},
+		Cmd:          []string{cmdText},
+		ExposedPorts: exposedPorts,
 		Labels: map[string]string{
 			dockerSessionLabelID:     session.Summary.ID,
 			dockerSessionLabelDriver: RuntimeDriverDocker,
@@ -303,7 +314,7 @@ func (r *dockerRuntime) getOrCreateContainer(ctx context.Context, dockerClient *
 	}
 	hostConfig := &containerapi.HostConfig{
 		Mounts:       mounts,
-		PortBindings: nat.PortMap{port: []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: strconv.Itoa(proxyState.HostPort)}}},
+		PortBindings: portBindings,
 		AutoRemove:   false,
 		NetworkMode:  networkMode,
 	}
@@ -554,8 +565,12 @@ func (r *dockerRuntime) findContainer(ctx context.Context, dockerClient *client.
 }
 
 func (r *dockerRuntime) dockerSessionProxyState(session *Session, vmState VMState, proxyState ProxyState) ProxyState {
+	if !proxyState.Enabled {
+		proxyState.GuestHost = ""
+		proxyState.GuestPort = 0
+		return proxyState
+	}
 	proxyState.GuestHost = r.containerName(session, vmState)
-	proxyState.GuestPort = r.config.JupyterGuestPort
 	return proxyState
 }
 

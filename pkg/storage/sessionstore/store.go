@@ -73,7 +73,17 @@ func cloneSessionWorkspace(item *SessionWorkspace) *SessionWorkspace {
 	return &copy
 }
 
-func (s *Store) CreateSession(_ context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SessionWorkspace, envItems []SessionEnvVar, tags []SessionTag) (*Session, error) {
+type CreateSessionOptions struct {
+	JupyterEnabled   bool
+	JupyterGuestPort int
+	JupyterExpose    bool
+}
+
+func (s *Store) CreateSession(ctx context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SessionWorkspace, envItems []SessionEnvVar, tags []SessionTag) (*Session, error) {
+	return s.CreateSessionWithOptions(ctx, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource, workspace, envItems, tags, CreateSessionOptions{})
+}
+
+func (s *Store) CreateSessionWithOptions(_ context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SessionWorkspace, envItems []SessionEnvVar, tags []SessionTag, options CreateSessionOptions) (*Session, error) {
 	now := time.Now().UTC()
 	id := uuid.NewString()
 	sessionDir := s.sessionDir(id)
@@ -126,10 +136,6 @@ func (s *Store) CreateSession(_ context.Context, title, baseWorkspace, driver, g
 		session.Summary.Title = "agent-compose Session " + now.Format("2006-01-02 15:04")
 	}
 
-	hostPort, err := s.allocateHostPort()
-	if err != nil {
-		return nil, err
-	}
 	vmState := VMState{
 		Driver:      session.Summary.Driver,
 		Mode:        session.Summary.Driver,
@@ -144,12 +150,24 @@ func (s *Store) CreateSession(_ context.Context, title, baseWorkspace, driver, g
 		return nil, err
 	}
 	proxyState := ProxyState{
-		ProxyPath:  session.Summary.ProxyPath,
-		GuestHost:  "127.0.0.1",
-		HostPort:   hostPort,
-		GuestPort:  s.config.JupyterGuestPort,
-		JupyterURL: fmt.Sprintf("http://127.0.0.1:%d/lab", hostPort),
-		Token:      uuid.NewString(),
+		ProxyPath: session.Summary.ProxyPath,
+		GuestHost: "127.0.0.1",
+		Enabled:   options.JupyterEnabled,
+		Exposed:   options.JupyterExpose,
+	}
+	if proxyState.Enabled {
+		hostPort, err := s.allocateHostPort()
+		if err != nil {
+			return nil, err
+		}
+		guestPort := options.JupyterGuestPort
+		if guestPort == 0 {
+			guestPort = s.config.JupyterGuestPort
+		}
+		proxyState.HostPort = hostPort
+		proxyState.GuestPort = guestPort
+		proxyState.JupyterURL = session.Summary.ProxyPath
+		proxyState.Token = uuid.NewString()
 	}
 	if err := s.SaveProxyState(session.Summary.ID, proxyState); err != nil {
 		return nil, err
@@ -630,6 +648,10 @@ func (s *Store) GetProxyState(id string) (ProxyState, error) {
 
 func (s *Store) SaveProxyState(id string, state ProxyState) error {
 	return s.writeJSONFile(s.proxyStatePath(id), state)
+}
+
+func (s *Store) AllocateHostPortForJupyter() (int, error) {
+	return s.allocateHostPort()
 }
 
 func (s *Store) allocateHostPort() (int, error) {
