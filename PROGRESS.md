@@ -730,7 +730,7 @@
 
 ## 阶段 9：`run -i` prompt/command REPL
 
-- [ ] 9.1 实现 CLI `run -i` 参数互斥、REPL loop 和 session 复用
+- [x] 9.1 实现 CLI `run -i` 参数互斥、REPL loop 和 session 复用
 
   依赖：2.1、4.2、8.3。
 
@@ -763,10 +763,23 @@
   - 不依赖 TTY、stdin 透传或 terminal resize。
 
   完成总结：
-  - 状态：待完成。
-  - 变更：待记录。
-  - 验证：待记录。
-  - 审计与例外：待记录。
+  - 状态：已完成。
+  - 变更：
+    - `run -i --prompt` 和 `run -i --command` 进入 stdin line-based REPL；每条非空输入触发一次 `RunAgentStream`，`/exit` 或 Ctrl+D 退出。
+    - `--prompt <text>` 和 `--command <cmd>` 可作为第一轮输入；两者均支持无值模式标记，并保留 `run <agent> --prompt "..."` / `--command "..."` 既有写法。
+    - REPL 每轮强制使用 `KEEP_RUNNING` cleanup policy，并在第一轮返回 sandbox 后把后续请求的 `session_id` 固定到同一 sandbox。
+    - `run -i` 与 `-d`、`--trigger`、`--json` 互斥；未指定 `--prompt`/`--command` 或同时指定两者时返回 usage error。
+    - `--rm` 在 REPL 退出时清理本 REPL 创建的 sandbox；显式传入 `--sandbox`/`--session-id` 时不把该 sandbox 视为 CLI 创建。
+    - 复用一轮 run 的 streaming/detail/failure helper；上下文取消后如已收到 run id，会 best-effort 调用 `StopRun`。
+    - CLI 手册更新 REPL 用法、互斥规则和非 TTY/stdin 透传边界。
+  - 验证：
+    - `go test ./cmd/agent-compose -run 'TestIntegrationCLIRunInteractive|TestCLIRunInteractiveUsageErrors|TestCLIRunInputModeUsageErrors|TestIntegrationCLIRunCommandSendsCommandAndStreamsOutput|TestIntegrationCLIRunStreamsOutputAndSupportsSessionReuse'`：通过。
+    - `go test ./cmd/agent-compose ./pkg/agentcompose/api ./pkg/agentcompose/app ./pkg/runs`：通过。
+    - `task build`：通过。
+  - 审计与例外：
+    - 本阶段没有新增 proto 字段或重新生成 proto-client。
+    - 本阶段没有实现 TTY、PTY、WebSocket TTY、terminal resize、Connect bidi stdin、运行中 stdin 透传或 `ExecInteractive`。
+    - prompt provider conversation 复用和 Gemini unsupported 语义留给 9.2；本阶段只保证 CLI REPL 的 session/sandbox 复用与每轮独立 run。
   - 下一目标：9.2。
 
 - [ ] 9.2 实现 prompt REPL provider 复用和 unsupported 语义

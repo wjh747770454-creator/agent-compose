@@ -96,6 +96,24 @@ func executeCLICommand(args ...string) (string, string, int, int) {
 	return stdout.String(), stderr.String(), runCount, exitCode
 }
 
+func executeCLICommandWithInput(input string, args ...string) (string, string, int, int) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runCount := 0
+	cmd := newRootCommand(&stdout, &stderr, func(context.Context) error {
+		runCount++
+		return nil
+	})
+	cmd.SetIn(strings.NewReader(input))
+	cmd.SetArgs(args)
+	exitCode := 0
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		_, _ = fmt.Fprintln(&stderr, err)
+		exitCode = commandExitCode(err)
+	}
+	return stdout.String(), stderr.String(), runCount, exitCode
+}
+
 func TestVersionCommandPrintsBuildVersionWithoutStartingDaemon(t *testing.T) {
 	oldVersion := config.BuildVersion
 	config.BuildVersion = "test-version"
@@ -1412,6 +1430,203 @@ agents:
 	}
 }
 
+func TestIntegrationCLIRunInteractivePromptReusesSession(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-interactive-prompt
+agents:
+  reviewer:
+    provider: codex
+`)
+	var prompts []string
+	var sessions []string
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				prompts = append(prompts, req.Msg.GetPrompt())
+				sessions = append(sessions, req.Msg.GetSessionId())
+				if req.Msg.GetCommand() != "" || req.Msg.GetTriggerId() != "" {
+					t.Fatalf("RunAgentStream interactive prompt request = %#v", req.Msg)
+				}
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING {
+					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
+				}
+				runID := fmt.Sprintf("run-repl-%d", len(prompts))
+				if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType:  agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
+					RunId:      runID,
+					Transcript: &agentcomposev2.TranscriptEvent{Text: fmt.Sprintf("prompt %d output\n", len(prompts))},
+				}); err != nil {
+					return err
+				}
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     runID,
+					Run: &agentcomposev2.RunSummary{
+						RunId:     runID,
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SessionId: "sandbox-repl",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), req.Msg.GetRunId(), "reviewer", "sandbox-repl", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommandWithInput("second prompt\n\n/exit\n", "run", "--host", server.URL, "--file", composePath, "reviewer", "-i", "--prompt", "first prompt")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("run -i --prompt code/stderr = %d / %q", exitCode, stderr)
+	}
+	if stdout != "prompt 1 output\nprompt 2 output\n" {
+		t.Fatalf("run -i --prompt stdout = %q", stdout)
+	}
+	if strings.Join(prompts, "|") != "first prompt|second prompt" {
+		t.Fatalf("prompts = %#v", prompts)
+	}
+	if strings.Join(sessions, "|") != "|sandbox-repl" {
+		t.Fatalf("sessions = %#v", sessions)
+	}
+}
+
+func TestIntegrationCLIRunInteractiveCommandNoValueMode(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-interactive-command
+agents:
+  reviewer:
+    provider: codex
+`)
+	var commands []string
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				commands = append(commands, req.Msg.GetCommand())
+				if req.Msg.GetPrompt() != "" || req.Msg.GetTriggerId() != "" {
+					t.Fatalf("RunAgentStream interactive command request = %#v", req.Msg)
+				}
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-command-repl",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-command-repl",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SessionId: "sandbox-command-repl",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), req.Msg.GetRunId(), "reviewer", "sandbox-command-repl", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommandWithInput("pwd\n/exit\n", "run", "--host", server.URL, "--file", composePath, "reviewer", "-i", "--command")
+	if exitCode != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("run -i --command code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+	}
+	if strings.Join(commands, "|") != "pwd" {
+		t.Fatalf("commands = %#v", commands)
+	}
+}
+
+func TestIntegrationCLIRunInteractiveRemoveCreatedSandboxOnExit(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-interactive-rm
+agents:
+  reviewer:
+    provider: codex
+`)
+	var removed []string
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-repl-rm",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-repl-rm",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SessionId: "sandbox-repl-rm",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), req.Msg.GetRunId(), "reviewer", "sandbox-repl-rm", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+		sandbox: sandboxServiceStub{
+			removeSandbox: func(ctx context.Context, req *connect.Request[agentcomposev2.RemoveSandboxRequest]) (*connect.Response[agentcomposev2.RemoveSandboxResponse], error) {
+				removed = append(removed, req.Msg.GetSandboxId())
+				if !req.Msg.GetForce() {
+					t.Fatalf("RemoveSandbox force = false")
+				}
+				return connect.NewResponse(&agentcomposev2.RemoveSandboxResponse{SandboxId: req.Msg.GetSandboxId(), Removed: true}), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommandWithInput("", "run", "--host", server.URL, "--file", composePath, "--rm", "reviewer", "-i", "--prompt", "first")
+	if exitCode != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("run -i --rm code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+	}
+	if strings.Join(removed, "|") != "sandbox-repl-rm" {
+		t.Fatalf("removed = %#v", removed)
+	}
+}
+
+func TestIntegrationCLIRunInteractiveRemoveSkipsExistingSandbox(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-interactive-rm-existing
+agents:
+  reviewer:
+    provider: codex
+`)
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				if req.Msg.GetSessionId() != "sandbox-existing" {
+					t.Fatalf("RunAgentStream session = %q, want sandbox-existing", req.Msg.GetSessionId())
+				}
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-repl-existing",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-repl-existing",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SessionId: "sandbox-existing",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), req.Msg.GetRunId(), "reviewer", "sandbox-existing", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+		sandbox: sandboxServiceStub{
+			removeSandbox: func(ctx context.Context, req *connect.Request[agentcomposev2.RemoveSandboxRequest]) (*connect.Response[agentcomposev2.RemoveSandboxResponse], error) {
+				t.Fatalf("RemoveSandbox should not be called for an explicit sandbox")
+				return nil, nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommandWithInput("", "run", "--host", server.URL, "--file", composePath, "--rm", "--sandbox", "sandbox-existing", "reviewer", "-i", "--prompt", "first")
+	if exitCode != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("run -i --rm --sandbox code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+	}
+}
+
 func TestIntegrationCLIRunTrigger(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-run-trigger
@@ -1572,19 +1787,53 @@ agents:
 	}
 }
 
-func TestCLIRunInteractiveReservedUnsupported(t *testing.T) {
+func TestCLIRunInteractiveUsageErrors(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-run-interactive
 agents:
   reviewer:
     provider: codex
 `)
-	stdout, stderr, _, exitCode := executeCLICommand("run", "--file", composePath, "reviewer", "-i")
-	if exitCode != exitCodeUnsupported {
-		t.Fatalf("run -i exit code = %d, want %d; stderr=%q", exitCode, exitCodeUnsupported, stderr)
-	}
-	if stdout != "" || !strings.Contains(stderr, "run -i/--interactive is not supported") {
-		t.Fatalf("run -i stdout/stderr = %q / %q", stdout, stderr)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "no mode",
+			args: []string{"run", "--file", composePath, "reviewer", "-i"},
+			want: "requires exactly one of --prompt or --command",
+		},
+		{
+			name: "trigger",
+			args: []string{"run", "--file", composePath, "reviewer", "-i", "--trigger", "nightly"},
+			want: "cannot be combined with --trigger",
+		},
+		{
+			name: "json",
+			args: []string{"run", "--file", composePath, "--json", "reviewer", "-i", "--prompt"},
+			want: "cannot be combined with --json",
+		},
+		{
+			name: "prompt and command",
+			args: []string{"run", "--file", composePath, "reviewer", "-i", "--prompt", "--command"},
+			want: "requires exactly one of --prompt or --command",
+		},
+		{
+			name: "positional prompt",
+			args: []string{"run", "--file", composePath, "reviewer", "-i", "--prompt", "first", "legacy"},
+			want: "does not accept legacy positional prompt",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, _, exitCode := executeCLICommand(tc.args...)
+			if exitCode != exitCodeUsage {
+				t.Fatalf("run -i exit code = %d, want %d; stderr=%q", exitCode, exitCodeUsage, stderr)
+			}
+			if stdout != "" || !strings.Contains(stderr, tc.want) {
+				t.Fatalf("run -i stdout/stderr = %q / %q, want %q", stdout, stderr, tc.want)
+			}
+		})
 	}
 }
 

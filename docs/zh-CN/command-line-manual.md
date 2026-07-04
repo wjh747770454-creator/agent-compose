@@ -151,6 +151,8 @@ agent-compose run <agent> --sandbox <sandbox> --prompt "..."
 | trigger | `run <agent> --trigger <trigger>` | 运行配置中定义的 trigger。 |
 | prompt | `run <agent> --prompt "..."` | 向 agent provider 发送 prompt。 |
 | command | `run <agent> --command "..."` | 启动或复用该 agent 的 sandbox 后执行 `bash -lc` 命令；命令 stdout/stderr 会实时输出，并写入该次 run 记录。 |
+| prompt REPL | `run <agent> -i --prompt` | 从 stdin 逐行读取 prompt；每条非空输入创建一次 run，并复用同一个 sandbox。 |
+| command REPL | `run <agent> -i --command` | 从 stdin 逐行读取 command；每条非空输入创建一次 run，并复用同一个 sandbox。 |
 | sandbox 复用 | `run <agent> --sandbox <sandbox> --prompt "..."` | 在指定 sandbox 中继续运行。 |
 
 兼容说明：
@@ -168,7 +170,7 @@ agent-compose run <agent> --sandbox <sandbox> --prompt "..."
 | `--jupyter` | 为本次 run 启用 Jupyter；未设置时使用 agent YAML 默认，YAML 未设置时默认关闭。 |
 | `--jupyter-expose` | 标记本次 run 的 Jupyter agent-compose proxy 入口为显式暴露意图；该参数不请求 runtime driver 暴露 host port，并会同时启用 Jupyter。 |
 | `-d, --detach` | 将 run 提交给 daemon 后立即返回；输出 run id、初始状态和 `logs --follow` 查看命令。 |
-| `-i, --interactive` | 预留交互模式参数，当前返回 unsupported。 |
+| `-i, --interactive` | 进入 prompt 或 command REPL；必须与 `--prompt` 或 `--command` 组合。 |
 
 示例：
 
@@ -178,6 +180,8 @@ agent-compose run reviewer --prompt "Review the staged changes"
 agent-compose run builder --command "task build"
 agent-compose run tester --command "task test" --keep-running
 agent-compose run tester --command "task test" -d
+agent-compose run reviewer -i --prompt
+agent-compose run tester -i --command
 agent-compose run reviewer --sandbox sandbox_123 --prompt "Continue the review"
 agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the notebook state"
 ```
@@ -186,7 +190,10 @@ agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the note
 
 - trigger、prompt、command 一次只能选择一种。
 - 使用 `--prompt`、`--trigger` 或 `--command` 时，不能再传 legacy positional prompt 参数。
-- `run -d/--detach` 和 `run -i/--interactive` 互斥；`-i/--interactive` 当前仍未作为稳定 CLI 能力发布。
+- `run -d/--detach` 和 `run -i/--interactive` 互斥。
+- `run -i/--interactive` 必须选择 `--prompt` 或 `--command`，不能与 `--trigger` 或 `--json` 组合。
+- REPL 中空行不会创建 run；输入 `/exit` 或 Ctrl+D 退出。
+- REPL 不是 TTY/PTY 或运行中 stdin 透传；每条输入都是一次独立 `RunAgentStream`，但复用同一个 sandbox。
 - detached run 可通过输出的 `agent-compose logs --run-id <run-id> --follow` 命令观察输出，也可继续使用 `stop`/`logs` 操作该 run。
 
 ## `ps`：查看 sandbox

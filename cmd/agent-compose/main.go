@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,6 +47,8 @@ import (
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 	"agent-compose/proto/agentcompose/v2/agentcomposev2connect"
 )
+
+const optionalRunModeFlagNoValue = "\x00agent-compose-run-mode"
 
 type daemonRunner func(context.Context) error
 
@@ -527,6 +530,8 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	runCmd.Flags().BoolVar(&runOptions.JupyterExpose, "jupyter-expose", false, "Mark the Jupyter proxy endpoint for this run as user-accessible")
 	runCmd.Flags().BoolVarP(&runOptions.Detach, "detach", "d", false, "Start the run in the daemon and return immediately")
 	runCmd.Flags().BoolVarP(&runOptions.Interactive, "interactive", "i", false, "Reserved for future interactive runs")
+	runCmd.Flags().Lookup("prompt").NoOptDefVal = optionalRunModeFlagNoValue
+	runCmd.Flags().Lookup("command").NoOptDefVal = optionalRunModeFlagNoValue
 
 	logsOptions := composeLogsOptions{}
 	logsCmd := &cobra.Command{
@@ -1123,33 +1128,51 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 	if err != nil {
 		return err
 	}
+	promptFlagChanged := cmd.Flags().Changed("prompt")
+	commandFlagChanged := cmd.Flags().Changed("command")
+	prompt := normalizeOptionalRunModeValue(normalizedOptions.Prompt)
+	commandText := normalizeOptionalRunModeValue(normalizedOptions.Command)
+	triggerID := strings.TrimSpace(normalizedOptions.Trigger)
+	if promptFlagChanged && normalizedOptions.Prompt == optionalRunModeFlagNoValue && len(args) > 1 {
+		prompt = strings.TrimSpace(args[1])
+		args = append(args[:1], args[2:]...)
+	}
+	if commandFlagChanged && normalizedOptions.Command == optionalRunModeFlagNoValue && len(args) > 1 {
+		commandText = strings.TrimSpace(args[1])
+		args = append(args[:1], args[2:]...)
+	}
 	if normalizedOptions.Detach && normalizedOptions.Interactive {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -d/--detach cannot be combined with -i/--interactive")}
 	}
-	if normalizedOptions.Interactive {
-		return commandExitError{Code: exitCodeUnsupported, Err: fmt.Errorf("run -i/--interactive is not supported")}
+	if normalizedOptions.Interactive && cli.JSON {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive cannot be combined with --json")}
+	}
+	if normalizedOptions.Interactive && triggerID != "" {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive cannot be combined with --trigger")}
+	}
+	if normalizedOptions.Interactive && promptFlagChanged == commandFlagChanged {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive requires exactly one of --prompt or --command")}
 	}
 	_, normalized, projectID, err := resolveComposeProject(cli)
 	if err != nil {
 		return err
 	}
 	agentName := strings.TrimSpace(args[0])
-	prompt := strings.TrimSpace(normalizedOptions.Prompt)
-	triggerID := strings.TrimSpace(normalizedOptions.Trigger)
-	commandText := strings.TrimSpace(normalizedOptions.Command)
-	if cmd.Flags().Changed("command") && commandText == "" {
+	if !normalizedOptions.Interactive && cmd.Flags().Changed("command") && commandText == "" {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --command requires a non-empty command")}
 	}
 	modeCount := 0
-	for _, value := range []string{prompt, triggerID, commandText} {
-		if value != "" {
-			modeCount++
+	if !normalizedOptions.Interactive {
+		for _, value := range []string{prompt, triggerID, commandText} {
+			if value != "" {
+				modeCount++
+			}
 		}
 	}
 	if modeCount > 1 {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run requires only one of --trigger, --prompt, or --command")}
 	}
-	if (triggerID != "" || prompt != "" || commandText != "") && len(args) > 1 {
+	if !normalizedOptions.Interactive && (triggerID != "" || prompt != "" || commandText != "") && len(args) > 1 {
 		mode := "--prompt"
 		if triggerID != "" {
 			mode = "--trigger"
@@ -1158,7 +1181,10 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		}
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run with %s does not accept legacy positional prompt arguments", mode)}
 	}
-	if prompt == "" && len(args) > 1 {
+	if normalizedOptions.Interactive && len(args) > 1 {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive does not accept legacy positional prompt arguments")}
+	}
+	if !normalizedOptions.Interactive && prompt == "" && len(args) > 1 {
 		// Deprecated: positional prompt arguments will become the trigger position in a future release.
 		if err := writeDeprecatedWarning(cmd.ErrOrStderr(), "agent-compose run <agent> [prompt...]", "agent-compose run <agent> --prompt"); err != nil {
 			return err
@@ -1198,43 +1224,20 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 	if normalizedOptions.Detach {
 		return startDetachedRun(cmd, cli, normalized.Name, client, runReq)
 	}
-	stream, err := client.RunAgentStream(cmd.Context(), connect.NewRequest(runReq))
+	if normalizedOptions.Interactive {
+		runReq.Prompt = ""
+		runReq.Command = ""
+		runReq.TriggerId = ""
+		runReq.CleanupPolicy = agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING
+		sandboxClient := agentcomposev2connect.NewSandboxServiceClient(newDaemonHTTPClient(clientConfig), clientConfig.BaseURL)
+		return runInteractiveComposeRun(cmd, normalizedOptions, normalized.Name, client, sandboxClient, runReq, promptFlagChanged, prompt, commandText)
+	}
+	detail, completed, warnings, err := runComposeRunStreamAndDetail(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, projectID, normalized.Name, runReq, cli.JSON)
 	if err != nil {
-		return commandExitErrorForConnect(fmt.Errorf("run project %s agent %s: %w", normalized.Name, agentName, err))
-	}
-	var completed *agentcomposev2.RunSummary
-	var warnings []string
-	for stream.Receive() {
-		event := stream.Msg()
-		warnings = appendUniqueStrings(warnings, event.GetWarnings()...)
-		if event.GetRun() != nil {
-			warnings = appendUniqueStrings(warnings, event.GetRun().GetWarnings()...)
-		}
-		switch event.GetEventType() {
-		case agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT:
-			if cli.JSON {
-				continue
-			}
-			if err := writeTranscriptOrChunk(cmd.OutOrStdout(), cmd.ErrOrStderr(), event.GetTranscript(), event.GetChunk(), event.GetIsStderr()); err != nil {
-				return err
-			}
-		case agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED:
-			completed = event.GetRun()
-		}
-	}
-	if err := stream.Err(); err != nil {
-		return commandExitErrorForConnect(fmt.Errorf("run project %s agent %s: %w", normalized.Name, agentName, err))
-	}
-	if completed == nil {
-		return fmt.Errorf("run project %s agent %s: stream completed without terminal run", normalized.Name, agentName)
-	}
-	warnings = appendUniqueStrings(warnings, completed.GetWarnings()...)
-	detail, err := getRunDetail(cmd.Context(), client, projectID, completed.GetRunId())
-	if err != nil {
-		return commandExitErrorForConnect(fmt.Errorf("get run %s for project %s: %w", completed.GetRunId(), normalized.Name, err))
+		return err
 	}
 	if cli.JSON {
-		output := composeRunOutputFromDetail(detail.Msg.GetRun())
+		output := composeRunOutputFromDetail(detail)
 		output.Warnings = appendUniqueStrings(output.Warnings, warnings...)
 		data, err := json.MarshalIndent(output, "", "  ")
 		if err != nil {
@@ -1249,18 +1252,152 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 			return err
 		}
 	}
-	cleanupErr := runDetailCleanupError(detail.Msg.GetRun())
+	return composeRunCompletionError(normalized.Name, agentName, completed, detail)
+}
+
+func runComposeRunStreamAndDetail(ctx context.Context, stdout, stderr io.Writer, client agentcomposev2connect.RunServiceClient, projectID, projectName string, runReq *agentcomposev2.RunAgentRequest, suppressOutput bool) (*agentcomposev2.RunDetail, *agentcomposev2.RunSummary, []string, error) {
+	stream, err := client.RunAgentStream(ctx, connect.NewRequest(runReq))
+	if err != nil {
+		return nil, nil, nil, commandExitErrorForConnect(fmt.Errorf("run project %s agent %s: %w", projectName, runReq.GetAgentName(), err))
+	}
+	var completed *agentcomposev2.RunSummary
+	var warnings []string
+	var runID string
+	defer func() {
+		if ctx.Err() != nil && strings.TrimSpace(runID) != "" {
+			_, _ = client.StopRun(context.Background(), connect.NewRequest(&agentcomposev2.StopRunRequest{
+				RunId:  runID,
+				Reason: "client interrupted",
+			}))
+		}
+	}()
+	for stream.Receive() {
+		event := stream.Msg()
+		if strings.TrimSpace(event.GetRunId()) != "" {
+			runID = event.GetRunId()
+		}
+		warnings = appendUniqueStrings(warnings, event.GetWarnings()...)
+		if event.GetRun() != nil {
+			warnings = appendUniqueStrings(warnings, event.GetRun().GetWarnings()...)
+		}
+		switch event.GetEventType() {
+		case agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT:
+			if suppressOutput {
+				continue
+			}
+			if err := writeTranscriptOrChunk(stdout, stderr, event.GetTranscript(), event.GetChunk(), event.GetIsStderr()); err != nil {
+				return nil, nil, nil, err
+			}
+		case agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED:
+			completed = event.GetRun()
+			if completed.GetRunId() != "" {
+				runID = completed.GetRunId()
+			}
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, nil, nil, commandExitErrorForConnect(fmt.Errorf("run project %s agent %s: %w", projectName, runReq.GetAgentName(), err))
+	}
+	if completed == nil {
+		return nil, nil, nil, fmt.Errorf("run project %s agent %s: stream completed without terminal run", projectName, runReq.GetAgentName())
+	}
+	warnings = appendUniqueStrings(warnings, completed.GetWarnings()...)
+	detail, err := getRunDetail(ctx, client, projectID, completed.GetRunId())
+	if err != nil {
+		return nil, nil, nil, commandExitErrorForConnect(fmt.Errorf("get run %s for project %s: %w", completed.GetRunId(), projectName, err))
+	}
+	return detail.Msg.GetRun(), completed, warnings, nil
+}
+
+func composeRunCompletionError(projectName, agentName string, completed *agentcomposev2.RunSummary, detail *agentcomposev2.RunDetail) error {
+	cleanupErr := runDetailCleanupError(detail)
 	if runSummaryFailed(completed) {
-		message := fmt.Sprintf("run %s for project %s agent %s failed: %s", completed.GetRunId(), normalized.Name, agentName, firstNonEmptyString(completed.GetError(), runStatusText(completed.GetStatus())))
+		message := fmt.Sprintf("run %s for project %s agent %s failed: %s", completed.GetRunId(), projectName, agentName, firstNonEmptyString(completed.GetError(), runStatusText(completed.GetStatus())))
 		if cleanupErr != "" {
 			message += fmt.Sprintf("; cleanup warning: %s", cleanupErr)
 		}
 		return commandExitError{Code: runSummaryExitCode(completed), Err: fmt.Errorf("%s", message)}
 	}
 	if cleanupErr != "" {
-		return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("run %s for project %s agent %s succeeded but sandbox cleanup failed: %s", completed.GetRunId(), normalized.Name, agentName, cleanupErr)}
+		return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("run %s for project %s agent %s succeeded but sandbox cleanup failed: %s", completed.GetRunId(), projectName, agentName, cleanupErr)}
 	}
 	return nil
+}
+
+func runInteractiveComposeRun(cmd *cobra.Command, options composeRunOptions, projectName string, client agentcomposev2connect.RunServiceClient, sandboxClient agentcomposev2connect.SandboxServiceClient, baseReq *agentcomposev2.RunAgentRequest, promptMode bool, firstPrompt, firstCommand string) (err error) {
+	sessionID := strings.TrimSpace(baseReq.GetSessionId())
+	removeOnExit := options.Remove && sessionID == ""
+	defer func() {
+		if !removeOnExit || strings.TrimSpace(sessionID) == "" {
+			return
+		}
+		removeErr := removeSandbox(context.Background(), sandboxClient, sessionID, true)
+		if removeErr == nil {
+			return
+		}
+		wrapped := commandExitErrorForConnect(fmt.Errorf("remove interactive sandbox %s: %w", sessionID, removeErr))
+		if err == nil {
+			err = wrapped
+			return
+		}
+		_ = writeRunWarnings(cmd.ErrOrStderr(), []string{fmt.Sprintf("interactive sandbox cleanup failed: %v", removeErr)})
+	}()
+
+	firstInput := firstCommand
+	if promptMode {
+		firstInput = firstPrompt
+	}
+	pending := make([]string, 0, 1)
+	if strings.TrimSpace(firstInput) != "" {
+		pending = append(pending, firstInput)
+	}
+	scanner := bufio.NewScanner(cmd.InOrStdin())
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for {
+		var line string
+		if len(pending) > 0 {
+			line = pending[0]
+			pending = pending[1:]
+		} else {
+			if !scanner.Scan() {
+				if scanErr := scanner.Err(); scanErr != nil {
+					return scanErr
+				}
+				return nil
+			}
+			line = scanner.Text()
+		}
+		input := strings.TrimSpace(line)
+		if input == "" {
+			continue
+		}
+		if input == "/exit" {
+			return nil
+		}
+		runReq := *baseReq
+		runReq.SessionId = sessionID
+		runReq.ClientRequestId = manualRunClientRequestID(projectName, baseReq.GetAgentName(), input)
+		if promptMode {
+			runReq.Prompt = input
+			runReq.Command = ""
+		} else {
+			runReq.Prompt = ""
+			runReq.Command = input
+		}
+		detail, completed, warnings, runErr := runComposeRunStreamAndDetail(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), client, baseReq.GetProjectId(), projectName, &runReq, false)
+		if runErr != nil {
+			return runErr
+		}
+		if completed.GetSessionId() != "" {
+			sessionID = completed.GetSessionId()
+		}
+		if err := writeRunWarnings(cmd.ErrOrStderr(), warnings); err != nil {
+			return err
+		}
+		if err := composeRunCompletionError(projectName, baseReq.GetAgentName(), completed, detail); err != nil {
+			return err
+		}
+	}
 }
 
 func startDetachedRun(cmd *cobra.Command, cli cliOptions, projectName string, client agentcomposev2connect.RunServiceClient, req *agentcomposev2.RunAgentRequest) error {
@@ -1347,6 +1484,13 @@ func normalizeComposeRunOptions(cmd *cobra.Command, options composeRunOptions) (
 		options.SessionID = options.SandboxID
 	}
 	return options, nil
+}
+
+func normalizeOptionalRunModeValue(value string) string {
+	if value == optionalRunModeFlagNoValue {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
 func runComposeLogsCommand(cmd *cobra.Command, cli cliOptions, options composeLogsOptions, args []string) error {
