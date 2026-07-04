@@ -295,7 +295,7 @@ func sessionProviderEnvItems(session *domain.Session) []domain.SessionEnvVar {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if value != "" {
+		if strings.TrimSpace(value) != "" {
 			return value
 		}
 	}

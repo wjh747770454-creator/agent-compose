@@ -145,4 +145,7 @@ func TestEnsureSessionAgentRuntimeConfigClaudeAndOpenCodeWorkflows(t *testing.T)
 	if !HasAnthropicProviderKey(ctx, config, store) {
 		t.Fatalf("expected anthropic provider key")
 	}
+	if got := firstNonEmpty(" \t", "value"); got != "value" {
+		t.Fatalf("firstNonEmpty = %q, want value", got)
+	}
 }

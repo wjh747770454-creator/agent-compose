@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -224,7 +226,29 @@ func loaderServiceConnectError(err error) error {
 	if errors.Is(err, domain.ErrNotFound) {
 		return connect.NewError(connect.CodeNotFound, err)
 	}
+	if errors.Is(err, domain.ErrFailedPrecondition) || errors.Is(err, domain.ErrConflict) || errors.Is(err, domain.ErrReferenced) {
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	if errors.Is(err, domain.ErrAlreadyExists) {
+		return connect.NewError(connect.CodeAlreadyExists, err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return connect.NewError(connect.CodeCanceled, err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
+	}
+	if isLoaderInternalError(err) {
+		return connect.NewError(connect.CodeInternal, err)
+	}
 	return connect.NewError(connect.CodeInvalidArgument, err)
+}
+
+func isLoaderInternalError(err error) bool {
+	return errors.Is(err, sql.ErrConnDone) ||
+		errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, os.ErrNotExist)
 }
 
 func protoEnvItemsToModel(items []*agentcomposev1.SessionEnvVar) []domain.SessionEnvVar {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -110,13 +111,17 @@ func (h *SessionHandler) StopSession(ctx context.Context, req *connect.Request[a
 func (h *SessionHandler) GetSession(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error) {
 	session, err := h.store.GetSession(ctx, req.Msg.GetSessionId())
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if isSessionNotFoundError(err) {
 			return nil, connect.NewError(connect.CodeNotFound, err)
 		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	session = h.reconcileRuntimeState(ctx, session, "get")
 	return connect.NewResponse(&agentcomposev1.SessionResponse{Session: SessionDetailToProto(session)}), nil
+}
+
+func isSessionNotFoundError(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, sql.ErrNoRows) || errors.Is(err, domain.ErrNotFound)
 }
 
 func (h *SessionHandler) ListSessions(ctx context.Context, req *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error) {

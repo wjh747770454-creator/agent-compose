@@ -166,8 +166,8 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 		}
 		cell.Output += chunk.Text
 		snapshot := cell
-		persistErr := e.store.AddCell(ctx, session, snapshot)
 		cellMu.Unlock()
+		persistErr := e.store.AddCell(ctx, session, snapshot)
 		if persistErr != nil {
 			setStreamErr(persistErr)
 			return

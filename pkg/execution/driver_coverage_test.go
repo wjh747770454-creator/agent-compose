@@ -1,9 +1,13 @@
 package execution
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	domain "agent-compose/pkg/model"
 )
@@ -46,5 +50,36 @@ func TestDriverConversionWorkflows(t *testing.T) {
 	result := FromDriverExecResult(driverpkg.ExecResult{ExitCode: 2, Stdout: "out", Stderr: "err", Output: "outerr", Success: false})
 	if result.ExitCode != 2 || result.Output != "outerr" || result.Success {
 		t.Fatalf("exec result = %#v", result)
+	}
+
+	config := &appconfig.Config{GuestWorkspacePath: "/workspace", GuestStateRoot: "/state", GuestRuntimeRoot: "/runtime", Version: "v-test"}
+	commandReq := RuntimeCommandRequestPayload(config, domain.LoaderCommandRequest{
+		Mode: "SHELL", Script: "echo ok", Env: map[string]string{"A": "B"},
+	}, "/state/cells/cell-1")
+	if commandReq.Mode != "shell" || commandReq.Cwd != "/workspace" || commandReq.MaxOutputBytes != DefaultLoaderCommandMaxOutputBytes {
+		t.Fatalf("runtime command request = %#v", commandReq)
+	}
+	session.EnvItems = []domain.SessionEnvVar{{Name: "USER_VAR", Value: "ok"}, {Name: "LLM_API_KEY", Value: "secret"}}
+	session.RuntimeEnvItems = []domain.SessionEnvVar{{Name: "MANAGED", Value: "yes"}}
+	env := BuildSessionExecEnv(config, session, "/home/agent")
+	if env["USER_VAR"] != "ok" || env["LLM_API_KEY"] != "" || env["MANAGED"] != "yes" || env["SESSION_ID"] != "session-1" {
+		t.Fatalf("session exec env = %#v", env)
+	}
+	execSpec := BuildLoaderCommandExecSpec(config, session, "/state/cells/cell-1/request.json", "/home/agent")
+	if execSpec.Command != "sh" || len(execSpec.Args) != 2 || !strings.Contains(execSpec.Args[1], "agent-compose-runtime exec") || execSpec.Cwd != "/workspace" {
+		t.Fatalf("loader command spec = %#v", execSpec)
+	}
+	artifactDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(artifactDir, "stdout.txt"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write existing artifact: %v", err)
+	}
+	if err := MirrorRuntimeCommandArtifacts(artifactDir, domain.RuntimeCommandResult{Stdout: "new", Stderr: "err", Output: "out"}); err != nil {
+		t.Fatalf("MirrorRuntimeCommandArtifacts returned error: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(artifactDir, "stdout.txt")); err != nil || string(got) != "existing" {
+		t.Fatalf("stdout artifact = %q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(artifactDir, "stderr.txt")); err != nil || string(got) != "err" {
+		t.Fatalf("stderr artifact = %q err=%v", got, err)
 	}
 }

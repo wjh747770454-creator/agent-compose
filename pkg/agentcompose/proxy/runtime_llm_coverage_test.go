@@ -67,6 +67,89 @@ func TestRuntimeLLMFacadeRoutesCoverageWorkflow(t *testing.T) {
 	}
 }
 
+func TestRuntimeLLMFacadeRejectsInvalidSecurityContext(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		body     string
+		token    llms.FacadeToken
+		session  *domain.Session
+		resolver RuntimeLLMTargetResolver
+		want     int
+	}{
+		{
+			name:    "expired token",
+			path:    "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			body:    `{"model":"gpt","input":"hi"}`,
+			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(-time.Minute)},
+			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}},
+			want:    http.StatusForbidden,
+		},
+		{
+			name:    "revoked token",
+			path:    "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			body:    `{"model":"gpt","input":"hi"}`,
+			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, RevokedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}},
+			want:    http.StatusForbidden,
+		},
+		{
+			name:    "wire api mismatch",
+			path:    "/api/runtime/sessions/session-1/llm/openai/v1/chat/completions",
+			body:    `{"model":"gpt","messages":[{"role":"user","content":"hi"}]}`,
+			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}},
+			want:    http.StatusForbidden,
+		},
+		{
+			name:    "stopped session",
+			path:    "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			body:    `{"model":"gpt","input":"hi"}`,
+			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusStopped}},
+			want:    http.StatusForbidden,
+		},
+		{
+			name:    "provider mismatch",
+			path:    "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			body:    `{"model":"gpt","input":"hi"}`,
+			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-2", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}},
+			resolver: func(context.Context, string, string) (llms.ResolvedTarget, error) {
+				return llms.ResolvedTarget{
+					Provider: llms.Provider{ID: "provider-1", ProviderType: llms.ProviderFamilyOpenAI, BaseURL: "http://upstream.test/v1"},
+					Model:    llms.Model{Name: "gpt"},
+					WireAPI:  llms.APIProtocolResponses,
+				}, nil
+			},
+			want: http.StatusForbidden,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			resolver := tc.resolver
+			if resolver == nil {
+				resolver = fakeRuntimeLLMTargetResolver("http://upstream.test/v1")
+			}
+			RegisterRuntimeLLMFacadeRoutes(e, RuntimeLLMOptions{
+				Tokens:        fakeRuntimeLLMTokens{token: tc.token},
+				Sessions:      fakeRuntimeLLMSessions{session: tc.session},
+				ResolveTarget: resolver,
+				Client:        &fakeRuntimeLLMHTTPClient{status: http.StatusOK, body: `{"id":"resp-1","model":"gpt","output":[]}`},
+			})
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer raw-token")
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("%s status=%d body=%s, want %d", tc.name, rec.Code, rec.Body.String(), tc.want)
+			}
+		})
+	}
+}
+
 func TestIntegrationRuntimeLLMFacadeRoutesCoverageWorkflow(t *testing.T) {
 	TestRuntimeLLMFacadeRoutesCoverageWorkflow(t)
 }

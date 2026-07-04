@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -68,4 +71,37 @@ func TestSessionHandlerGetAndListSessionsUseStoreAndReconciler(t *testing.T) {
 	if reconciler.calls != 2 {
 		t.Fatalf("reconciler calls = %d, want 2", reconciler.calls)
 	}
+}
+
+func TestSessionHandlerGetSessionNotFoundErrorCompatibility(t *testing.T) {
+	tests := []error{
+		fmt.Errorf("load session: %w", os.ErrNotExist),
+		fmt.Errorf("load session: %w", sql.ErrNoRows),
+		fmt.Errorf("load session: %w", domain.ErrNotFound),
+	}
+	for _, storeErr := range tests {
+		handler := &SessionHandler{store: errorSessionStore{err: storeErr}}
+		_, err := handler.GetSession(context.Background(), connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: "missing"}))
+		if connect.CodeOf(err) != connect.CodeNotFound {
+			t.Fatalf("GetSession error code = %v, want %v for %v", connect.CodeOf(err), connect.CodeNotFound, storeErr)
+		}
+	}
+
+	handler := &SessionHandler{store: errorSessionStore{err: fmt.Errorf("load session: %w", os.ErrPermission)}}
+	_, err := handler.GetSession(context.Background(), connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: "missing"}))
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("GetSession internal error code = %v, want %v", connect.CodeOf(err), connect.CodeInternal)
+	}
+}
+
+type errorSessionStore struct {
+	err error
+}
+
+func (s errorSessionStore) GetSession(context.Context, string) (*domain.Session, error) {
+	return nil, s.err
+}
+
+func (s errorSessionStore) ListSessions(context.Context, domain.SessionListOptions) (domain.SessionListResult, error) {
+	return domain.SessionListResult{}, s.err
 }

@@ -43,6 +43,26 @@ func TestRemoveSandboxRemoveRaceRemainsInternal(t *testing.T) {
 	}
 }
 
+func TestLoaderServiceConnectErrorClassifiesInternalFailures(t *testing.T) {
+	tests := []struct {
+		err  error
+		code connect.Code
+	}{
+		{err: domain.ResourceError(domain.ErrNotFound, "loader", "missing", "", nil), code: connect.CodeNotFound},
+		{err: domain.ClassifyError(domain.ErrFailedPrecondition, "loader is running", nil), code: connect.CodeFailedPrecondition},
+		{err: domain.ClassifyError(domain.ErrAlreadyExists, "loader exists", nil), code: connect.CodeAlreadyExists},
+		{err: context.DeadlineExceeded, code: connect.CodeDeadlineExceeded},
+		{err: sql.ErrConnDone, code: connect.CodeInternal},
+		{err: os.ErrPermission, code: connect.CodeInternal},
+		{err: errors.New("loader script is required"), code: connect.CodeInvalidArgument},
+	}
+	for _, tc := range tests {
+		if got := connect.CodeOf(loaderServiceConnectError(tc.err)); got != tc.code {
+			t.Fatalf("loaderServiceConnectError(%v) = %v, want %v", tc.err, got, tc.code)
+		}
+	}
+}
+
 func TestKernelAndAgentUnaryHandlerWorkflows(t *testing.T) {
 	ctx := context.Background()
 	session := &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning, CreatedAt: time.Now()}}

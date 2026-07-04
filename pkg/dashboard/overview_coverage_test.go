@@ -61,6 +61,15 @@ func TestAggregatorReturnsStoreErrors(t *testing.T) {
 	}
 }
 
+func TestIntegrationDashboardOverviewWorkflows(t *testing.T) {
+	TestAggregatorAndHubWorkflows(t)
+	TestAggregatorReturnsStoreErrors(t)
+}
+
+func TestE2EDashboardOverviewWorkflows(t *testing.T) {
+	TestIntegrationDashboardOverviewWorkflows(t)
+}
+
 type dashboardSessionStore struct {
 	sessions []*domain.Session
 	err      error

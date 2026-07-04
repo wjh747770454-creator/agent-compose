@@ -58,6 +58,17 @@ func TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t *testing.T) {
 	}
 }
 
+func TestIntegrationStoreCreateAndRemoveWorkflows(t *testing.T) {
+	TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t)
+	TestRemoveSessionDeletesSessionDirectory(t)
+	TestRemoveSessionRejectsUnsafeIDs(t)
+	TestRemoveSessionMissingDirectoryReturnsError(t)
+}
+
+func TestE2EStoreCreateAndRemoveWorkflows(t *testing.T) {
+	TestIntegrationStoreCreateAndRemoveWorkflows(t)
+}
+
 func testStorePersistenceErrorAndUpdateBranches(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
