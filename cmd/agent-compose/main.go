@@ -3309,11 +3309,7 @@ func normalizeCLIHost(name, value string) (string, error) {
 func resolveAgentComposeSocketForCLI(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		if runtimeDir := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR")); runtimeDir != "" {
-			value = filepath.Join(runtimeDir, "agent-compose.sock")
-		} else {
-			value = filepath.Join(os.TempDir(), fmt.Sprintf("agent-compose-%d.sock", os.Getuid()))
-		}
+		value = config.DefaultAgentComposeSocket()
 	}
 	if value == "" {
 		return "", fmt.Errorf("AGENT_COMPOSE_SOCKET is empty")

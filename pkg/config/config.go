@@ -15,6 +15,7 @@ import (
 )
 
 const DefaultWorkspaceUploadLimitBytes int64 = 1 << 30
+const DefaultAgentComposeSocketPath = "/var/run/agent-compose.sock"
 const defaultGuestHomePath = "/root"
 
 const (
@@ -516,10 +517,14 @@ func resolveAgentComposeSocket(value string) (string, error) {
 }
 
 func defaultAgentComposeSocket() string {
+	return DefaultAgentComposeSocket()
+}
+
+func DefaultAgentComposeSocket() string {
 	if runtimeDir := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR")); runtimeDir != "" {
 		return filepath.Join(runtimeDir, "agent-compose.sock")
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("agent-compose-%d.sock", os.Getuid()))
+	return DefaultAgentComposeSocketPath
 }
 
 func validateTCPListenAddress(name, value string) error {

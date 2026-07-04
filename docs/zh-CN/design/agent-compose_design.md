@@ -67,7 +67,7 @@ daemon 默认监听 Unix socket：
 
 - `AGENT_COMPOSE_SOCKET` 显式设置时使用该路径。
 - 未设置时优先使用 `$XDG_RUNTIME_DIR/agent-compose.sock`。
-- 否则使用 `/tmp/agent-compose-<uid>.sock`。
+- 否则使用 `/var/run/agent-compose.sock`。
 
 只有显式设置 `HTTP_LISTEN` 时才额外启用 TCP HTTP/Connect listener。CLI 连接优先级是 `--host`、`AGENT_COMPOSE_HOST`、默认 Unix socket。
 

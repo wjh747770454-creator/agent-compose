@@ -70,7 +70,7 @@ func JupyterKernelspecsURL(proxyState ProxyState) string {
 
 func waitForJupyterProxy(ctx context.Context, proxyState ProxyState) error {
 	urlValue := jupyterKernelspecsURL(proxyState)
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := newJupyterReadyHTTPClient(5 * time.Second)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -114,6 +114,15 @@ func waitForJupyterProxy(ctx context.Context, proxyState ProxyState) error {
 			return fmt.Errorf("jupyter did not become ready on %s: %w", urlValue, ctx.Err())
 		case <-ticker.C:
 		}
+	}
+}
+
+func newJupyterReadyHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
 	}
 }
 

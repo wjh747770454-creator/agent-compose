@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -24,9 +25,49 @@ import (
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 	"agent-compose/proto/agentcompose/v2/agentcomposev2connect"
 	"agent-compose/proto/health/v1/healthv1connect"
+	"github.com/joho/godotenv"
 	"github.com/samber/do/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+func TestMain(m *testing.M) {
+	clearDaemonTestEnv()
+	os.Exit(m.Run())
+}
+
+func clearDaemonTestEnv() {
+	envFile, err := findDaemonTestEnvFile()
+	if err != nil {
+		return
+	}
+	values, err := godotenv.Read(envFile)
+	if err != nil {
+		return
+	}
+	for key := range values {
+		_ = os.Unsetenv(key)
+	}
+}
+
+func findDaemonTestEnvFile() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		path := filepath.Join(dir, ".env")
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", os.ErrNotExist
+		}
+		dir = parent
+	}
+}
 
 func executeCommand(args ...string) (string, string, int, error) {
 	var stdout bytes.Buffer
@@ -132,6 +173,18 @@ func TestDaemonCommandStartsDaemon(t *testing.T) {
 
 func TestCLIClientConfigPriority(t *testing.T) {
 	testCLIClientConfigPriority(t)
+}
+
+func TestResolveAgentComposeSocketForCLIFallsBackToVarRun(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+
+	socketPath, err := resolveAgentComposeSocketForCLI("")
+	if err != nil {
+		t.Fatalf("resolveAgentComposeSocketForCLI returned error: %v", err)
+	}
+	if socketPath != config.DefaultAgentComposeSocketPath {
+		t.Fatalf("socketPath = %q, want %q", socketPath, config.DefaultAgentComposeSocketPath)
+	}
 }
 
 func testCLIClientConfigPriority(t *testing.T) {

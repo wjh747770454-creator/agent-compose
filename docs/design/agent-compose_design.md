@@ -86,7 +86,7 @@ The daemon listens on a Unix socket by default:
 
 - `AGENT_COMPOSE_SOCKET` is used when explicitly set.
 - Otherwise `$XDG_RUNTIME_DIR/agent-compose.sock` is preferred.
-- Otherwise `/tmp/agent-compose-<uid>.sock` is used.
+- Otherwise `/var/run/agent-compose.sock` is used.
 
 A TCP HTTP/Connect listener is enabled only when `HTTP_LISTEN` is explicitly
 set. CLI connection priority is `--host`, then `AGENT_COMPOSE_HOST`, then the

@@ -45,6 +45,7 @@ RUN apt-get update &&     apt-get install -y --no-install-recommends ca-certific
 RUN ln -sfv /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo "Asia/Shanghai" > /etc/timezone
 WORKDIR /app
 COPY --from=go-build /out/agent-compose /app/agent-compose
+RUN ln -sf /app/agent-compose /usr/local/bin/agent-compose
 COPY --from=boxlite-local /out/runtime /app/boxlite/runtime
 COPY --from=microsandbox-local /out /app/microsandbox
 ENV RUNTIME_DRIVER=docker
@@ -61,5 +62,5 @@ ENV MICROSANDBOX_HOME=/data/microsandbox
 ENV MICROSANDBOX_MSB_PATH=/app/microsandbox/bin/msb
 ENV MICROSANDBOX_LIB_PATH=/app/microsandbox/lib/libmicrosandbox_go_ffi.so
 ENV LD_LIBRARY_PATH=/app/boxlite/runtime:/app/microsandbox/lib
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/app/agent-compose", "daemon"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/agent-compose"]
+CMD ["daemon"]

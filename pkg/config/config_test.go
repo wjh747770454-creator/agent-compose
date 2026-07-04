@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/base64"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,8 +10,48 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/samber/do/v2"
 )
+
+func TestMain(m *testing.M) {
+	clearConfigTestEnv()
+	os.Exit(m.Run())
+}
+
+func clearConfigTestEnv() {
+	envFile, err := findConfigTestEnvFile()
+	if err != nil {
+		return
+	}
+	values, err := godotenv.Read(envFile)
+	if err != nil {
+		return
+	}
+	for key := range values {
+		_ = os.Unsetenv(key)
+	}
+}
+
+func findConfigTestEnvFile() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		path := filepath.Join(dir, ".env")
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", os.ErrNotExist
+		}
+		dir = parent
+	}
+}
 
 func TestNewConfigParsesEnvironment(t *testing.T) {
 	testNewConfigParsesEnvironment(t)
@@ -179,6 +220,26 @@ func testNewConfigAllowsDefaultRootsAndRequiresValidDriver(t *testing.T) {
 
 func TestNewConfigDefaultsDaemonListenConfig(t *testing.T) {
 	testNewConfigDefaultsDaemonListenConfig(t)
+}
+
+func TestNewConfigDefaultsDaemonSocketToVarRunWithoutRuntimeDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DATA_ROOT", filepath.Join(root, "data"))
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("HTTP_LISTEN", "")
+	t.Setenv("AGENT_COMPOSE_SOCKET", "")
+	t.Setenv("AGENT_COMPOSE_HOST", "")
+
+	di := do.New()
+	do.ProvideValue(di, slog.Default())
+	config, err := NewConfig(di)
+	if err != nil {
+		t.Fatalf("NewConfig returned error: %v", err)
+	}
+
+	if config.AgentComposeSocket != DefaultAgentComposeSocketPath {
+		t.Fatalf("AgentComposeSocket = %q, want %q", config.AgentComposeSocket, DefaultAgentComposeSocketPath)
+	}
 }
 
 func testNewConfigDefaultsDaemonListenConfig(t *testing.T) {
