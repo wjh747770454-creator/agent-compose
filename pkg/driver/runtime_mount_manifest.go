@@ -36,6 +36,21 @@ type runtimeMountSpec struct {
 	isFile    bool
 }
 
+type directoryOnlyExposure string
+
+const (
+	directoryOnlyExposureNone          directoryOnlyExposure = ""
+	directoryOnlyExposureSymlink       directoryOnlyExposure = "symlink"
+	directoryOnlyExposureAlreadyInData directoryOnlyExposure = "already-in-data"
+)
+
+type logicalRuntimeMountEntry struct {
+	sessionPath           string
+	guestPath             string
+	isFile                bool
+	directoryOnlyExposure directoryOnlyExposure
+}
+
 func runtimeMountManifestPath(session *Session) string {
 	return filepath.Join(hostSessionDir(session), "vm", "mount-manifest.json")
 }
@@ -49,7 +64,7 @@ func prepareRuntimeMountManifest(config *appconfig.Config, session *Session, dri
 	if err := initializeSessionHomeDefaults(session); err != nil {
 		return RuntimeMountManifest{}, err
 	}
-	if err := initializeSessionRuntimeMountDirs(session); err != nil {
+	if err := initializeSessionRuntimeMountDirs(config, session); err != nil {
 		return RuntimeMountManifest{}, err
 	}
 	manifest, err := buildRuntimeMountManifest(config, session, driver)
@@ -181,28 +196,48 @@ func runtimeMountSpecsForDriver(config *appconfig.Config, session *Session, driv
 	}
 }
 
-func runtimeMountSpecsForDocker(config *appconfig.Config, session *Session) []runtimeMountSpec {
-	home := hostSessionHome(session)
-	return []runtimeMountSpec{
-		{hostPath: session.Summary.WorkspacePath, guestPath: config.GuestWorkspacePath},
-		{hostPath: filepath.Join(hostSessionDir(session), "state"), guestPath: config.GuestStateRoot},
-		{hostPath: filepath.Join(hostSessionDir(session), "runtime"), guestPath: config.GuestRuntimeRoot},
-		{hostPath: filepath.Join(hostSessionDir(session), "logs"), guestPath: config.GuestLogRoot},
-		{hostPath: filepath.Join(home, ".codex"), guestPath: filepath.Join(config.GuestHomePath, ".codex")},
-		{hostPath: filepath.Join(home, ".claude"), guestPath: filepath.Join(config.GuestHomePath, ".claude")},
-		{hostPath: filepath.Join(home, ".opencode"), guestPath: filepath.Join(config.GuestHomePath, ".opencode")},
-		{hostPath: filepath.Join(home, ".claude.json"), guestPath: filepath.Join(config.GuestHomePath, ".claude.json"), isFile: true},
-		{hostPath: filepath.Join(home, ".gitconfig"), guestPath: filepath.Join(config.GuestHomePath, ".gitconfig"), isFile: true},
-		{hostPath: filepath.Join(home, ".gemini"), guestPath: filepath.Join(config.GuestHomePath, ".gemini")},
-		{hostPath: filepath.Join(home, ".config", "claude"), guestPath: filepath.Join(config.GuestHomePath, ".config", "claude")},
-		{hostPath: filepath.Join(home, ".config", "Claude"), guestPath: filepath.Join(config.GuestHomePath, ".config", "Claude")},
-		{hostPath: filepath.Join(home, ".config", "gemini"), guestPath: filepath.Join(config.GuestHomePath, ".config", "gemini")},
-		{hostPath: filepath.Join(home, ".config", "opencode"), guestPath: filepath.Join(config.GuestHomePath, ".config", "opencode")},
-		{hostPath: filepath.Join(home, ".local", "share", "gemini"), guestPath: filepath.Join(config.GuestHomePath, ".local", "share", "gemini")},
+func runtimeMountEntries(config *appconfig.Config) []logicalRuntimeMountEntry {
+	appconfig.ApplyDefaultGuestPaths(config)
+	return []logicalRuntimeMountEntry{
+		{sessionPath: "workspace", guestPath: config.GuestWorkspacePath, directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "state", guestPath: config.GuestStateRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
+		{sessionPath: "runtime", guestPath: config.GuestRuntimeRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
+		{sessionPath: "logs", guestPath: config.GuestLogRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
+		{sessionPath: "home/.codex", guestPath: filepath.Join(config.GuestHomePath, ".codex"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.claude", guestPath: filepath.Join(config.GuestHomePath, ".claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.opencode", guestPath: filepath.Join(config.GuestHomePath, ".opencode"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.claude.json", guestPath: filepath.Join(config.GuestHomePath, ".claude.json"), isFile: true, directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.gitconfig", guestPath: filepath.Join(config.GuestHomePath, ".gitconfig"), isFile: true, directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.gemini", guestPath: filepath.Join(config.GuestHomePath, ".gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.config/claude", guestPath: filepath.Join(config.GuestHomePath, ".config", "claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.config/Claude", guestPath: filepath.Join(config.GuestHomePath, ".config", "Claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.config/gemini", guestPath: filepath.Join(config.GuestHomePath, ".config", "gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.config/opencode", guestPath: filepath.Join(config.GuestHomePath, ".config", "opencode"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sessionPath: "home/.local/share/gemini", guestPath: filepath.Join(config.GuestHomePath, ".local", "share", "gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
 	}
 }
 
+func logicalRuntimeMountHostPath(session *Session, entry logicalRuntimeMountEntry) string {
+	return filepath.Join(hostSessionDir(session), filepath.FromSlash(entry.sessionPath))
+}
+
+func runtimeMountSpecsForDocker(config *appconfig.Config, session *Session) []runtimeMountSpec {
+	entries := runtimeMountEntries(config)
+	specs := make([]runtimeMountSpec, 0, len(entries))
+	for _, entry := range entries {
+		specs = append(specs, runtimeMountSpec{
+			hostPath:  logicalRuntimeMountHostPath(session, entry),
+			guestPath: entry.guestPath,
+			isFile:    entry.isFile,
+		})
+	}
+	return specs
+}
+
 func runtimeMountSpecsForDirectoryOnlyRuntime(config *appconfig.Config, session *Session) []runtimeMountSpec {
+	if len(runtimeMountEntries(config)) == 0 {
+		return nil
+	}
 	return []runtimeMountSpec{
 		{hostPath: hostSessionDir(session), guestPath: directoryOnlyGuestSessionPath},
 	}
@@ -254,14 +289,12 @@ func initializeSessionHomeDefaults(session *Session) error {
 	return nil
 }
 
-func initializeSessionRuntimeMountDirs(session *Session) error {
-	for _, dir := range []string{
-		session.Summary.WorkspacePath,
-		filepath.Join(hostSessionDir(session), "state"),
-		filepath.Join(hostSessionDir(session), "runtime"),
-		filepath.Join(hostSessionDir(session), "logs"),
-		hostSessionHome(session),
-	} {
+func initializeSessionRuntimeMountDirs(config *appconfig.Config, session *Session) error {
+	for _, entry := range runtimeMountEntries(config) {
+		if entry.isFile {
+			continue
+		}
+		dir := logicalRuntimeMountHostPath(session, entry)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create session runtime mount dir %s: %w", dir, err)
 		}

@@ -26,6 +26,48 @@ func testRuntimeMountSession(root string) *Session {
 	}}
 }
 
+func TestRuntimeMountEntriesDefineSharedLogicalMountList(t *testing.T) {
+	config := testRuntimeMountConfig()
+	entries := runtimeMountEntries(config)
+	got := map[string]logicalRuntimeMountEntry{}
+	for _, entry := range entries {
+		if got[entry.guestPath].guestPath != "" {
+			t.Fatalf("duplicate logical guest path %s", entry.guestPath)
+		}
+		got[entry.guestPath] = entry
+	}
+	want := map[string]struct {
+		sessionPath string
+		isFile      bool
+		exposure    directoryOnlyExposure
+	}{
+		"/workspace":                {sessionPath: "workspace", exposure: directoryOnlyExposureSymlink},
+		"/data/state":               {sessionPath: "state", exposure: directoryOnlyExposureAlreadyInData},
+		"/data/runtime":             {sessionPath: "runtime", exposure: directoryOnlyExposureAlreadyInData},
+		"/data/logs":                {sessionPath: "logs", exposure: directoryOnlyExposureAlreadyInData},
+		"/root/.codex":              {sessionPath: "home/.codex", exposure: directoryOnlyExposureSymlink},
+		"/root/.claude":             {sessionPath: "home/.claude", exposure: directoryOnlyExposureSymlink},
+		"/root/.opencode":           {sessionPath: "home/.opencode", exposure: directoryOnlyExposureSymlink},
+		"/root/.claude.json":        {sessionPath: "home/.claude.json", isFile: true, exposure: directoryOnlyExposureSymlink},
+		"/root/.gitconfig":          {sessionPath: "home/.gitconfig", isFile: true, exposure: directoryOnlyExposureSymlink},
+		"/root/.gemini":             {sessionPath: "home/.gemini", exposure: directoryOnlyExposureSymlink},
+		"/root/.config/claude":      {sessionPath: "home/.config/claude", exposure: directoryOnlyExposureSymlink},
+		"/root/.config/Claude":      {sessionPath: "home/.config/Claude", exposure: directoryOnlyExposureSymlink},
+		"/root/.config/gemini":      {sessionPath: "home/.config/gemini", exposure: directoryOnlyExposureSymlink},
+		"/root/.config/opencode":    {sessionPath: "home/.config/opencode", exposure: directoryOnlyExposureSymlink},
+		"/root/.local/share/gemini": {sessionPath: "home/.local/share/gemini", exposure: directoryOnlyExposureSymlink},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("logical mount count = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for guestPath, wantEntry := range want {
+		entry := got[guestPath]
+		if entry.sessionPath != wantEntry.sessionPath || entry.isFile != wantEntry.isFile || entry.directoryOnlyExposure != wantEntry.exposure {
+			t.Fatalf("logical entry %s = %#v, want sessionPath=%s isFile=%v exposure=%s", guestPath, entry, wantEntry.sessionPath, wantEntry.isFile, wantEntry.exposure)
+		}
+	}
+}
+
 func TestPrepareRuntimeMountManifestForDockerIncludesRequiredMountsOnly(t *testing.T) {
 	root := t.TempDir()
 	session := testRuntimeMountSession(root)
@@ -46,22 +88,9 @@ func TestPrepareRuntimeMountManifestForDockerIncludesRequiredMountsOnly(t *testi
 		}
 		got[mount.GuestPath] = mount.HostPath
 	}
-	want := map[string]string{
-		"/workspace":                filepath.Join(root, "workspace"),
-		"/data/state":               filepath.Join(root, "state"),
-		"/data/runtime":             filepath.Join(root, "runtime"),
-		"/data/logs":                filepath.Join(root, "logs"),
-		"/root/.codex":              filepath.Join(root, "home", ".codex"),
-		"/root/.claude":             filepath.Join(root, "home", ".claude"),
-		"/root/.opencode":           filepath.Join(root, "home", ".opencode"),
-		"/root/.claude.json":        filepath.Join(root, "home", ".claude.json"),
-		"/root/.gitconfig":          filepath.Join(root, "home", ".gitconfig"),
-		"/root/.gemini":             filepath.Join(root, "home", ".gemini"),
-		"/root/.config/claude":      filepath.Join(root, "home", ".config", "claude"),
-		"/root/.config/Claude":      filepath.Join(root, "home", ".config", "Claude"),
-		"/root/.config/gemini":      filepath.Join(root, "home", ".config", "gemini"),
-		"/root/.config/opencode":    filepath.Join(root, "home", ".config", "opencode"),
-		"/root/.local/share/gemini": filepath.Join(root, "home", ".local", "share", "gemini"),
+	want := map[string]string{}
+	for _, entry := range runtimeMountEntries(testRuntimeMountConfig()) {
+		want[entry.guestPath] = filepath.Join(root, filepath.FromSlash(entry.sessionPath))
 	}
 	if len(got) != len(want) {
 		t.Fatalf("manifest mount count = %d, want %d: %+v", len(got), len(want), got)
@@ -201,6 +230,18 @@ func TestPrepareRuntimeMountManifestForDirectoryOnlyDriversMountsSingleSessionDi
 				}
 				if !info.IsDir() {
 					t.Fatalf("session path %s is not a directory", requiredDir)
+				}
+			}
+			for _, entry := range runtimeMountEntries(testRuntimeMountConfig()) {
+				if entry.isFile {
+					continue
+				}
+				info, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.sessionPath)))
+				if err != nil {
+					t.Fatalf("expected logical directory source %s to exist: %v", entry.sessionPath, err)
+				}
+				if !info.IsDir() {
+					t.Fatalf("logical source %s is not a directory", entry.sessionPath)
 				}
 			}
 			for _, requiredFile := range []string{".claude.json", ".gitconfig"} {

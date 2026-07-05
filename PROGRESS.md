@@ -483,7 +483,7 @@
       - 旧阶段 5.1 的真实 BoxLite bind mount smoke 仍是历史失败证据，不再作为 v2 目标验收。
     - 下一目标：7.2。
 
-- [ ] 7.2 抽象统一逻辑挂载清单
+- [x] 7.2 抽象统一逻辑挂载清单
   - 依赖：7.1。
   - 工作内容：
     - 在 `pkg/driver` 增加共享逻辑挂载条目 helper。
@@ -491,9 +491,9 @@
     - BoxLite/Microsandbox 从该清单派生 directory-only manifest 和 bootstrap 输入。
     - 保持 BoxLite/Microsandbox manifest 只有 `<session> -> /data`。
   - 可并行子任务：
-    - [ ] 可并行：实现逻辑清单和 Docker manifest 生成。
-    - [ ] 可并行：实现 directory-only manifest 派生。
-    - [ ] 可并行：补 manifest 共享清单单元测试。
+    - [x] 可并行：实现逻辑清单和 Docker manifest 生成。
+    - [x] 可并行：实现 directory-only manifest 派生。
+    - [x] 可并行：补 manifest 共享清单单元测试。
   - 测试方案：
     - `go test ./pkg/driver -run 'TestPrepareRuntimeMountManifest|TestRuntimeMountManifest'`
     - `go test ./pkg/driver`
@@ -502,10 +502,21 @@
     - Docker manifest 语义保持等价。
     - BoxLite/Microsandbox manifest 仍只有 `<session> -> /data`。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - 在 `pkg/driver/runtime_mount_manifest.go` 增加 `logicalRuntimeMountEntry`、`directoryOnlyExposure` 和 `runtimeMountEntries(config)`，把 workspace/state/runtime/logs/home 条目集中为单一逻辑清单。
+      - Docker manifest generation 改为从 `runtimeMountEntries(config)` 派生细粒度 bind mounts，保留 file source 和 directory source 语义。
+      - BoxLite/Microsandbox directory-only manifest 继续保持 `<session> -> /data`，并通过同一逻辑清单驱动 host source 初始化，为后续 bootstrap symlink 复用提供输入。
+      - `initializeSessionRuntimeMountDirs` 改为使用逻辑清单创建 directory source，补齐 `.opencode`、`.gemini`、`.config/*`、`.local/share/gemini` 等声明 home 目录。
+      - 增加 `TestRuntimeMountEntriesDefineSharedLogicalMountList`，并让 Docker manifest 期望值从逻辑清单派生，避免测试继续维护分散路径列表。
+    - 验证：
+      - `go test ./pkg/driver -run 'TestPrepareRuntimeMountManifest|TestRuntimeMountManifest'`：通过。
+      - `go test ./pkg/driver`：通过。
+      - `git diff --check`：通过。
+    - 审计与例外：
+      - 本任务只抽象 manifest/source 清单，未改变 directory-only bootstrap 行为；`/root` bind mount 删除和 home 条目 symlink 实现留给 7.3。
+      - 未新增 API、CLI、proto、数据库 schema、配置项、Docker compose 行为、`GUEST_HOME` 或 `HOME` 注入。
+      - BoxLite/Microsandbox manifest 仍只有 `<session> -> /data`，没有重新引入 file source mount。
     - 下一目标：7.3。
 
 - [ ] 7.3 改造 directory-only bootstrap 为 home 条目 symlink
