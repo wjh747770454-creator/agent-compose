@@ -135,13 +135,19 @@ func (s *Service) reconcileOrphanedRunningCells(ctx context.Context, session *Se
 		return err
 	}
 	var converged int
+	// Collect events first, then persist cells and events together.
+	// This prevents the inconsistency where cells are saved but events are lost
+	// (AddEvent error was previously silently ignored).
+	type cellEvent struct {
+		CellID  string
+		EventID string
+	}
+	var cellEvents []cellEvent
 	now := time.Now().UTC()
 	for i := range cells {
 		if !cells[i].Running {
 			continue
 		}
-		// Only converge cells created before this daemon instance started.
-		// Cells created after startedAt belong to the current daemon lifecycle.
 		if !cells[i].CreatedAt.Before(s.startedAt) {
 			continue
 		}
@@ -149,25 +155,37 @@ func (s *Service) reconcileOrphanedRunningCells(ctx context.Context, session *Se
 		cells[i].Success = false
 		cells[i].ExitCode = 1
 		converged++
+		eventID := uuid.NewString()
+		cellEvents = append(cellEvents, cellEvent{CellID: cells[i].ID, EventID: eventID})
 		slog.Info("converged orphaned running cell",
 			"session_id", session.Summary.ID,
 			"cell_id", cells[i].ID,
 			"cell_type", cells[i].Type,
 			"cell_source", truncateCellSource(cells[i].Source, 80),
 		)
-		_ = s.store.AddEvent(ctx, session.Summary.ID, SessionEvent{
-			ID:        uuid.NewString(),
-			Type:      "cell.execution_interrupted",
-			Level:     "warn",
-			Message:   orphanedRunningCellError,
-			CreatedAt: now,
-		})
 	}
 	if converged == 0 {
 		return nil
 	}
+	// Save cells first (the mutation we must not lose)
 	if err := s.store.saveCells(session.Summary.ID, cells); err != nil {
 		return err
+	}
+	// Save events after cells succeed (best-effort: log and continue on failure)
+	for _, ce := range cellEvents {
+		if err := s.store.AddEvent(ctx, session.Summary.ID, SessionEvent{
+			ID:        ce.EventID,
+			Type:      "cell.execution_interrupted",
+			Level:     "warn",
+			Message:   orphanedRunningCellError,
+			CreatedAt: now,
+		}); err != nil {
+			slog.Warn("failed to record cell.execution_interrupted event (cell already converged)",
+				"session_id", session.Summary.ID,
+				"cell_id", ce.CellID,
+				"error", err,
+			)
+		}
 	}
 	slog.Info("converged orphaned running cells", "session_id", session.Summary.ID, "count", converged)
 	return nil
