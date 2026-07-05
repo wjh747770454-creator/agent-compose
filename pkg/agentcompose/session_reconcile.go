@@ -64,13 +64,18 @@ func (s *Service) reconcilePendingSessionState(ctx context.Context, session *Ses
 	if err := s.store.UpdateSession(ctx, session); err != nil {
 		return nil, err
 	}
-	_ = s.store.AddEvent(ctx, session.Summary.ID, SessionEvent{
+	if err := s.store.AddEvent(ctx, session.Summary.ID, SessionEvent{
 		ID:        uuid.NewString(),
 		Type:      "session.startup_interrupted",
 		Level:     "warn",
 		Message:   "session marked failed after a previous startup was interrupted before the VM became ready",
 		CreatedAt: now,
-	})
+	}); err != nil {
+		slog.Warn("failed to record session.startup_interrupted event (session already marked failed)",
+			"session_id", session.Summary.ID,
+			"error", err,
+		)
+	}
 	return s.store.GetSession(ctx, session.Summary.ID)
 }
 
