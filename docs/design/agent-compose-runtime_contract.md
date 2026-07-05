@@ -77,11 +77,13 @@ Therefore these paths correspond:
 
 The `boxlite`, `docker`, and `microsandbox` drivers all consume
 `<session>/vm/mount-manifest.json`, but manifest content is generated per
-driver. Docker keeps fine-grained home subpath mounts, including file sources
-such as `.claude.json` and `.gitconfig`. BoxLite and Microsandbox use directory
-sources only. They expose `/workspace` and `/root` through guest-side symlinks
-from the mounted `<session> -> /data`, while `/data/state`, `/data/runtime`, and
-`/data/logs` come directly from mounted directories.
+driver from the same logical runtime mount list. Docker keeps fine-grained home
+subpath mounts, including file sources such as `.claude.json` and `.gitconfig`.
+BoxLite and Microsandbox use directory sources only. They expose
+`/workspace -> /data/workspace` through guest-side symlink and keep `/root` as a
+real image directory, while declared home entries such as `/root/.codex` and
+`/root/.gitconfig` are symlinked to `/data/home/...`. `/data/state`,
+`/data/runtime`, and `/data/logs` come directly from mounted directories.
 
 ## 3. Host Resource Preparation
 
@@ -148,8 +150,8 @@ RUNTIME_ROOT=/data/runtime
 
 agent-compose no longer overrides `HOME`; guest tools use the image default
 `HOME=/root`. Default Codex, Claude, and Git config is initialized by the host in
-session home and mounted to the corresponding paths under `/root` through the
-mount manifest.
+session home and exposed to the corresponding paths under `/root` through the
+mount manifest or directory-only bootstrap.
 
 ## 4. Entry Command
 
@@ -822,4 +824,4 @@ Changes to the JavaScript runtime or host invocation should preserve:
 - Provider state file path remains
   `/data/state/agents/providers/<provider>.json`.
 - The host can continue collecting provider-native session records from
-  `/data/home`.
+  `/data/home` through declared home-entry symlinks on directory-only runtimes.

@@ -58,14 +58,22 @@ Home persistence is handled by the mount manifest:
 
 | Host path | Docker guest path | BoxLite/Microsandbox guest path |
 | --- | --- | --- |
-| `<session>/home/.codex` | `/root/.codex` | Exposed through `<session> -> /data` and `/root -> /data/home` |
-| `<session>/home/.claude` | `/root/.claude` | Exposed through `<session> -> /data` and `/root -> /data/home` |
-| `<session>/home/.claude.json` | `/root/.claude.json` | Exposed through `<session> -> /data` and `/root -> /data/home` |
-| `<session>/home/.gitconfig` | `/root/.gitconfig` | Exposed through `<session> -> /data` and `/root -> /data/home` |
+| `<session>/home/.codex` | `/root/.codex` | Symlink `/root/.codex -> /data/home/.codex` |
+| `<session>/home/.claude` | `/root/.claude` | Symlink `/root/.claude -> /data/home/.claude` |
+| `<session>/home/.opencode` | `/root/.opencode` | Symlink `/root/.opencode -> /data/home/.opencode` |
+| `<session>/home/.claude.json` | `/root/.claude.json` | Symlink `/root/.claude.json -> /data/home/.claude.json` |
+| `<session>/home/.gitconfig` | `/root/.gitconfig` | Symlink `/root/.gitconfig -> /data/home/.gitconfig` |
+| `<session>/home/.gemini` | `/root/.gemini` | Symlink `/root/.gemini -> /data/home/.gemini` |
+| `<session>/home/.config/claude` | `/root/.config/claude` | Symlink |
+| `<session>/home/.config/Claude` | `/root/.config/Claude` | Symlink |
+| `<session>/home/.config/gemini` | `/root/.config/gemini` | Symlink |
+| `<session>/home/.config/opencode` | `/root/.config/opencode` | Symlink |
+| `<session>/home/.local/share/gemini` | `/root/.local/share/gemini` | Symlink |
 
-Docker also fine-grain mounts home subpaths such as `.gemini/`, `.config/*`,
-and `.local/share/gemini/`. BoxLite and Microsandbox mount only the whole
-`<session>` directory.
+Docker fine-grain mounts these home subpaths directly. BoxLite and Microsandbox
+mount only the whole `<session>` directory at `/data`; guest bootstrap keeps
+`/root` as a real directory and creates symlinks only for the declared home
+entries above. Other `/root` subpaths are not guaranteed to persist.
 
 ## Host Configuration Variables
 
@@ -143,4 +151,5 @@ Artifact dir is a command/request-scoped path:
 - Runtime state variables are unified as `STATE_ROOT` and `RUNTIME_ROOT`.
 - `HOME`, `SESSION_WORKSPACE`, guest-side `SESSION_ROOT`, and global
   `ARTIFACT_DIR` are no longer part of the current runtime contract.
-- Home persistence paths in the manifest land under `/root/...`.
+- Declared home persistence paths are visible under `/root/...`; for
+  directory-only runtimes they are symlinks into `/data/home/...`.

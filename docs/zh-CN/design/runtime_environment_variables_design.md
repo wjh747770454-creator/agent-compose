@@ -50,12 +50,19 @@ Home 持久化由 mount manifest 完成：
 
 | Host path | Docker guest path | BoxLite/Microsandbox guest path |
 | --- | --- | --- |
-| `<session>/home/.codex` | `/root/.codex` | 通过 `<session> -> /data` 和 `/root -> /data/home` 暴露 |
-| `<session>/home/.claude` | `/root/.claude` | 通过 `<session> -> /data` 和 `/root -> /data/home` 暴露 |
-| `<session>/home/.claude.json` | `/root/.claude.json` | 通过 `<session> -> /data` 和 `/root -> /data/home` 暴露 |
-| `<session>/home/.gitconfig` | `/root/.gitconfig` | 通过 `<session> -> /data` 和 `/root -> /data/home` 暴露 |
+| `<session>/home/.codex` | `/root/.codex` | Symlink `/root/.codex -> /data/home/.codex` |
+| `<session>/home/.claude` | `/root/.claude` | Symlink `/root/.claude -> /data/home/.claude` |
+| `<session>/home/.opencode` | `/root/.opencode` | Symlink `/root/.opencode -> /data/home/.opencode` |
+| `<session>/home/.claude.json` | `/root/.claude.json` | Symlink `/root/.claude.json -> /data/home/.claude.json` |
+| `<session>/home/.gitconfig` | `/root/.gitconfig` | Symlink `/root/.gitconfig -> /data/home/.gitconfig` |
+| `<session>/home/.gemini` | `/root/.gemini` | Symlink `/root/.gemini -> /data/home/.gemini` |
+| `<session>/home/.config/claude` | `/root/.config/claude` | Symlink |
+| `<session>/home/.config/Claude` | `/root/.config/Claude` | Symlink |
+| `<session>/home/.config/gemini` | `/root/.config/gemini` | Symlink |
+| `<session>/home/.config/opencode` | `/root/.config/opencode` | Symlink |
+| `<session>/home/.local/share/gemini` | `/root/.local/share/gemini` | Symlink |
 
-Docker 还会细粒度挂载 `.gemini/`、`.config/*`、`.local/share/gemini/` 等 home 子路径。BoxLite/Microsandbox 只挂载整个 `<session>` 目录。
+Docker 会直接细粒度挂载这些 home 子路径。BoxLite/Microsandbox 只把整个 `<session>` 目录挂到 `/data`；guest bootstrap 保持 `/root` 为真实目录，只为上表声明的 home 条目创建 symlink。其他 `/root` 子路径不保证持久化。
 
 ## Host Configuration Variables
 
@@ -127,4 +134,4 @@ artifact dir 是 command/request 范围内的路径：
 - workspace 变量统一为 `WORKSPACE`。
 - runtime state 变量统一为 `STATE_ROOT` 和 `RUNTIME_ROOT`。
 - `HOME`、`SESSION_WORKSPACE`、guest-side `SESSION_ROOT`、global `ARTIFACT_DIR` 不再作为当前 runtime contract 的一部分。
-- manifest 中 home 持久化路径落到 `/root/...`。
+- 声明的 home 持久化路径在 guest 内可通过 `/root/...` 访问；对 directory-only runtime，它们是指向 `/data/home/...` 的 symlink。

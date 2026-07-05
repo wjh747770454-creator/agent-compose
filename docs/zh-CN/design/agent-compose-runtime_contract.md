@@ -64,7 +64,7 @@ host:  ./data/agent-compose/sessions/<session_id>
 | `<session>/runtime` | `/data/runtime` | 运行期资源与扩展能力的预留目录 |
 | `<session>/logs` | `/data/logs` | Jupyter 等日志 |
 
-`boxlite`、`docker`、`microsandbox` 三个 driver 都消费 `<session>/vm/mount-manifest.json`，但 manifest 内容按 driver 生成。Docker 保留细粒度 home 子路径挂载，包括 `.claude.json` 和 `.gitconfig` file source；BoxLite 和 Microsandbox 只挂载目录 source，并通过 `<session> -> /data` 加 guest 侧 symlink 暴露 `/workspace` 和 `/root`，`/data/state`、`/data/runtime`、`/data/logs` 直接来自挂载目录。
+`boxlite`、`docker`、`microsandbox` 三个 driver 都消费 `<session>/vm/mount-manifest.json`，但 manifest 内容从同一套逻辑 runtime mount 清单按 driver 生成。Docker 保留细粒度 home 子路径挂载，包括 `.claude.json` 和 `.gitconfig` file source；BoxLite 和 Microsandbox 只挂载目录 source。它们通过 guest 侧 symlink 暴露 `/workspace -> /data/workspace`，保持 `/root` 为真实镜像目录，并把声明的 home 条目（如 `/root/.codex`、`/root/.gitconfig`）symlink 到 `/data/home/...`。`/data/state`、`/data/runtime`、`/data/logs` 直接来自挂载目录。
 
 ## 3. Host 资源准备
 
@@ -122,7 +122,7 @@ STATE_ROOT=/data/state
 RUNTIME_ROOT=/data/runtime
 ```
 
-agent-compose 不再覆盖 `HOME`，guest 工具使用镜像默认 `HOME=/root`。默认 Codex/Claude/Git 配置由 host 在 session home 中初始化，并通过 mount manifest 挂到 `/root` 下对应路径。
+agent-compose 不再覆盖 `HOME`，guest 工具使用镜像默认 `HOME=/root`。默认 Codex/Claude/Git 配置由 host 在 session home 中初始化，并通过 mount manifest 或 directory-only bootstrap 暴露到 `/root` 下对应路径。
 
 ## 4. 入口命令
 
@@ -688,4 +688,4 @@ runtime.env.all()
 - 成功时 stdout 必须输出可解析的 agent result JSON，推荐使用 `__AGENT_RESULT__` 前缀。
 - 人类可读过程输出应继续走 stderr，避免污染 stdout 协议通道。
 - provider state 文件路径保持 `/data/state/agents/providers/<provider>.json`。
-- host 可继续通过 `/data/home` 收集 provider 原生会话记录。
+- host 可继续通过 `/data/home` 收集 provider 原生会话记录；directory-only runtime 通过声明 home 条目 symlink 暴露这些路径。

@@ -21,8 +21,15 @@
 - [ ] 每个行为变更任务都必须写明并运行最小可证明测试；阶段性收口时运行 harness 定义的完整门禁。
 - [ ] `task lint`、`task build`、`task test` 是最终常规质量门禁；真实 runtime 变更完成后按环境运行 `task test:runtime-smoke`。
 - [ ] 不新增 API、CLI、proto、数据库 schema、`GUEST_HOME` 或 Docker manifest 行为，除非先更新 spec 和 plan。
-- [ ] 不把 `/root` 静默降级回 symlink；如果 BoxLite 或 Microsandbox 不支持 guest 内 `mount --bind /data/home /root`，停止实现并更新 spec。
+- [ ] 不把 `/root` 整体降级成 symlink；BoxLite/Microsandbox 的 directory-only home 暴露只能按统一逻辑清单为声明的 `/root/...` 条目创建 symlink。
 - [ ] 每个任务完成后必须把完成总结写成多行 Markdown 结构，包含 `状态`、`变更`、`验证`、`审计与例外`、`下一目标`。
+
+## 方案重定向说明
+
+- 2026-07-05 已连续三次证明 BoxLite guest 内 `mount --bind /data/home /root` 返回 `permission denied`，旧 `/root` bind mount 方案停止。
+- 新方案改为统一逻辑挂载清单：Docker、BoxLite、Microsandbox 使用同一套 workspace/state/runtime/logs/home 条目；Docker 从清单生成细粒度 bind mounts，BoxLite/Microsandbox 仍只挂 `<session> -> /data`，再由 bootstrap 创建 `/workspace` 和声明 home 条目的 symlink。
+- `/root` 必须保持 guest image 的真实目录；不得创建整体 `/root -> /data/home` symlink。
+- 旧阶段 5/6 的 bind mount smoke 验收已被阶段 7 起的新任务取代；历史阻塞记录保留为方案变更依据。
 
 ## 阶段 1：锁定实现边界和测试基线
 
@@ -433,6 +440,145 @@
     - 常规门禁通过，或完成总结中明确记录环境型失败原因。
     - 无 proto、API、CLI、数据库 schema 或 compose 行为变更。
     - 真实 runtime smoke 的运行结果或未运行原因被记录。
+  - 完成总结：
+    - 状态：待完成。
+    - 变更：待完成。
+    - 验证：待完成。
+    - 审计与例外：待完成。
+    - 下一目标：无。
+
+## 阶段 7：v2 方案重定向与统一逻辑清单
+
+参考文档：[docs/plan/directory-only-runtime-bootstrap-implementation-plan.md](docs/plan/directory-only-runtime-bootstrap-implementation-plan.md#阶段-1方案重定向和边界复核)
+
+- [x] 7.1 更新 v2 方案文档和执行队列
+  - 依赖：旧 5.1 阻塞记录完成。
+  - 工作内容：
+    - 更新 spec，将目标从 `/root` bind mount 改为真实 `/root` + 声明 home 条目 symlink。
+    - 更新 plan，按统一逻辑挂载清单、directory-only bootstrap、真实 runtime smoke、全量门禁重新拆分阶段。
+    - 更新 runtime mount manifest 设计文档，明确 Docker/BoxLite/Microsandbox 使用同一逻辑清单但不同应用方式。
+    - 更新本文件的执行规则和后续任务队列。
+  - 可并行子任务：
+    - [x] 可并行：更新 spec/plan。
+    - [x] 可并行：更新 mount manifest 设计文档。
+    - [x] 可并行：更新 PROGRESS 队列。
+  - 测试方案：
+    - 文档任务不要求代码测试。
+    - `git diff --check`
+  - 验收标准：
+    - 文档不再把 `/root` bind mount 作为目标语义。
+    - 文档明确 `/root` 保持真实目录，声明 home 条目通过 symlink 暴露到 `/data/home/...`。
+    - 文档明确统一逻辑清单是 Docker 和 directory-only runtime 的共同 source of truth。
+  - 完成总结：
+    - 状态：已完成。
+    - 变更：
+      - `docs/spec/directory-only-runtime-bootstrap-spec.md` 改为 v2 方案，保留 BoxLite bind mount 阻塞记录作为方案变更依据。
+      - `docs/plan/directory-only-runtime-bootstrap-implementation-plan.md` 改为 v2 阶段计划。
+      - `docs/design/runtime_mount_manifest_driver_specific_design.md` 和中文版本同步新设计。
+      - `PROGRESS.md` 增加方案重定向说明和阶段 7 后续队列。
+    - 验证：
+      - `git diff --check`：通过。
+    - 审计与例外：
+      - 本任务只更新设计和执行文档，未修改生产代码、测试代码、API、CLI、proto、数据库 schema、Docker compose 或 JS runtime。
+      - 旧阶段 5.1 的真实 BoxLite bind mount smoke 仍是历史失败证据，不再作为 v2 目标验收。
+    - 下一目标：7.2。
+
+- [ ] 7.2 抽象统一逻辑挂载清单
+  - 依赖：7.1。
+  - 工作内容：
+    - 在 `pkg/driver` 增加共享逻辑挂载条目 helper。
+    - Docker manifest 从该清单生成细粒度 bind mounts。
+    - BoxLite/Microsandbox 从该清单派生 directory-only manifest 和 bootstrap 输入。
+    - 保持 BoxLite/Microsandbox manifest 只有 `<session> -> /data`。
+  - 可并行子任务：
+    - [ ] 可并行：实现逻辑清单和 Docker manifest 生成。
+    - [ ] 可并行：实现 directory-only manifest 派生。
+    - [ ] 可并行：补 manifest 共享清单单元测试。
+  - 测试方案：
+    - `go test ./pkg/driver -run 'TestPrepareRuntimeMountManifest|TestRuntimeMountManifest'`
+    - `go test ./pkg/driver`
+  - 验收标准：
+    - Docker 与 directory-only runtime 不再维护分散 home 条目清单。
+    - Docker manifest 语义保持等价。
+    - BoxLite/Microsandbox manifest 仍只有 `<session> -> /data`。
+  - 完成总结：
+    - 状态：待完成。
+    - 变更：待完成。
+    - 验证：待完成。
+    - 审计与例外：待完成。
+    - 下一目标：7.3。
+
+- [ ] 7.3 改造 directory-only bootstrap 为 home 条目 symlink
+  - 依赖：7.2。
+  - 工作内容：
+    - 删除 bootstrap 中的 `/root` bind mount 逻辑。
+    - 保持 `/root` 为真实目录，不创建整体 `/root -> /data/home` symlink。
+    - 为统一逻辑清单中的 home 条目创建 `/root/... -> /data/home/...` symlink。
+    - 更新 BoxLite/Microsandbox bootstrap guard 和 unit tests。
+  - 可并行子任务：
+    - [ ] 可并行：实现 bootstrap symlink 逻辑。
+    - [ ] 可并行：更新 bootstrap command tests。
+    - [ ] 可并行：更新 lifecycle/exec guard tests。
+  - 测试方案：
+    - `go test ./pkg/driver -run 'TestDirectoryOnly|Test.*Bootstrap'`
+    - `go test ./pkg/driver`
+  - 验收标准：
+    - bootstrap 不包含 `mount --bind /data/home /root`。
+    - bootstrap 不生成 `/root -> /data/home`。
+    - `/data/home` 缺失时不删除或移动 `/root`。
+    - 声明 home 条目可通过 symlink 从 `/root/...` 访问。
+  - 完成总结：
+    - 状态：待完成。
+    - 变更：待完成。
+    - 验证：待完成。
+    - 审计与例外：待完成。
+    - 下一目标：7.4。
+
+- [ ] 7.4 更新真实 runtime smoke 覆盖
+  - 依赖：7.3。
+  - 工作内容：
+    - 更新 BoxLite smoke，验证真实 `/root` + 声明 home 条目 symlink。
+    - 更新 Microsandbox smoke，验证 EnsureSession 和 exec guard。
+    - 更新共享 smoke helper，不再要求 `/root` 是 mount point。
+  - 可并行子任务：
+    - [ ] 可并行：更新 BoxLite smoke。
+    - [ ] 可并行：更新 Microsandbox smoke。
+    - [ ] 可并行：更新共享 smoke helper 与 Taskfile 正则审计。
+  - 测试方案：
+    - `SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke`
+    - `SMOKE_RUNTIME_DRIVERS=microsandbox task test:runtime-smoke`
+    - `go test ./pkg/driver`
+  - 验收标准：
+    - 两个 driver 的 smoke 都证明 directory-only bootstrap 不依赖 Jupyter readiness。
+    - 两个 driver 的 smoke 都证明声明 home 条目持久化到 host `<session>/home`。
+    - OCI image smoke 仍按既有 Taskfile 范围执行。
+  - 完成总结：
+    - 状态：待完成。
+    - 变更：待完成。
+    - 验证：待完成。
+    - 审计与例外：待完成。
+    - 下一目标：7.5。
+
+- [ ] 7.5 运行全量质量门禁并收口文档
+  - 依赖：7.4。
+  - 工作内容：
+    - 审计 spec/plan/design 与实现一致性。
+    - 运行常规门禁和 CI Go 测试范围。
+    - 记录真实 runtime smoke 结果或环境型例外。
+  - 可并行子任务：
+    - [ ] 可并行：运行 `task lint`。
+    - [ ] 可并行：运行 `task build`。
+    - [ ] 可并行：运行 `task test`。
+    - [ ] 可并行：运行 `go test ./cmd/... ./pkg/...`。
+  - 测试方案：
+    - `task lint`
+    - `task build`
+    - `task test`
+    - `go test ./cmd/... ./pkg/...`
+  - 验收标准：
+    - 常规门禁通过，或明确记录环境型失败原因。
+    - 无 proto、API、CLI、数据库 schema 或 compose 行为变更。
+    - 文档不再描述 BoxLite/Microsandbox 通过 `/root` bind mount 或整体 `/root` symlink 暴露 home。
   - 完成总结：
     - 状态：待完成。
     - 变更：待完成。
