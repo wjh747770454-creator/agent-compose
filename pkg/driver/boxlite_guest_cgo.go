@@ -273,3 +273,47 @@ func directoryOnlyGuestSessionBootstrapCommand(config *appconfig.Config) string 
 	}
 	return strings.Join(commands, "; ")
 }
+
+func directoryOnlyGuestSessionBootstrapExecSpec(config *appconfig.Config) ExecSpec {
+	return ExecSpec{
+		Command: "sh",
+		Args:    []string{"-lc", directoryOnlyGuestSessionBootstrapCommand(config)},
+		Cwd:     "/",
+	}
+}
+
+func formatDirectoryOnlyGuestSessionBootstrapError(driver, sessionID, runtimeID string, result ExecResult, execErr error) error {
+	parts := []string{"directory-only guest bootstrap failed", "driver=" + strings.TrimSpace(driver)}
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+		parts = append(parts, "session_id="+sessionID)
+	}
+	if runtimeID = strings.TrimSpace(runtimeID); runtimeID != "" {
+		parts = append(parts, "runtime_id="+runtimeID)
+	}
+	if result.ExitCode != 0 {
+		parts = append(parts, fmt.Sprintf("exit_code=%d", result.ExitCode))
+	}
+	if stdout := summarizeBootstrapOutput(result.Stdout); stdout != "" {
+		parts = append(parts, "stdout="+stdout)
+	}
+	if stderr := summarizeBootstrapOutput(result.Stderr); stderr != "" {
+		parts = append(parts, "stderr="+stderr)
+	}
+	message := strings.Join(parts, " ")
+	if execErr != nil {
+		return fmt.Errorf("%s: %w", message, execErr)
+	}
+	return fmt.Errorf("%s", message)
+}
+
+func summarizeBootstrapOutput(output string) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return ""
+	}
+	const limit = 1024
+	if len(output) <= limit {
+		return fmt.Sprintf("%q", output)
+	}
+	return fmt.Sprintf("%q", output[:limit]+"...")
+}

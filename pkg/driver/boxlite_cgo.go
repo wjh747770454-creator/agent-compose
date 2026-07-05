@@ -398,6 +398,11 @@ func (r *cgoBoxRuntime) EnsureSession(ctx context.Context, session *Session, vmS
 		slog.Info("agent-compose boxlite box started", "session_id", session.Summary.ID, "elapsed_ms", time.Since(startedAt).Milliseconds())
 	}
 
+	if err := r.ensureDirectoryOnlyGuestSessionBootstrap(ctx, box, session); err != nil {
+		return SessionVMInfo{}, err
+	}
+	slog.Info("agent-compose boxlite guest bootstrap ready", "session_id", session.Summary.ID, "created", created, "elapsed_ms", time.Since(startedAt).Milliseconds())
+
 	if jupyterEnabled(proxyState) {
 		slog.Info("agent-compose boxlite checking jupyter", "session_id", session.Summary.ID, "host_port", proxyState.HostPort)
 		if err := waitForJupyterProxy(ctx, proxyState); err != nil {
@@ -486,6 +491,25 @@ func (r *cgoBoxRuntime) execWithStream(ctx context.Context, vmState VMState, spe
 		}
 	}
 	return r.executeBox(ctx, box, spec, stream)
+}
+
+func (r *cgoBoxRuntime) ensureDirectoryOnlyGuestSessionBootstrap(ctx context.Context, box *cgoBoxHandle, session *Session) error {
+	boxID := ""
+	if id, err := r.boxID(box); err == nil {
+		boxID = id
+	}
+	sessionID := ""
+	if session != nil {
+		sessionID = session.Summary.ID
+	}
+	result, err := r.executeBox(ctx, box, directoryOnlyGuestSessionBootstrapExecSpec(r.config), nil)
+	if err != nil {
+		return formatDirectoryOnlyGuestSessionBootstrapError(RuntimeDriverBoxlite, sessionID, boxID, result, err)
+	}
+	if !result.Success {
+		return formatDirectoryOnlyGuestSessionBootstrapError(RuntimeDriverBoxlite, sessionID, boxID, result, nil)
+	}
+	return nil
 }
 
 func (r *cgoBoxRuntime) runtimeHandle() (*C.CBoxliteRuntime, error) {

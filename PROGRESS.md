@@ -142,7 +142,7 @@
 
 参考文档：[docs/plan/directory-only-runtime-bootstrap-implementation-plan.md](docs/plan/directory-only-runtime-bootstrap-implementation-plan.md#阶段-3接入-boxlite-lifecycle-和-exec-guard)
 
-- [ ] 3.1 在 BoxLite EnsureSession 中执行 bootstrap
+- [x] 3.1 在 BoxLite EnsureSession 中执行 bootstrap
   - 依赖：2.2。
   - 工作内容：
     - 在 `pkg/driver/boxlite_cgo.go` 增加 BoxLite 专用 bootstrap 执行方法。
@@ -150,8 +150,8 @@
     - 复用已有 running box 时执行 bootstrap guard。
     - bootstrap 使用 cwd `/`，错误包含 driver、session id 或 box id、stdout/stderr 摘要。
   - 可并行子任务：
-    - [ ] 可并行：实现 BoxLite bootstrap 执行 wrapper。
-    - [ ] 可并行：补 BoxLite EnsureSession 行为测试设计。
+    - [x] 可并行：实现 BoxLite bootstrap 执行 wrapper。
+    - [x] 可并行：补 BoxLite EnsureSession 行为测试设计。
   - 测试方案：
     - `go test ./pkg/driver -run 'Test.*BoxLite.*Ensure|Test.*Bootstrap'`
     - `go test ./pkg/driver`
@@ -159,10 +159,24 @@
     - BoxLite 无 Jupyter `EnsureSession` 不再依赖 Jupyter launch 才创建 `/workspace` 和 `/root`。
     - bootstrap 失败时 `EnsureSession` 返回错误，session 不被视为 ready。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - 在 `pkg/driver/boxlite_cgo.go` 增加 `ensureDirectoryOnlyGuestSessionBootstrap`，通过 BoxLite exec 执行 directory-only bootstrap。
+      - `EnsureSession` 在新建 box start 成功后、已有 box 被 `getOrCreateBox` 复用或重启后，统一执行 bootstrap，再进入 Jupyter readiness 检查。
+      - bootstrap exec 使用 `directoryOnlyGuestSessionBootstrapExecSpec`，固定 `Command=sh`、`Args=-lc <bootstrap>`、`Cwd=/`，避免 `/workspace` 尚未就绪时 chdir 失败。
+      - bootstrap 失败时通过 `formatDirectoryOnlyGuestSessionBootstrapError` 返回包含 driver、session id、box/runtime id、exit code、stdout/stderr 摘要或底层 exec error 的诊断错误。
+      - 增加默认构建可运行的测试，覆盖 bootstrap exec spec 和错误上下文；同时用 `boxlitecgo` build tag 编译验证 cgo 路径。
+    - 验证：
+      - `go test ./pkg/driver -run 'Test.*BoxLite.*Ensure|Test.*Bootstrap'`：通过。
+      - `go test ./pkg/driver`：通过。
+      - `go test -tags boxlitecgo ./pkg/driver -run 'Test.*BoxLite.*Ensure|Test.*Bootstrap'`：通过。
+      - `go test -tags boxlitecgo ./pkg/driver`：通过。
+      - `git diff --check`：通过。
+    - 审计与例外：
+      - 本任务只接入 BoxLite `EnsureSession` lifecycle bootstrap；`Exec`/`ExecStream` 前 guard 尚未接入，按 3.2 继续。
+      - 未新增 API、CLI、proto、数据库 schema、配置项、Docker manifest 语义或 JS runtime 主修复。
+      - BoxLite Jupyter command 仍保留内部 directory-only bootstrap，`EnsureSession` 后续 bootstrap 必须保持幂等；当前 helper 已按阶段 2 实现幂等保护。
+      - 真实 BoxLite smoke 未在本任务运行；按阶段 5 使用 `SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke` 验证真实 runtime bind mount 能力。
     - 下一目标：3.2。
 
 - [ ] 3.2 在 BoxLite Exec/ExecStream 前执行 bootstrap guard
