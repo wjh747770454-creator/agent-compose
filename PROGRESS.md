@@ -298,8 +298,8 @@
     - 避免只手动 `getOrCreateBox` + `startBox` 后等待旧 marker。
     - 增加 `/root` 是 mount point、不是 symlink、home 文件来自 session home 的验证。
   - 可并行子任务：
-    - [ ] 可并行：更新 smoke lifecycle 路径。
-    - [ ] 可并行：更新 `/root` bind mount 断言 helper。
+    - [x] 可并行：更新 smoke lifecycle 路径。
+    - [x] 可并行：更新 `/root` bind mount 断言 helper。
   - 测试方案：
     - `SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke`
     - 若环境缺失，记录未运行原因，并至少运行 `go test ./pkg/driver`。
@@ -307,11 +307,27 @@
     - BoxLite smoke 不依赖 Jupyter readiness 间接触发 bootstrap。
     - BoxLite smoke 能证明 `/root` bind mount 语义。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：5.2。
+    - 状态：未完成；已触发 BoxLite runtime 能力停止条件。
+    - 变更：
+      - `TestSmokeBoxLiteRuntimeMountManifestDirectoryOnlyStarts` 和 OCI image smoke 均改为通过 `runtime.EnsureSession` 覆盖 BoxLite lifecycle bootstrap，不再手动 `getOrCreateBox` + `startBox`。
+      - 增加 `assertBoxLiteRuntimeSmokeGuestPaths`，通过 BoxLite 内部 `executeBox` 直接检查 `EnsureSession` 后的 guest path 状态，避免 public `Exec` guard 掩盖 lifecycle bootstrap 缺失。
+      - BoxLite smoke 现在验证 `/root` 是 mount point、不是 symlink、`/root` 与 `/data/home` 指向同一目录实体，且 `/root/.codex/config.toml`、`/root/.gitconfig`、`/root/.claude.json` 来自 session home。
+      - BoxLite smoke 现在验证 `/workspace -> /data/workspace` 并可作为 guest cwd，同时写入 home/state marker 供 host-side 持久化断言复用。
+    - 验证：
+      - `go test -tags boxlitecgo ./pkg/driver -run '^TestSmokeBoxLiteRuntimeMountManifestDirectoryOnlyStarts$'`：通过（未设置 `SMOKE_RUNTIME_DRIVERS`，测试按 smoke gate skip，但完成编译）。
+      - `go test ./pkg/driver`：通过（cached）。
+      - `go test -tags boxlitecgo ./pkg/driver`：通过。
+      - `git diff --check`：通过。
+      - `SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke`：初次失败，host 环境阻塞为 `create runtime: unsupported: /dev/kvm: permission denied`。
+      - `sudo setfacl -m u:$(id -un):rw /dev/kvm` 后重跑 `SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke`：仍失败，BoxLite cgo runtime re-open `/dev/kvm` panic。
+      - `sudo usermod -aG kvm $(id -un)` 后通过 `sg kvm -c 'SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke'` 重跑：KVM 阻塞解除，但默认 `docker.io/library/debian:bookworm-slim` manifest 拉取失败。
+      - `sg kvm -c 'IMAGE_REGISTRY=registry-mirrors.dev.in.chaitin.net SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke'`：BoxLite runtime 启动并进入 bootstrap，失败于 `directory-only guest bootstrap failed ... stderr="mount: /root: permission denied ... directory-only home target is not a mount point /root"`。
+    - 审计与例外：
+      - 本任务只更新 BoxLite smoke 覆盖，未触达 API、CLI、proto、数据库 schema、配置项、Docker manifest 语义或 JS runtime 主修复。
+      - 已通过 sudo/`sg kvm` 排除 host KVM 组权限问题，BoxLite guest 内 `mount --bind /data/home /root` 返回 permission denied。
+      - 该结果命中 spec/plan 停止条件：不得退回 `/root -> /data/home` symlink；停止后续实现并更新 spec/plan，等待 BoxLite runtime 能力或产品方案决策。
+      - Microsandbox smoke 覆盖暂不推进，避免在 BoxLite 停止条件未解决时继续扩大实现面。
+    - 下一目标：停止实现并更新 spec/plan 记录 BoxLite bind mount runtime 能力限制。
 
 - [ ] 5.2 更新 Microsandbox smoke 覆盖
   - 依赖：4.2。

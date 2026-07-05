@@ -120,6 +120,11 @@ go test ./pkg/driver
 - 如果 BoxLite guest 不允许 `mount --bind`，停止实现并记录 runtime 能力限制；不得退回 `/root` symlink 方案。
 - 如果 BoxLite exec API 无法可靠获取 bootstrap stdout/stderr，至少保留 exit status 和可定位的 command context。
 
+执行记录：
+
+- 2026-07-05 执行 `sg kvm -c 'IMAGE_REGISTRY=registry-mirrors.dev.in.chaitin.net SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke'` 时，BoxLite runtime 成功越过 host KVM 和 image registry 阶段，但 guest bootstrap 中 `mount --bind /data/home /root` 返回 `permission denied`。
+- 该结果已触发 BoxLite 停止条件。后续不得以 `/root -> /data/home` symlink 降级完成；需先确认 BoxLite guest 可获得 bind mount 能力，或回到 spec 重新决策方案。
+
 ## 阶段 4：接入 Microsandbox lifecycle 和 exec guard
 
 目标：Microsandbox 在无 Jupyter start/resume 和每次 exec 前都能完成或自愈 directory-only bootstrap。

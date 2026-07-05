@@ -185,3 +185,20 @@ task test
 - `/root` 推荐通过 guest 内 `mount --bind /data/home /root` 暴露，而不是 symlink。
 - bootstrap 必须可重复执行，并能覆盖已有 running sandbox 的自愈场景。
 - Docker driver 不受该问题影响，仍使用现有细粒度 bind mount。
+
+## 运行时能力阻塞记录
+
+2026-07-05 在本地 BoxLite smoke 中，已通过 `sudo usermod -aG kvm $(id -un)` 和 `sg kvm` 排除 host `/dev/kvm` 权限问题，并通过 `IMAGE_REGISTRY=registry-mirrors.dev.in.chaitin.net` 排除默认 Docker Hub manifest 拉取问题。BoxLite runtime 能启动并进入 guest bootstrap，但 guest 内执行：
+
+```bash
+mount --bind /data/home /root
+```
+
+失败为：
+
+```text
+mount: /root: permission denied
+directory-only home target is not a mount point /root
+```
+
+该结果命中本方案停止条件：不得静默退回 `/root -> /data/home` symlink。BoxLite 方向在确认 runtime 能授予 guest 执行 bind mount 所需能力，或产品重新决策 `/root` 暴露方案前，不应标记完成。
