@@ -222,7 +222,7 @@ go test ./cmd/agent-compose ./pkg/agentcompose/api ./pkg/storage/sessionstore -c
       - prohibited-path check 无输出，表示未命中禁止范围。
     - 下一目标：5.2 运行 harness 门禁。
 
-- [ ] 5.2 运行 harness 门禁
+- [x] 5.2 运行 harness 门禁
   - 依赖：5.1。
   - 工作内容：运行项目级质量门禁；如因环境依赖失败，记录具体失败命令、失败阶段和可复现错误。
   - 可并行子任务：无，质量门禁按顺序执行，避免缓存和资源竞争造成误判。
@@ -236,11 +236,24 @@ task build
 
   - 验收标准：门禁通过；或失败原因被清晰记录且不是实现本身导致时，标出残余风险。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：无。
+    - 状态：已完成。
+    - 变更：
+      - 未新增功能变更；本任务完成项目级 harness 门禁运行和结果记录。
+    - 验证：
+      - `task lint`：通过。
+      - `task test`：首次失败，combined coverage 为 69.38%，低于 70% 门禁；原因定位为项目内 `.cache/go-build` 复用了旧 e2e coverage 布局，导致 `cmd/agent-compose/main.go` 覆盖率分母异常放大。
+      - `task build`：通过。
+      - `rm -rf .cache/go-build .cache/coverage && task test`：通过。
+      - clean rerun coverage 汇总：
+        - unit：72.79%。
+        - integration：69.16%。
+        - e2e：68.05%。
+        - combined：76.03%。
+    - 审计与例外：
+      - 首次 `task test` 失败为 stale custom Go build cache 造成的 coverage 统计问题；清理 `.cache/go-build` 和 `.cache/coverage` 后复跑通过。
+      - 残余风险低；最终通过结果满足 `TESTING.md` 中 unit/integration/e2e/combined coverage 门禁。
+      - 未修改 proto、generated Connect 文件、runtime driver、部署 compose、image build 行为、`SESSION_ROOT`、`DATA_ROOT` 或 runtime driver 私有目录。
+    - 下一目标：最终完成审计和远端 CI 检查。
 
 ## 停止条件
 
