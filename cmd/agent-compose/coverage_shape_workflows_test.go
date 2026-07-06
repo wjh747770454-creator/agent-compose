@@ -524,14 +524,14 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 		t.Fatalf("logs agent conflict err=%v code=%d", err, commandExitCode(err))
 	}
 	logsCmd = &cobra.Command{Use: "logs"}
-	logsCmd.Flags().String("session-id", "", "")
-	if err := logsCmd.Flags().Set("session-id", "legacy-session"); err != nil {
-		t.Fatalf("set session-id flag: %v", err)
+	logsCmd.Flags().String("sandbox", "", "")
+	if err := logsCmd.Flags().Set("sandbox", "sandbox-logs"); err != nil {
+		t.Fatalf("set sandbox flag: %v", err)
 	}
 	out.Reset()
 	logsCmd.SetErr(&out)
-	logOptions, err := normalizeComposeLogsOptions(logsCmd, composeLogsOptions{SessionID: "legacy-session", TailLines: -1}, nil)
-	if err != nil || logOptions.SessionID != "legacy-session" || !strings.Contains(out.String(), "deprecated") {
+	logOptions, err := normalizeComposeLogsOptions(logsCmd, composeLogsOptions{SandboxID: "sandbox-logs", TailLines: -1}, nil)
+	if err != nil || logOptions.SessionID != "sandbox-logs" || out.String() != "" {
 		t.Fatalf("normalizeComposeLogsOptions options=%#v err=%v stderr=%q", logOptions, err, out.String())
 	}
 	if _, err := normalizeComposeLogsOptions(&cobra.Command{Use: "logs"}, composeLogsOptions{TailLines: -2}, nil); commandExitCode(err) != exitCodeUsage {
@@ -542,9 +542,9 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 	if err := composeExecArgs(execCmd, nil); err == nil {
 		t.Fatalf("composeExecArgs without target returned nil error")
 	}
-	execCmd.Flags().String("session-id", "", "")
-	if err := execCmd.Flags().Set("session-id", "session-1"); err != nil {
-		t.Fatalf("set exec session-id: %v", err)
+	execCmd.Flags().String("run-id", "", "")
+	if err := execCmd.Flags().Set("run-id", "run-1"); err != nil {
+		t.Fatalf("set exec run-id: %v", err)
 	}
 	if err := composeExecArgs(execCmd, nil); err != nil {
 		t.Fatalf("composeExecArgs with legacy target returned error: %v", err)
@@ -570,20 +570,20 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 		{
 			name: "multiple legacy targets",
 			setup: func(cmd *cobra.Command) composeExecOptions {
-				cmd.Flags().String("session-id", "", "")
+				cmd.Flags().String("agent", "", "")
 				cmd.Flags().String("run-id", "", "")
-				_ = cmd.Flags().Set("session-id", "session-1")
+				_ = cmd.Flags().Set("agent", "reviewer")
 				_ = cmd.Flags().Set("run-id", "run-1")
-				return composeExecOptions{SessionID: "session-1", RunID: "run-1"}
+				return composeExecOptions{AgentName: "reviewer", RunID: "run-1"}
 			},
 			wantErr: "target can only be specified once",
 		},
 		{
-			name: "empty session flag",
+			name: "empty run flag",
 			setup: func(cmd *cobra.Command) composeExecOptions {
-				cmd.Flags().String("session-id", "", "")
-				_ = cmd.Flags().Set("session-id", " ")
-				return composeExecOptions{SessionID: " "}
+				cmd.Flags().String("run-id", "", "")
+				_ = cmd.Flags().Set("run-id", " ")
+				return composeExecOptions{RunID: " "}
 			},
 			wantErr: "requires a value",
 		},

@@ -181,6 +181,29 @@ func TestRunHelpHidesOptionalModeFlagSentinel(t *testing.T) {
 	}
 }
 
+func TestCLIHelpUsesSandboxTerminology(t *testing.T) {
+	commands := [][]string{
+		{"--help"},
+		{"run", "--help"},
+		{"logs", "--help"},
+		{"exec", "--help"},
+		{"inspect", "--help"},
+		{"cache", "ls", "--help"},
+		{"cache", "prune", "--help"},
+	}
+	for _, args := range commands {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stdout, stderr, _, exitCode := executeCLICommand(args...)
+			if exitCode != 0 || stderr != "" {
+				t.Fatalf("%v code/stderr = %d / %q", args, exitCode, stderr)
+			}
+			if strings.Contains(strings.ToLower(stdout), "session") {
+				t.Fatalf("%v help contains session terminology:\n%s", args, stdout)
+			}
+		})
+	}
+}
+
 func TestUnknownCommandFailsWithoutStartingDaemon(t *testing.T) {
 	_, _, runCount, err := executeCommand("does-not-exist")
 	if err == nil {
@@ -1048,7 +1071,7 @@ agents:
 		if repeatedCode != 0 || repeatedErr != "" {
 			t.Fatalf("down repeated code/stderr = %d / %q", repeatedCode, repeatedErr)
 		}
-		for _, want := range []string{"Project: cli-down-demo", "Status: unchanged", "Failed session stops: 0"} {
+		for _, want := range []string{"Project: cli-down-demo", "Status: unchanged", "Failed sandbox stops: 0"} {
 			if !strings.Contains(repeatedOut, want) {
 				t.Fatalf("down repeated stdout %q does not contain %q", repeatedOut, want)
 			}
@@ -1122,10 +1145,10 @@ agents:
 		if exitCode != exitCodeGeneral {
 			t.Fatalf("down partial exit code = %d, want %d; stderr=%q", exitCode, exitCodeGeneral, stderr)
 		}
-		if !strings.Contains(stderr, "completed with 1 session stop failure") {
+		if !strings.Contains(stderr, "completed with 1 sandbox stop failure") {
 			t.Fatalf("down partial stderr = %q", stderr)
 		}
-		for _, want := range []string{"Status: partial-failure", "Failed session stops: 1", "session-failed", "forced stop failure"} {
+		for _, want := range []string{"Status: partial-failure", "Failed sandbox stops: 1", "session-failed", "forced stop failure"} {
 			if !strings.Contains(stdout, want) {
 				t.Fatalf("down partial stdout %q does not contain %q", stdout, want)
 			}
@@ -1201,7 +1224,6 @@ agents:
 		flag string
 	}{
 		{name: "legacy sandbox flag", flag: "--sandbox"},
-		{name: "legacy session flag", flag: "--session-id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			legacyOut, legacyErr, _, legacyCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, tc.flag, "session-reuse", "--keep-running", "reviewer", "--prompt", "check this")
@@ -2347,18 +2369,8 @@ agents:
 	}
 
 	legacyOut, legacyErr, _, legacyCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--agent", "reviewer", "--session-id", "session-logs", "--json")
-	if legacyCode != 0 {
-		t.Fatalf("logs --session-id exit code = %d, stderr=%q", legacyCode, legacyErr)
-	}
-	if !strings.Contains(legacyErr, "agent-compose logs --session-id is deprecated") || !strings.Contains(legacyErr, "agent-compose logs --sandbox") {
-		t.Fatalf("logs --session-id stderr = %q, want deprecated warning", legacyErr)
-	}
-	var legacyDecoded composeLogsOutput
-	if err := json.Unmarshal([]byte(legacyOut), &legacyDecoded); err != nil {
-		t.Fatalf("logs --session-id JSON decode failed: %v\n%s", err, legacyOut)
-	}
-	if len(legacyDecoded.Runs) != 1 || legacyDecoded.Runs[0].RunID != "run-logs" {
-		t.Fatalf("logs --session-id JSON = %#v", legacyDecoded)
+	if legacyCode != exitCodeUsage || legacyOut != "" || !strings.Contains(legacyErr, "unknown flag: --session-id") {
+		t.Fatalf("logs --session-id code/stdout/stderr = %d / %q / %q", legacyCode, legacyOut, legacyErr)
 	}
 
 	runOut, runErr, _, runCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", "run-logs")
@@ -3213,12 +3225,12 @@ agents:
 		t.Fatal("ExecStream selector was not used")
 	}
 
-	jsonOut, jsonErr, _, jsonCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--json", "--session-id", "session-exec", "bash")
+	jsonOut, jsonErr, _, jsonCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--json", "session-exec", "bash")
 	if jsonCode != 0 {
 		t.Fatalf("exec --json code/stderr = %d / %q", jsonCode, jsonErr)
 	}
-	if !strings.Contains(jsonErr, "agent-compose exec --session-id is deprecated") || strings.Contains(jsonOut, "deprecated") {
-		t.Fatalf("exec --session-id json stdout/stderr = %q / %q", jsonOut, jsonErr)
+	if jsonErr != "" || strings.Contains(jsonOut, "deprecated") {
+		t.Fatalf("exec positional json stdout/stderr = %q / %q", jsonOut, jsonErr)
 	}
 	if strings.Contains(jsonErr, "exec stderr") {
 		t.Fatalf("exec --json leaked transcript stdout/stderr = %q / %q", jsonOut, jsonErr)
@@ -3231,19 +3243,9 @@ agents:
 		t.Fatalf("exec JSON = %#v", decoded)
 	}
 
-	commandAliasOut, commandAliasErr, _, commandAliasCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--json", "--session-id", "session-exec", "--command", "printf alias")
-	if commandAliasCode != 0 {
-		t.Fatalf("exec --session-id --command code/stderr = %d / %q", commandAliasCode, commandAliasErr)
-	}
-	if !strings.Contains(commandAliasErr, "agent-compose exec --session-id is deprecated") || strings.Contains(commandAliasOut, "deprecated") {
-		t.Fatalf("exec --session-id --command json stdout/stderr = %q / %q", commandAliasOut, commandAliasErr)
-	}
-	var commandAliasDecoded composeExecOutput
-	if err := json.Unmarshal([]byte(commandAliasOut), &commandAliasDecoded); err != nil {
-		t.Fatalf("exec --session-id --command JSON decode failed: %v\n%s", err, commandAliasOut)
-	}
-	if commandAliasDecoded.ExecID != "exec-cli" || !commandAliasDecoded.Success {
-		t.Fatalf("exec --session-id --command JSON = %#v", commandAliasDecoded)
+	legacyExecOut, legacyExecErr, _, legacyExecCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--json", "--session-id", "session-exec", "--command", "printf alias")
+	if legacyExecCode != exitCodeUsage || legacyExecOut != "" || !strings.Contains(legacyExecErr, "unknown flag: --session-id") {
+		t.Fatalf("exec --session-id code/stdout/stderr = %d / %q / %q", legacyExecCode, legacyExecOut, legacyExecErr)
 	}
 
 	ambiguousOut, ambiguousErr, _, ambiguousCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "sandbox-command", "--command", "pwd", "whoami")
@@ -3548,11 +3550,15 @@ func TestIntegrationCLICacheListFilterValuesAndUsageErrors(t *testing.T) {
 		{
 			name:   "type",
 			flag:   "--type",
-			values: []string{"oci", "materialized", "runtime", "session"},
+			values: []string{"oci", "materialized", "runtime", "sandbox", "session"},
 			assert: func(t *testing.T, filter *agentcomposev2.CacheFilter, value string) {
 				t.Helper()
-				if filter.GetType() != value {
-					t.Fatalf("type filter = %q, want %q", filter.GetType(), value)
+				want := value
+				if value == "sandbox" {
+					want = "session"
+				}
+				if filter.GetType() != want {
+					t.Fatalf("type filter = %q, want %q", filter.GetType(), want)
 				}
 			},
 		},
@@ -3845,7 +3851,7 @@ func TestIntegrationCLICachePruneFilterMappings(t *testing.T) {
 		},
 		{
 			name: "common filters",
-			args: []string{"--driver", "microsandbox", "--type", "session", "--status", "unknown"},
+			args: []string{"--driver", "microsandbox", "--type", "sandbox", "--status", "unknown"},
 			assert: func(t *testing.T, req *agentcomposev2.PruneCachesRequest) {
 				t.Helper()
 				filter := req.GetFilter()

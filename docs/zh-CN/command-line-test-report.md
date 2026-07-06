@@ -148,7 +148,7 @@ AUTH_USERNAME=admin AUTH_PASSWORD=... \
 | 查看运行中 sandbox | `<prefix> ps` | 无 | 默认展示 running sandbox | 通过 |
 | 查看所有 sandbox JSON | `<prefix> --json ps --all` | `--json`、`--all` | 展示 running/stopped 等所有 sandbox | 通过 |
 | 按状态过滤并显示详细列 | `<prefix> ps --all --status running --verbose` | `--status`、`--verbose` | 仅展示匹配状态的 sandbox，并包含 driver/image/workspace 等详细列 | 通过 |
-| 查看 sandbox 详情 | `<prefix> --json inspect sandbox <sandbox>` | `inspect sandbox` | 返回 sandbox/session runtime 详情 | 通过 |
+| 查看 sandbox 详情 | `<prefix> --json inspect sandbox <sandbox>` | `inspect sandbox` | 返回 sandbox runtime 详情 | 通过 |
 | 兼容查看 session | `<prefix> --json inspect session <sandbox>` | `inspect session` | 返回详情，并在 stderr 输出 deprecated warning | 通过 |
 | 查看 run 详情 | `<prefix> --json inspect run <run-id>` | `inspect run` | 返回 run 详情 | 通过 |
 | 删除 running sandbox 被拒绝 | `<prefix> rm <sandbox>` | `rm` | 返回 `is running`，退出码非 0 | 通过 |
@@ -164,9 +164,7 @@ AUTH_USERNAME=admin AUTH_PASSWORD=... \
 | --- | --- | --- | --- | --- |
 | 使用 `--command` 执行命令 | `<prefix> exec <sandbox> --command 'printf cli-exec-ok'` | `exec <sandbox>`、`--command` | 输出 `cli-exec-ok` | 通过 |
 | 使用 positional command 执行命令 | `<prefix> exec <sandbox> printf cli-exec-args-ok` | `exec <sandbox> [command] [args...]` | 输出 `cli-exec-args-ok` | 通过 |
-| 兼容旧 `--session-id` | `<prefix> --json exec --session-id <sandbox> --command 'printf legacy-exec-ok'` | `--session-id`、`--json` | stdout 为 JSON；stderr 输出 deprecated warning | 通过 |
-
-结论：新的 `exec <sandbox>` 语义可用，旧 `--session-id` 入口仍兼容，且 deprecated warning 不污染 JSON stdout。
+结论：新的 `exec <sandbox>` 语义可用。
 
 ## 7. Logs 命令测试
 
@@ -174,10 +172,9 @@ AUTH_USERNAME=admin AUTH_PASSWORD=... \
 | --- | --- | --- | --- | --- |
 | 查看 agent 日志 | `<prefix> logs reviewer --tail 20` | positional agent、`--tail` | 输出 reviewer 的 run 日志 | 通过 |
 | 查看 sandbox 日志 JSON | `<prefix> --json logs --sandbox <sandbox> --tail 20 --timestamp` | `--sandbox`、`--tail`、`--timestamp`、`--json` | 返回指定 sandbox 日志，包含时间信息 | 通过 |
-| 兼容旧 `--session-id` | `<prefix> --json logs --session-id <sandbox> --tail 5` | `--session-id`、`--json` | stdout 为 JSON；stderr 输出 deprecated warning | 通过 |
 | 跟随日志 | `<prefix> logs reviewer --follow --tail 5` | `--follow`、`--tail` | 输出已有日志；当前 run 已结束时命令可正常返回 | 通过 |
 
-结论：`logs` 可按 agent/sandbox/session 兼容入口读取日志，`--tail`、`--timestamp`、`--follow` 均完成基础验证。
+结论：`logs` 可按 agent/sandbox 读取日志，兼容入口、`--tail`、`--timestamp`、`--follow` 均完成基础验证。
 
 ## 8. 镜像命令测试
 
@@ -224,19 +221,7 @@ AUTH_USERNAME=admin AUTH_PASSWORD=... \
 
 ## 11. 测试中发现的问题
 
-### 11.1 `exec --session-id <sandbox> --command` 参数校验问题
-
-问题：旧兼容入口 `exec --session-id <sandbox> --command ... --json` 曾被 Cobra positional args 校验拦截，报 `requires at least 1 arg(s)`。
-
-处理：已修复，提交为：
-
-```text
-ee40224 fix(cli): allow legacy exec target with command flag
-```
-
-复测结果：通过。旧入口可用，deprecated warning 输出到 stderr，JSON stdout 保持干净。
-
-### 11.2 `pull` 无参数遇到本地镜像时会失败
+### 11.1 `pull` 无参数遇到本地镜像时会失败
 
 现象：
 
@@ -254,7 +239,7 @@ pull access denied for agent-compose-guest
 
 建议：后续可考虑优化错误信息，提示用户该镜像可能是本地镜像或私有镜像，需要先登录 registry 或改用可拉取镜像。
 
-### 11.3 外部 timeout 中断 `run` 可能留下 runtime 容器
+### 11.2 外部 timeout 中断 `run` 可能留下 runtime 容器
 
 现象：测试脚本曾使用：
 
@@ -274,7 +259,7 @@ timeout 60s <prefix> run reviewer --command 'sleep 300' --keep-running
 | --- | ---: | --- |
 | 确定性通过测试项 | 59 | 已实现命令、关键参数、JSON 输出、deprecated warning、认证、sandbox 生命周期、镜像命令。 |
 | 历史延期命令边界项 | 3 | 历史测试时 `stats`、`build`、`push` 尚未发布；当前 `stats` 已实现，`build`/`push` 仍暂缓。 |
-| 已修复问题 | 1 | `exec --session-id ... --command` 兼容入口参数校验问题。 |
+| 已修复问题 | 0 | 本轮未新增已修复问题条目。 |
 | 新发现待跟进问题 | 2 | 本地镜像 `pull` 报错提示可优化；外部 timeout 中断 `run` 后可能遗留 runtime 容器。 |
 | 当前阻塞发布的问题 | 0 | 除已明确延期项和异常中断清理边界外，已实现 CLI 命令通过本轮复测。 |
 

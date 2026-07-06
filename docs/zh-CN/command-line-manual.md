@@ -165,7 +165,6 @@ prompt 输入必须使用 `--prompt`。不再支持 positional prompt 参数。
 | --- | --- |
 | `--keep-running` | 运行结束后保留 sandbox runtime。 |
 | `--sandbox <sandbox>` | 指定已有 sandbox。 |
-| `--session-id <session-id>` | 兼容旧参数，等价于 `--sandbox`，会输出 deprecated warning。 |
 | `--rm` | 运行结束后删除 sandbox。 |
 | `--jupyter` | 为本次 run 启用 Jupyter；未设置时使用 agent YAML 默认，YAML 未设置时默认关闭。 |
 | `--jupyter-expose` | 标记本次 run 的 Jupyter agent-compose proxy 入口为显式暴露意图；该参数不请求 runtime driver 暴露 host port，并会同时启用 Jupyter。 |
@@ -196,7 +195,7 @@ agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the note
 - REPL 中空行不会创建 run；输入 `/exit` 或 Ctrl+D 退出。
 - REPL 不是 TTY/PTY 或运行中 stdin 透传；每条输入都是一次独立 `RunAgentStream`，但复用同一个 sandbox。
 - detached run 可通过输出的 `agent-compose logs --run-id <run-id> --follow` 命令观察输出，也可继续使用 `stop`/`logs` 操作该 run。
-- `run -i --prompt` 仅支持可复用 provider session 的 Codex、Claude/cc 和 OpenCode；Gemini 当前会返回 unsupported。
+- `run -i --prompt` 仅支持可复用 provider conversation 的 Codex、Claude/cc 和 OpenCode；Gemini 当前会返回 unsupported。
 - `StopRun` 会请求 daemon 内当前活动 run 取消；daemon 重启后遗留的 running/pending run 会在启动 reconcile 中标记为 failed，并带 `daemon interrupted` 错误。
 
 ## `ps`：查看 sandbox
@@ -328,7 +327,6 @@ agent-compose exec <sandbox> --command "..."
 | --- | --- |
 | `--command "..."` | 以 flag 形式传入 shell 命令，等价于在 sandbox 中执行 `bash -lc "..."`。 |
 | `--cwd <path>` | 指定 sandbox 内工作目录。 |
-| `--session-id <sandbox>` | 兼容旧参数，等价于 positional `<sandbox>`，会输出 deprecated warning。 |
 | `--agent <agent>` | 兼容旧目标选择参数，会输出 deprecated warning；新命令应使用 `exec <sandbox>`。 |
 | `--run-id <run-id>` | 兼容旧目标选择参数，会输出 deprecated warning；新命令应使用 `exec <sandbox>`。 |
 
@@ -371,7 +369,6 @@ agent-compose logs -t
 | `--agent <agent>` | 按 agent 过滤。 |
 | `--run-id <run-id>` | 按 run 过滤。 |
 | `--sandbox <sandbox>` | 按 sandbox 过滤。 |
-| `--session-id <sandbox>` | 兼容旧参数，等价于 `--sandbox`，会输出 deprecated warning。 |
 
 示例：
 
@@ -393,7 +390,6 @@ agent-compose inspect project
 agent-compose inspect agent <agent>
 agent-compose inspect run <run-id>
 agent-compose inspect sandbox <sandbox>
-agent-compose inspect session <sandbox>
 agent-compose inspect image <image>
 agent-compose inspect cache <cache-id>
 ```
@@ -404,7 +400,6 @@ agent-compose inspect cache <cache-id>
 - `inspect agent <agent>` 查看 agent 配置和运行摘要。
 - `inspect run <run-id>` 查看一次 run 的详情。
 - `inspect sandbox <sandbox>` 查看 sandbox/runtime 详情。
-- `inspect session <sandbox>` 是兼容旧入口，会输出 deprecated warning；新命令应使用 `inspect sandbox`。
 - `inspect image <image>` 查看镜像详情。
 - `inspect cache <cache-id>` 查看一个 daemon runtime cache item，包括引用、阻止删除原因和 warnings。
 
@@ -425,7 +420,7 @@ agent-compose inspect image <image>
 - `images`：列出镜像。
 - `pull`：拉取当前 project 中所有 agent 引用的镜像。
 - `pull <image>`：拉取指定镜像；如果本地 OCI image backend/store 已存在该镜像，会直接成功并输出 skipped/already exists warning，不会再次 pull。
-- `rmi <image>`：删除镜像 metadata/store entry，不删除 materialized image cache、runtime-derived cache 或 session ephemeral state。
+- `rmi <image>`：删除镜像 metadata/store entry，不删除 materialized image cache、runtime-derived cache 或 sandbox ephemeral state。
 - `inspect image <image>`：查看镜像详情。
 
 常用选项：
@@ -455,12 +450,12 @@ Cache domain 在 CLI 中用 `--type` 表示：
 - `oci`：daemon OCI image store metadata/layout。
 - `materialized`：从镜像派生出的 runtime 输入，例如 BoxLite OCI layout 或 Microsandbox rootfs。
 - `runtime`：runtime driver home 下的派生缓存，例如 BoxLite image artifacts。
-- `session`：session 级 runtime state，例如 Microsandbox docker disks。
+- `sandbox`：sandbox 级 runtime state，例如 Microsandbox docker disks。
 
 保护状态：
 
 - `active`：正在被 running/resuming runtime 使用，永不删除。
-- `referenced`：当前不 active，但仍被 stopped session、project/image metadata 或 runtime metadata 引用。默认跳过；`cache prune --include-referenced --force` 可以删除。
+- `referenced`：当前不 active，但仍被 stopped sandbox、project/image metadata 或 runtime metadata 引用。默认跳过；`cache prune --include-referenced --force` 可以删除。
 - `unused`、`expired`、`orphaned`：设置 `--force` 后可删除。
 - `unknown`：引用或安全检查不完整，永不删除。
 
@@ -469,7 +464,7 @@ Cache domain 在 CLI 中用 `--type` 表示：
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
 | `cache ls`, `cache prune` | `--driver <docker|boxlite|microsandbox|all>` | 按 runtime driver 过滤。 |
-| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|session>` | 按 cache type 过滤。 |
+| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|sandbox>` | 按 cache type 过滤。 |
 | `cache ls`, `cache prune` | `--status <active|referenced|unused|expired|orphaned|unknown>` | 按保护状态过滤。 |
 | `cache prune` | `--unused`, `--orphaned`, `--expired` | status 快捷参数；彼此互斥，也不能与 `--status` 同用。 |
 | `cache prune` | `--older-than <duration>` | 匹配超过指定时长的 cache，例如 `7d` 或 `168h`。 |
@@ -482,7 +477,7 @@ Cache domain 在 CLI 中用 `--type` 表示：
 agent-compose cache ls --type materialized
 agent-compose cache inspect <cache-id>
 agent-compose cache prune --driver boxlite --unused
-agent-compose cache prune --type session --orphaned --force
+agent-compose cache prune --type sandbox --orphaned --force
 agent-compose cache prune --older-than 7d --force
 agent-compose cache rm <cache-id> --force
 ```

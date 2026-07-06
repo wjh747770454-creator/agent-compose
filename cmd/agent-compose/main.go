@@ -508,7 +508,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 
 	downCmd := &cobra.Command{
 		Use:   "down",
-		Short: "Stop project schedulers and running sessions",
+		Short: "Stop project schedulers and running sandboxes",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeDownCommand(cmd, options)
@@ -528,7 +528,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	runCmd.Flags().StringVar(&runOptions.Command, "command", "", "Bash command to execute in the agent sandbox")
 	runCmd.Flags().StringVar(&runOptions.SandboxID, "sandbox-id", "", "Reuse an existing sandbox")
 	runCmd.Flags().StringVar(&runOptions.Driver, "driver", "", "Runtime driver override for a new sandbox")
-	runCmd.Flags().BoolVar(&runOptions.KeepRunning, "keep-running", false, "Keep the session runtime running after completion")
+	runCmd.Flags().BoolVar(&runOptions.KeepRunning, "keep-running", false, "Keep the sandbox runtime running after completion")
 	runCmd.Flags().BoolVar(&runOptions.Remove, "rm", false, "Remove the sandbox after a successful run")
 	runCmd.Flags().BoolVar(&runOptions.Jupyter, "jupyter", false, "Enable Jupyter for this run")
 	runCmd.Flags().BoolVar(&runOptions.JupyterExpose, "jupyter-expose", false, "Mark the Jupyter proxy endpoint for this run as user-accessible")
@@ -550,8 +550,6 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	logsCmd.Flags().StringVar(&logsOptions.AgentName, "agent", "", "Filter logs by agent name")
 	logsCmd.Flags().StringVar(&logsOptions.RunID, "run-id", "", "Filter logs by run id")
 	logsCmd.Flags().StringVar(&logsOptions.SandboxID, "sandbox", "", "Filter logs by sandbox id")
-	// Deprecated: use --sandbox instead.
-	logsCmd.Flags().StringVar(&logsOptions.SessionID, "session-id", "", "Filter logs by session id")
 	logsCmd.Flags().BoolVar(&logsOptions.Follow, "follow", false, "Follow running run output")
 	logsCmd.Flags().IntVarP(&logsOptions.TailLines, "tail", "n", -1, "Show the last N lines of run output")
 	logsCmd.Flags().BoolVarP(&logsOptions.Timestamp, "timestamp", "t", false, "Prefix text log lines with a run-level timestamp")
@@ -617,11 +615,9 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 		},
 	}
 	// Deprecated: use `agent-compose exec <sandbox>` instead.
-	execCmd.Flags().StringVar(&execOptions.AgentName, "agent", "", "Select a running session by agent")
+	execCmd.Flags().StringVar(&execOptions.AgentName, "agent", "", "Deprecated target selection by agent; use exec <sandbox>")
 	// Deprecated: use `agent-compose exec <sandbox>` instead.
-	execCmd.Flags().StringVar(&execOptions.RunID, "run-id", "", "Execute in the session linked to a run")
-	// Deprecated: use `agent-compose exec <sandbox>` instead.
-	execCmd.Flags().StringVar(&execOptions.SessionID, "session-id", "", "Execute in a specific session")
+	execCmd.Flags().StringVar(&execOptions.RunID, "run-id", "", "Deprecated target selection by run; use exec <sandbox>")
 	execCmd.Flags().StringVar(&execOptions.Command, "command", "", "Shell command to execute in the sandbox")
 	execCmd.Flags().BoolVarP(&execOptions.Interactive, "interactive", "i", false, "Reserved for future interactive exec")
 	execCmd.Flags().StringVar(&execOptions.Cwd, "cwd", "", "Guest working directory")
@@ -777,8 +773,8 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	imageCmd.AddCommand(imageLSCmd, imagePullCmd, imageRemoveCmd, imageInspectCmd)
 
 	inspectCmd := &cobra.Command{
-		Use:   "inspect <project|agent|run|sandbox|session|image|cache> [name-or-id]",
-		Short: "Inspect project, agent, run, sandbox, session, image, or cache details",
+		Use:   "inspect <project|agent|run|sandbox|image|cache> [name-or-id]",
+		Short: "Inspect project, agent, run, sandbox, image, or cache details",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeInspectCommand(cmd, options, args)
@@ -838,7 +834,6 @@ type composePSOptions struct {
 type composeExecOptions struct {
 	AgentName   string
 	RunID       string
-	SessionID   string
 	Command     string
 	Cwd         string
 	Interactive bool
@@ -907,7 +902,7 @@ func addImageRemoveFlags(cmd *cobra.Command, options *composeImageRemoveOptions)
 
 func addCacheFilterFlags(cmd *cobra.Command, options *composeCacheFilterOptions) {
 	cmd.Flags().StringVar(&options.Driver, "driver", "", "Filter caches by driver: docker, boxlite, microsandbox, or all")
-	cmd.Flags().StringVar(&options.Type, "type", "", "Filter caches by type: oci, materialized, runtime, or session")
+	cmd.Flags().StringVar(&options.Type, "type", "", "Filter caches by type: oci, materialized, runtime, or sandbox")
 	cmd.Flags().StringVar(&options.Status, "status", "", "Filter caches by status: active, referenced, unused, expired, orphaned, or unknown")
 }
 
@@ -1106,7 +1101,7 @@ func runComposeDownCommand(cmd *cobra.Command, cli cliOptions) error {
 	if output.FailedSessionStops > 0 {
 		return commandExitError{
 			Code: exitCodeGeneral,
-			Err:  fmt.Errorf("down project %s completed with %d session stop failure(s)", normalized.Name, output.FailedSessionStops),
+			Err:  fmt.Errorf("down project %s completed with %d sandbox stop failure(s)", normalized.Name, output.FailedSessionStops),
 		}
 	}
 	return nil
@@ -1800,14 +1795,6 @@ func normalizeComposeLogsOptions(cmd *cobra.Command, options composeLogsOptions,
 		}
 		options.AgentName = args[0]
 	}
-	if cmd.Flags().Changed("session-id") {
-		if err := writeDeprecatedWarning(cmd.ErrOrStderr(), "agent-compose logs --session-id", "agent-compose logs --sandbox"); err != nil {
-			return options, err
-		}
-		if strings.TrimSpace(options.SandboxID) == "" {
-			options.SandboxID = options.SessionID
-		}
-	}
 	if strings.TrimSpace(options.SandboxID) != "" {
 		options.SessionID = options.SandboxID
 	}
@@ -1818,7 +1805,7 @@ func normalizeComposeLogsOptions(cmd *cobra.Command, options composeLogsOptions,
 }
 
 func composeExecArgs(cmd *cobra.Command, args []string) error {
-	if cmd.Flags().Changed("session-id") || cmd.Flags().Changed("run-id") || cmd.Flags().Changed("agent") {
+	if cmd.Flags().Changed("run-id") || cmd.Flags().Changed("agent") {
 		return nil
 	}
 	return cobra.MinimumNArgs(1)(cmd, args)
@@ -1904,16 +1891,13 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 		}
 	}
 	if !result.GetSuccess() {
-		return commandExitError{Code: execResultExitCode(result), Err: fmt.Errorf("exec %s in session %s failed: %s", result.GetExecId(), result.GetSessionId(), firstNonEmptyString(result.GetError(), result.GetStderr(), result.GetOutput(), "command failed"))}
+		return commandExitError{Code: execResultExitCode(result), Err: fmt.Errorf("exec %s in sandbox %s failed: %s", result.GetExecId(), result.GetSessionId(), firstNonEmptyString(result.GetError(), result.GetStderr(), result.GetOutput(), "command failed"))}
 	}
 	return nil
 }
 
 func normalizeComposeExecRequest(cmd *cobra.Command, projectName, projectID string, options composeExecOptions, args []string) (*agentcomposev2.ExecRequest, error) {
 	legacyTargetFlags := []string{}
-	if cmd.Flags().Changed("session-id") {
-		legacyTargetFlags = append(legacyTargetFlags, "--session-id")
-	}
 	if cmd.Flags().Changed("run-id") {
 		legacyTargetFlags = append(legacyTargetFlags, "--run-id")
 	}
@@ -1936,12 +1920,6 @@ func normalizeComposeExecRequest(cmd *cobra.Command, projectName, projectID stri
 			Cwd:     strings.TrimSpace(options.Cwd),
 		}
 		switch legacyTargetFlags[0] {
-		case "--session-id":
-			sessionID := strings.TrimSpace(options.SessionID)
-			if sessionID == "" {
-				return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --session-id requires a value")}
-			}
-			req.Target = &agentcomposev2.ExecRequest_SessionId{SessionId: sessionID}
 		case "--run-id":
 			runID := strings.TrimSpace(options.RunID)
 			if runID == "" {
@@ -2429,11 +2407,11 @@ func runComposeInspectCommand(cmd *cobra.Command, cli cliOptions, args []string)
 			return err
 		}
 		if target == "" {
-			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("inspect session requires a session id")}
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("inspect session requires a sandbox")}
 		}
 		output, err = composeSandboxInspectOutputFor(cmd.Context(), clients, target)
 		if err != nil {
-			return commandExitErrorForConnect(fmt.Errorf("inspect session %s: %w", target, err))
+			return commandExitErrorForConnect(fmt.Errorf("inspect sandbox %s: %w", target, err))
 		}
 	default:
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("unsupported inspect target %q", kind)}
@@ -3055,7 +3033,7 @@ func projectListStatus(project composeProjectListItem) string {
 }
 
 func writeComposeDownText(out io.Writer, output composeDownOutput) error {
-	if _, err := fmt.Fprintf(out, "Project: %s\nID: %s\nStatus: %s\nFailed session stops: %d\n\n",
+	if _, err := fmt.Fprintf(out, "Project: %s\nID: %s\nStatus: %s\nFailed sandbox stops: %d\n\n",
 		output.Project.Name,
 		output.Project.ID,
 		output.Status,
@@ -3543,7 +3521,7 @@ func composeAgentInspectOutputFor(ctx context.Context, clients cliServiceClients
 		output.LatestRun = latest
 	}
 	if session, err := firstRunningSessionOutput(ctx, clients, project.GetSummary().GetProjectId(), agentName); err != nil {
-		return composeAgentInspectOutput{}, commandExitErrorForConnect(fmt.Errorf("list running session for agent %s: %w", agentName, err))
+		return composeAgentInspectOutput{}, commandExitErrorForConnect(fmt.Errorf("list running sandbox for agent %s: %w", agentName, err))
 	} else if session != nil {
 		output.RunningSessions = append(output.RunningSessions, *session)
 	}
@@ -3896,9 +3874,8 @@ func writeCacheInspectText(out io.Writer, output composeCacheInspectOutput) erro
 		}
 	}
 	if cache.SessionID != "" || cache.SandboxID != "" {
-		if _, err := fmt.Fprintf(out, "Session: %s\nSandbox: %s\n",
-			firstNonEmptyString(cache.SessionID, "-"),
-			firstNonEmptyString(cache.SandboxID, "-"),
+		if _, err := fmt.Fprintf(out, "Sandbox: %s\n",
+			firstNonEmptyString(cache.SandboxID, cache.SessionID, "-"),
 		); err != nil {
 			return err
 		}
@@ -4491,8 +4468,10 @@ func cacheTypeFilterValue(value string) (string, error) {
 		return "", nil
 	case "oci", "materialized", "runtime", "session":
 		return strings.ToLower(strings.TrimSpace(value)), nil
+	case "sandbox":
+		return "session", nil
 	default:
-		return "", fmt.Errorf("invalid --type %q: expected oci, materialized, runtime, or session", value)
+		return "", fmt.Errorf("invalid --type %q: expected oci, materialized, runtime, or sandbox", value)
 	}
 }
 
@@ -4537,7 +4516,7 @@ func cacheDomainText(domain agentcomposev2.CacheDomain) string {
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE:
 		return "runtime-derived-cache"
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE:
-		return "session-ephemeral-state"
+		return "sandbox-ephemeral-state"
 	default:
 		return "unspecified"
 	}
@@ -4552,7 +4531,7 @@ func cacheTypeText(domain agentcomposev2.CacheDomain) string {
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE:
 		return "runtime"
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE:
-		return "session"
+		return "sandbox"
 	default:
 		return "unspecified"
 	}

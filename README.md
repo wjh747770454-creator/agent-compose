@@ -4,7 +4,7 @@
 [![Images & Release](https://github.com/chaitin/agent-compose/actions/workflows/images.yml/badge.svg?branch=main)](https://github.com/chaitin/agent-compose/actions/workflows/images.yml)
 
 agent-compose is an experimental control plane for running isolated agent
-sessions. It provides a daemon, CLI, Connect APIs, runtime drivers, workspace
+sandboxes. It provides a daemon, CLI, Connect APIs, runtime drivers, workspace
 provisioning, scheduler automation, event history, and a Jupyter proxy for
 notebook-style guest runtimes.
 
@@ -138,8 +138,8 @@ The main commands are:
 - `agent-compose run <agent> <trigger-name>`: run a configured trigger by name.
 - `agent-compose run <agent> --prompt "..."` / `--command "..."`: run ad hoc prompt or shell command work.
 - `agent-compose logs`: inspect project run logs.
-- `agent-compose ps`: list project agents, recent runs, and active sessions.
-- `agent-compose down`: disable managed schedulers and stop running sessions.
+- `agent-compose ps`: list project agents, recent runs, and active sandboxes.
+- `agent-compose down`: disable managed schedulers and stop running sandboxes.
 - `agent-compose images`, `pull`, `rmi`, `image inspect`: manage daemon-side images.
 - `agent-compose cache ls|inspect|prune|rm`: inspect and explicitly clean daemon runtime caches. `prune` and `rm` are dry-run unless `--force` is set.
 
@@ -288,13 +288,13 @@ Important variables include:
   used when generating runtime LLM facade configuration. Docker Compose
   defaults this to `http://agent-compose:7410`; host-based Docker setups should
   set it to a concrete host IP/name and port.
-- `DOCKER_HOST_SESSION_ROOT`: host path for session data bind-mounted into guest
+- `DOCKER_HOST_SESSION_ROOT`: host path for sandbox data bind-mounted into guest
   containers. Docker Compose defaults this to `./data/agent-compose/sessions`.
 - `CAP_GRPC_LISTEN`, `CAP_GRPC_TARGET`: required only when agents need to call
   OctoBus gRPC capabilities. `CAP_GRPC_LISTEN` starts the agent-compose
   capability proxy; `CAP_GRPC_TARGET` is the guest-reachable address injected
-  into new sessions. After changing either value, restart the daemon and create
-  a new session.
+  into new sandboxes. After changing either value, restart the daemon and create
+  a new sandbox.
 - `IMAGE_STORE_MODE`, `IMAGE_CACHE_ROOT`, `IMAGE_REGISTRY`,
   `IMAGE_INSECURE_REGISTRIES`: image store and OCI cache settings.
 - `BOXLITE_HOME`, `BOXLITE_RUNTIME_DIR`, `BOX_ROOTFS_PATH`, `BOX_CACHE_TTL`:
@@ -312,10 +312,10 @@ Important variables include:
 
 ### Agent providers
 
-Guest agent sessions run provider CLIs through the `agent-compose-runtime` CLI,
+Guest agent sandboxes run provider CLIs through the `agent-compose-runtime` CLI,
 provided by the `@chaitin-ai/agent-compose-runtime` npm package. Codex and Claude calls use the Runtime LLM Facade:
 provider keys stay in the daemon-side LLM provider configuration, while guest
-runtimes receive session-scoped facade tokens and facade base URLs. LLM provider
+runtimes receive sandbox-scoped facade tokens and facade base URLs. LLM provider
 key names such as `LLM_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `ANTHROPIC_AUTH_TOKEN`, `GOOGLE_API_KEY`, and `GEMINI_API_KEY` are filtered from
 user-supplied runtime environment variables. Compatibility aliases such as
@@ -337,7 +337,7 @@ After changing guest runtime code or provider support, rebuild the guest image:
 task image:agent-compose-guest
 ```
 
-Create a new session (or resume one) so the updated image and environment
+Create a new sandbox (or resume one) so the updated image and environment
 variables are picked up.
 
 > **Upgrade note (breaking for some Docker setups):** Because provider keys are
@@ -370,7 +370,7 @@ LLM_MODEL=your-model
 Compatible backends include DeepSeek, local OpenAI-compatible proxies
 (vLLM/Ollama), and similar Chat Completions endpoints.
 
-This does not create a workspace-capable agent session and does not grant file,
+This does not create a workspace-capable agent sandbox and does not grant file,
 command, or MCP tool access.
 
 With `outputSchema`, `chat_completions` uses prompt guidance and

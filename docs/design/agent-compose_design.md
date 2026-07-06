@@ -116,17 +116,17 @@ Current main commands:
   revision, managed agent definitions, and scheduler/loader; does not directly
   create a run or session.
 - `down`: call `ProjectService.RemoveProject`; disable managed
-  scheduler/loader and stop running sessions for the project; preserves project,
-  run, and session history by default.
-- `ps`: query project, agent, latest run, and running session state.
+  scheduler/loader and stop running sandboxes for the project; preserves project,
+  run, and sandbox history by default.
+- `ps`: query project, agent, latest run, and running sandbox state.
 - `run <agent>`: call `RunService.RunAgentStream` for a manual agent run;
-  creates a new session by default, supports reusing an existing session with
-  `--session-id`, stops the runtime after completion by default, and can keep it
+  creates a new sandbox by default, supports reusing an existing sandbox with
+  `--sandbox-id`, stops the runtime after completion by default, and can keep it
   running with `--keep-running`.
-- `logs`: inspect run output by project, agent, run id, or session id; supports
+- `logs`: inspect run output by project, agent, run id, or sandbox id; supports
   `--follow`.
-- `exec`: call `ExecService.ExecStream` inside a running session; can locate the
-  target by session id, run id, or project/agent selector.
+- `exec`: call `ExecService.ExecStream` inside a running sandbox; target the
+  sandbox with positional `<sandbox>`.
 - `images`, `image ls`, `pull`, `image pull`, `rmi`, `image rm`,
   `image inspect`: call `ImageService` to manage the daemon image store. The
   default store is selected by daemon `IMAGE_STORE_MODE`.
@@ -379,9 +379,9 @@ scheduler trigger, or future API clients.
 3. Merge runtime environment. Priority from low to high is global env, project
    variables, agent env, then run request env.
 4. Prepare local/Git workspace snapshot from project/agent workspace spec.
-5. Create a new session or reuse an existing session with `--session-id`.
+5. Create a new sandbox or reuse an existing sandbox with `--sandbox-id`.
 6. Write project, agent, run_id, scheduler_id, source, and related tags to the
-   session.
+   sandbox.
 7. Mark run as running and call the existing agent executor.
 8. Stream start/output/completed events for streaming requests.
 9. Persist terminal run state for success, failure, cancellation, workspace

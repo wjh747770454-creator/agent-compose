@@ -56,10 +56,10 @@ CLI 是 agent-compose daemon 的操作入口。它负责读取本地 project 配
 | `resume` | 基于 v1 `SessionService.ResumeSession` 恢复 sandbox。 |
 | `rm` | 调用 v2 `SandboxService.RemoveSandbox` 删除 sandbox；running sandbox 需要 `--force`。 |
 | `exec` | 调用 v2 `ExecService.ExecStream` 在已有 sandbox 中执行一次 command transcript。 |
-| `inspect` | 查看 project、agent、run、sandbox/session、image 或 cache 详情。 |
+| `inspect` | 查看 project、agent、run、sandbox、image 或 cache 详情。 |
 | `images` | 列出 daemon image store 中的镜像。 |
 | `pull` | 拉取当前 project 的 agent images，或拉取指定 OCI image reference。 |
-| `rmi` | 删除镜像 metadata/store entry；不删除 materialized/runtime/session cache。 |
+| `rmi` | 删除镜像 metadata/store entry；不删除 materialized/runtime/sandbox cache。 |
 | `cache` | 查看、dry-run 和显式清理 daemon runtime cache inventory，包含 `ls`、`inspect`、`prune`、`rm`。 |
 | `image` | 旧 image 命令树，保留兼容并输出 deprecated warning。 |
 
@@ -128,7 +128,7 @@ agents:
 - trigger name、`--prompt`、`--command` 一次只能选择一种。
 - 使用 `--prompt` 或 `--command` 后不能再传额外位置参数。
 - prompt 输入必须使用 `--prompt`；`run <agent> <trigger-name>` 的第二个位置参数不再作为 prompt 处理。
-- `--session-id` 是 `--sandbox` 的 deprecated alias。
+- 复用 sandbox 使用 `--sandbox-id`。
 
 ### Trigger 解析
 
@@ -147,7 +147,7 @@ v2 `RunSessionCleanupPolicy` 当前包括：
 - `KEEP_RUNNING`：`--keep-running`，run 完成后保留 runtime。
 - `REMOVE_ON_COMPLETION`：`--rm`，run terminal 后删除本次 run 创建的 sandbox。
 
-`--rm` 由 service 端 `pkg/runs.Controller` 负责，不依赖 CLI 进程存活。它覆盖 succeeded、failed、canceled 等 terminal 状态。显式传入已有 `--sandbox`/`--session-id` 时，不删除该 sandbox。cleanup 失败写入 `project_run.cleanup_error`；run 原始错误优先于 cleanup 错误。
+`--rm` 由 service 端 `pkg/runs.Controller` 负责，不依赖 CLI 进程存活。它覆盖 succeeded、failed、canceled 等 terminal 状态。显式传入已有 `--sandbox-id` 时，不删除该 sandbox。cleanup 失败写入 `project_run.cleanup_error`；run 原始错误优先于 cleanup 错误。
 
 ### Detach 和 StopRun
 
@@ -162,7 +162,7 @@ v2 `RunSessionCleanupPolicy` 当前包括：
 - stdin 每条非空输入创建一条独立 `ProjectRun`。
 - 同一 REPL 复用同一个 sandbox。
 - prompt 模式复用 provider conversation；当前支持 Codex、Claude/cc 和 OpenCode，Gemini 返回 unsupported。
-- command 模式复用同一 workspace/home/state/runtime session。
+- command 模式复用同一 workspace/home/state/runtime sandbox。
 - 输入 `/exit` 或 Ctrl+D 退出。
 - 不提供 TTY、PTY、terminal resize、WebSocket TTY、Connect bidi stdin 或运行中 stdin 透传。
 
@@ -192,7 +192,7 @@ run 日志的权威文件由 `project_run.logs_path` 指向：
 
 ## Stats
 
-`agent-compose stats [sandbox]` 调用 v2 `SandboxService.GetSandboxStats`。指定 sandbox 时直接查询该 sandbox；未指定 sandbox 时先按当前 compose project 枚举 running sandbox，再逐个查询 stats。service 解析 sandbox/session、runtime state 和对应 driver optional stats 能力。
+`agent-compose stats [sandbox]` 调用 v2 `SandboxService.GetSandboxStats`。指定 sandbox 时直接查询该 sandbox；未指定 sandbox 时先按当前 compose project 枚举 running sandbox，再逐个查询 stats。service 解析 sandbox、runtime state 和对应 driver optional stats 能力。
 
 JSON 字段集合保持稳定：
 
@@ -218,7 +218,7 @@ Jupyter 默认关闭。启用来源包括：
 - `run --jupyter`
 - `run --jupyter-expose`
 
-`--jupyter-expose` 会同时启用 Jupyter，并把 session proxy state 标记为 exposed。它只表达“通过 agent-compose proxy 暴露可访问入口”的意图，不要求 Docker、BoxLite 或 Microsandbox runtime driver 做外部 host port bind。
+`--jupyter-expose` 会同时启用 Jupyter，并把 sandbox proxy state 标记为 exposed。它只表达“通过 agent-compose proxy 暴露可访问入口”的意图，不要求 Docker、BoxLite 或 Microsandbox runtime driver 做外部 host port bind。
 
 session store 会把 Jupyter options 写入 `proxy/jupyter.json`。driver 启动 runtime 时读取 session proxy state。`GetSessionProxy` 只返回 proxy 入口信息；真实 HTTP/WebSocket 转发由 `pkg/agentcompose/proxy` 的 proxy routes 处理。
 
@@ -238,7 +238,7 @@ session store 会把 Jupyter options 写入 `proxy/jupyter.json`。driver 启动
 
 Docker daemon 只是可选 image backend；OCI cache 是 daemonless backend。BoxLite 和 Microsandbox 可以在启动 runtime 时从 OCI image 派生自身 artifact，但 `pull` 不属于 runtime driver 能力。
 
-`rmi` 同样只面向 image store/backend。materialized image cache、runtime-derived driver cache 和 session-ephemeral state 的清理由 `cache ls|inspect|prune|rm` 显式完成，并复用 `CacheService` 的 dry-run、`--force`、保护状态和安全路径检查。
+`rmi` 同样只面向 image store/backend。materialized image cache、runtime-derived driver cache 和 sandbox-ephemeral state 的清理由 `cache ls|inspect|prune|rm` 显式完成，并复用 `CacheService` 的 dry-run、`--force`、保护状态和安全路径检查。
 
 ## Sandbox lifecycle
 
@@ -248,10 +248,10 @@ Docker daemon 只是可选 image backend；OCI cache 是 daemonless backend。Bo
 
 - 非 running sandbox 可直接删除。
 - running sandbox 无 `--force` 时返回 failed precondition，并提示 `is running`。
-- running sandbox 带 `--force` 时先 stop，再删除 session/sandbox metadata 和相关运行态资源。
+- running sandbox 带 `--force` 时先 stop，再删除 sandbox metadata 和相关运行态资源。
 - `rm` 不删除 project 配置。
 
-`inspect session`、`--session-id` 等旧入口保留兼容并输出 deprecated warning。
+`inspect session` 旧入口保留兼容并输出 deprecated warning。
 
 ## Deprecated 兼容项
 
@@ -261,9 +261,6 @@ Docker daemon 只是可选 image backend；OCI cache 是 daemonless backend。Bo
 | `agent-compose image pull <image>` | `agent-compose pull <image>` |
 | `agent-compose image rm <image>` | `agent-compose rmi <image>` |
 | `agent-compose image inspect <image>` | `agent-compose inspect image <image>` |
-| `agent-compose run --session-id <id>` | `agent-compose run --sandbox <sandbox>` |
-| `agent-compose exec --agent/--run-id/--session-id ...` | `agent-compose exec <sandbox> ...` |
-| `agent-compose logs --session-id <id>` | `agent-compose logs --sandbox <sandbox>` |
 | `agent-compose inspect session <id>` | `agent-compose inspect sandbox <sandbox>` |
 
 兼容入口必须满足：

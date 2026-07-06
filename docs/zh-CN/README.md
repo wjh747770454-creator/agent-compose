@@ -1,6 +1,6 @@
 # agent-compose 中文文档
 
-agent-compose 是一个 daemon + CLI 形态的 agent/session 控制面。daemon 负责持久化状态、scheduler、runtime 生命周期、Connect API 和 Jupyter 代理；CLI 负责读取本地 `agent-compose.yml`，连接 daemon，并执行 `up`、`run`、`logs`、`ps`、`down`、`image` 等操作。
+agent-compose 是一个 daemon + CLI 形态的 agent/sandbox 控制面。daemon 负责持久化状态、scheduler、runtime 生命周期、Connect API 和 Jupyter 代理；CLI 负责读取本地 `agent-compose.yml`，连接 daemon，并执行 `up`、`run`、`logs`、`ps`、`down`、`image` 等操作。
 
 当前项目正在准备首次公开发布，建议按 preview/experimental 项目使用。API、运行时打包、部署默认值和生产环境建议后续仍可能调整。
 
@@ -68,8 +68,8 @@ agent-compose down
 - `agent-compose run <agent> <trigger-name>`：按名称运行已配置的 trigger。
 - `agent-compose run <agent> --prompt "..."` / `--command "..."`：手动执行临时 prompt 或 shell command。
 - `agent-compose logs`：查看 project run 日志。
-- `agent-compose ps`：查看 project agent、latest run 和 running session 状态。
-- `agent-compose down`：禁用 daemon 管理的 scheduler，并停止该 project 的 running sessions。
+- `agent-compose ps`：查看 project agent、latest run 和 running sandbox 状态。
+- `agent-compose down`：禁用 daemon 管理的 scheduler，并停止该 project 的 running sandboxes。
 - `agent-compose images|pull|rmi|image inspect`：管理 daemon 侧 image store。
 - `agent-compose cache ls|inspect|prune|rm`：查看并显式清理 daemon runtime cache；`prune` 和 `rm` 默认 dry-run，只有传 `--force` 才会删除。
 
@@ -140,12 +140,12 @@ docker compose --profile with-ui up -d
 - `LLM_API_ENDPOINT`、`LLM_API_PROTOCOL`、`LLM_API_KEY`、`OPENAI_API_KEY`、`LLM_MODEL`、`LLM_TIMEOUT`：daemon 侧 OpenAI family LLM 配置，供 `LLMService`、`scheduler.llm` 和 runtime agent LLM facade bootstrap 使用。这些值不会作为 provider key 注入 guest agent runtime。对接 OpenAI 兼容 Chat Completions 后端时设置 `LLM_API_PROTOCOL=chat_completions`。
 - `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_ENDPOINT`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`、`CLAUDE_MODEL`：daemon 侧 Anthropic family LLM facade bootstrap 配置。
 - `AGENT_COMPOSE_RUNTIME_BASE_URL`：可选的 runtime 内可访问 daemon base URL，用于生成 Runtime LLM Facade 配置。Docker Compose 默认使用 `http://agent-compose:7410`；宿主机 Docker 场景应配置具体的宿主机 IP/名称和端口。
-- `DOCKER_HOST_SESSION_ROOT`：guest 容器 bind mount 使用的宿主机 session 数据路径。Docker Compose 默认使用 `./data/agent-compose/sessions`。
-- `CAP_GRPC_LISTEN`、`CAP_GRPC_TARGET`：仅在 Agent 需要调用 OctoBus gRPC capability 时必须配置。`CAP_GRPC_LISTEN` 启动 agent-compose capability proxy；`CAP_GRPC_TARGET` 是注入新 session 的 guest 可达地址。修改后需要重启 daemon 并新建 session。
+- `DOCKER_HOST_SESSION_ROOT`：guest 容器 bind mount 使用的宿主机 sandbox 数据路径。Docker Compose 默认使用 `./data/agent-compose/sessions`。
+- `CAP_GRPC_LISTEN`、`CAP_GRPC_TARGET`：仅在 Agent 需要调用 OctoBus gRPC capability 时必须配置。`CAP_GRPC_LISTEN` 启动 agent-compose capability proxy；`CAP_GRPC_TARGET` 是注入新 sandbox 的 guest 可达地址。修改后需要重启 daemon 并新建 sandbox。
 
 ### Agent Provider
 
-Guest agent session 在 guest 容器内通过 `agent-compose-runtime` CLI 运行 provider CLI；该 CLI 由 `@chaitin-ai/agent-compose-runtime` npm 包提供。Codex 和 Claude 通过 Runtime LLM Facade 调用：真实 provider key 保存在 daemon 侧 LLM provider 配置中，runtime 只拿 session-scoped facade token 和 facade base URL。`LLM_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`GOOGLE_API_KEY`、`GEMINI_API_KEY` 等 provider key 名称会从用户提供的 runtime env 中过滤。兼容别名 `LLM_API_KEY`、`LLM_API_ENDPOINT` 仍可能出现在 runtime 中，但它们是 daemon 写入的 facade 值，不是上游 provider 凭据。Gemini 和 OpenCode 仍直接使用各自 provider CLI；OpenCode 凭据取决于所选 OpenCode model provider。
+Guest agent sandbox 在 guest 容器内通过 `agent-compose-runtime` CLI 运行 provider CLI；该 CLI 由 `@chaitin-ai/agent-compose-runtime` npm 包提供。Codex 和 Claude 通过 Runtime LLM Facade 调用：真实 provider key 保存在 daemon 侧 LLM provider 配置中，runtime 只拿 sandbox-scoped facade token 和 facade base URL。`LLM_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`GOOGLE_API_KEY`、`GEMINI_API_KEY` 等 provider key 名称会从用户提供的 runtime env 中过滤。兼容别名 `LLM_API_KEY`、`LLM_API_ENDPOINT` 仍可能出现在 runtime 中，但它们是 daemon 写入的 facade 值，不是上游 provider 凭据。Gemini 和 OpenCode 仍直接使用各自 provider CLI；OpenCode 凭据取决于所选 OpenCode model provider。
 
 | Provider | 典型环境变量 | 说明 |
 | --- | --- | --- |
@@ -160,7 +160,7 @@ Guest agent session 在 guest 容器内通过 `agent-compose-runtime` CLI 运行
 task image:agent-compose-guest
 ```
 
-创建新 session（或 resume 已有 session）以加载更新后的镜像和环境变量。
+创建新 sandbox（或 resume 已有 sandbox）以加载更新后的镜像和环境变量。
 
 > **升级注意（部分 Docker 部署存在破坏性变更）：** provider key 不再透传进 guest runtime，Codex/Claude 改为通过 daemon facade 访问上游 LLM，需要一个 runtime 内可达的 daemon URL。自带的 `docker-compose.yml` 已默认设置 `AGENT_COMPOSE_RUNTIME_BASE_URL=http://agent-compose:7410`。如果你在宿主机上直接运行 daemon（Docker driver）且 `HTTP_LISTEN=127.0.0.1:...`，容器无法访问该 loopback 地址，facade 配置会被跳过，agent run 将没有可用的 LLM 凭据。此时需要把 `AGENT_COMPOSE_RUNTIME_BASE_URL` 设为宿主机可达的具体 IP/名称和端口（例如 `http://host.docker.internal:7410`）。
 
@@ -179,7 +179,7 @@ LLM_MODEL=your-model
 
 兼容后端包括 DeepSeek、本地 OpenAI 兼容代理（vLLM/Ollama）等 Chat Completions endpoint。
 
-该路径不会创建具备 workspace 能力的 agent session，也不提供文件、命令或 MCP 工具访问。
+该路径不会创建具备 workspace 能力的 agent sandbox，也不提供文件、命令或 MCP 工具访问。
 
 使用 `outputSchema` 时，`chat_completions` 通过 prompt 引导并设置 `response_format: json_object`，不等价于 Responses API 的 strict JSON Schema。
 

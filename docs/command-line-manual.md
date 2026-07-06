@@ -162,7 +162,6 @@ a usage error; use `--prompt` or `--command` for ad hoc work.
 | --- | --- |
 | `--keep-running` | Keep the sandbox runtime after the run completes. |
 | `--sandbox <sandbox>` | Reuse an existing sandbox. |
-| `--session-id <session-id>` | Deprecated alias for `--sandbox`; prints a warning to stderr. |
 | `--rm` | Remove the sandbox after the run reaches a terminal state. |
 | `--jupyter` | Enable Jupyter for this run. When unset, the agent YAML default is used; when YAML is unset, Jupyter is disabled. |
 | `--jupyter-expose` | Mark the Jupyter agent-compose proxy endpoint for this run as explicitly exposed. This does not request runtime-driver host port exposure and also enables Jupyter. |
@@ -193,7 +192,7 @@ Rules:
 - Empty REPL lines do not create runs. Enter `/exit` or press Ctrl+D to exit.
 - REPL mode is not TTY/PTY or running stdin passthrough. Each input is one independent `RunAgentStream` call that reuses the same sandbox.
 - Detached runs can be observed with the printed `agent-compose logs --run-id <run-id> --follow` command, or managed later with `stop` and `logs`.
-- `run -i --prompt` supports providers with reusable provider sessions: Codex, Claude/cc, and OpenCode. Gemini currently returns unsupported.
+- `run -i --prompt` supports providers with reusable provider conversations: Codex, Claude/cc, and OpenCode. Gemini currently returns unsupported.
 - `StopRun` requests cancellation for active in-daemon runs. Pending/running runs left behind after daemon restart are reconciled to failed with a `daemon interrupted` error.
 
 ## `ps`: List Sandboxes
@@ -319,7 +318,6 @@ agent-compose exec <sandbox> --command "..."
 | --- | --- |
 | `--command "..."` | Pass a shell command as a flag. It is executed as `bash -lc "..."` in the sandbox. |
 | `--cwd <path>` | Set the working directory inside the sandbox. |
-| `--session-id <sandbox>` | Deprecated alias for positional `<sandbox>`; prints a warning to stderr. |
 | `--agent <agent>` | Deprecated target selection option; use `exec <sandbox>` instead. |
 | `--run-id <run-id>` | Deprecated target selection option; use `exec <sandbox>` instead. |
 
@@ -360,7 +358,6 @@ agent-compose logs -t
 | `--agent <agent>` | Filter by agent. |
 | `--run-id <run-id>` | Filter by run id. |
 | `--sandbox <sandbox>` | Filter by sandbox. |
-| `--session-id <sandbox>` | Deprecated alias for `--sandbox`; prints a warning to stderr. |
 
 Examples:
 
@@ -382,7 +379,6 @@ agent-compose inspect project
 agent-compose inspect agent <agent>
 agent-compose inspect run <run-id>
 agent-compose inspect sandbox <sandbox>
-agent-compose inspect session <sandbox>
 agent-compose inspect image <image>
 agent-compose inspect cache <cache-id>
 ```
@@ -393,7 +389,6 @@ Details:
 - `inspect agent <agent>` shows agent config and runtime summary.
 - `inspect run <run-id>` shows one run record.
 - `inspect sandbox <sandbox>` shows sandbox/runtime details.
-- `inspect session <sandbox>` is a deprecated compatibility entrypoint; use `inspect sandbox`.
 - `inspect image <image>` shows image details.
 - `inspect cache <cache-id>` shows one daemon runtime cache item, including references, blocked reasons, and warnings.
 
@@ -414,7 +409,7 @@ Commands:
 - `images`: list images.
 - `pull`: pull all agent images referenced by the current project.
 - `pull <image>`: pull a specific image. If the local OCI image backend/store already has the image, the command succeeds directly with a skipped/already exists warning and does not pull again.
-- `rmi <image>`: remove an image metadata/store entry. It does not delete materialized image cache, runtime-derived cache, or session ephemeral state.
+- `rmi <image>`: remove an image metadata/store entry. It does not delete materialized image cache, runtime-derived cache, or sandbox ephemeral state.
 - `inspect image <image>`: inspect an image.
 
 Common options:
@@ -444,12 +439,12 @@ Cache domains are shown as command-level `--type` values:
 - `oci`: daemon OCI image store metadata/layout.
 - `materialized`: runtime input generated from images, such as BoxLite OCI layout or Microsandbox rootfs.
 - `runtime`: runtime-derived cache under driver homes, such as BoxLite image artifacts.
-- `session`: session-scoped runtime state, such as Microsandbox docker disks.
+- `sandbox`: sandbox-scoped runtime state, such as Microsandbox docker disks.
 
 Protection status:
 
 - `active`: currently used by a running/resuming runtime; never removed.
-- `referenced`: not active, but still referenced by stopped session, project/image metadata, or runtime metadata. Skipped by default; `cache prune --include-referenced --force` can remove it.
+- `referenced`: not active, but still referenced by a stopped sandbox, project/image metadata, or runtime metadata. Skipped by default; `cache prune --include-referenced --force` can remove it.
 - `unused`, `expired`, `orphaned`: eligible for removal when `--force` is set.
 - `unknown`: reference or safety checks were incomplete; never removed.
 
@@ -458,7 +453,7 @@ Common options:
 | Command | Option | Description |
 | --- | --- | --- |
 | `cache ls`, `cache prune` | `--driver <docker|boxlite|microsandbox|all>` | Filter by runtime driver. |
-| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|session>` | Filter by cache type. |
+| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|sandbox>` | Filter by cache type. |
 | `cache ls`, `cache prune` | `--status <active|referenced|unused|expired|orphaned|unknown>` | Filter by protection status. |
 | `cache prune` | `--unused`, `--orphaned`, `--expired` | Status shortcuts; mutually exclusive with each other and with `--status`. |
 | `cache prune` | `--older-than <duration>` | Match caches older than a duration such as `7d` or `168h`. |
@@ -471,7 +466,7 @@ Examples:
 agent-compose cache ls --type materialized
 agent-compose cache inspect <cache-id>
 agent-compose cache prune --driver boxlite --unused
-agent-compose cache prune --type session --orphaned --force
+agent-compose cache prune --type sandbox --orphaned --force
 agent-compose cache prune --older-than 7d --force
 agent-compose cache rm <cache-id> --force
 ```
