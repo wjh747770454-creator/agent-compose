@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/samber/do/v2"
 
@@ -30,7 +31,16 @@ func NewLoaderController(di do.Injector) (*loaders.Controller, error) {
 		notifier = hub
 	}
 	controller = loaders.NewController(loaders.ControllerDependencies{
-		RootCtx:   do.MustInvoke[context.Context](di),
+		RootCtx: do.MustInvoke[context.Context](di),
+		RunTimeout: func(override time.Duration) time.Duration {
+			if override > 0 {
+				return override
+			}
+			if config.LoaderRunTimeout > 0 {
+				return config.LoaderRunTimeout
+			}
+			return 20 * time.Minute
+		},
 		Store:     configDB,
 		Engine:    do.MustInvoke[loaders.LoaderEngine](di),
 		Publisher: bus,
