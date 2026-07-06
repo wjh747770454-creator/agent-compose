@@ -162,25 +162,26 @@ func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, sessio
 		return domain.LoaderCommandResult{}, err
 	}
 	streamWriter := func(chunk domain.ExecChunk) {
-		if chunk.Text == "" {
+		filtered, visible := execution.FilterCommandStreamChunk(chunk)
+		if !visible {
 			return
 		}
 		cellMu.Lock()
-		streamed.WriteChunk(chunk)
-		isStderr := domain.NormalizeStdioStream(chunk.Stream) == domain.StdioStderr
+		streamed.WriteChunk(filtered)
+		isStderr := domain.NormalizeStdioStream(filtered.Stream) == domain.StdioStderr
 		if isStderr {
-			cell.Stderr += chunk.Text
+			cell.Stderr += filtered.Text
 		} else {
-			cell.Stdout += chunk.Text
+			cell.Stdout += filtered.Text
 		}
-		cell.Output += chunk.Text
+		cell.Output += filtered.Text
 		snapshot := cell
 		cellMu.Unlock()
 		if err := e.Store.AddCell(ctx, session, snapshot); err != nil {
 			setStreamErr(err)
 			return
 		}
-		e.Streams.PublishCellOutput(session.Summary.ID, snapshot.ID, chunk.Text, chunk.Stream)
+		e.Streams.PublishCellOutput(session.Summary.ID, snapshot.ID, filtered.Text, filtered.Stream)
 	}
 	commandHome := e.Config.GuestHomePath
 	execResult, err := runtime.ExecStream(execCtx, execSession, vmState, execution.BuildLoaderCommandExecSpec(e.Config, execSession, filepath.Join(guestCellDir, "command-request.json"), commandHome), streamWriter)

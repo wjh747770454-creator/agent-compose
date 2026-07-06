@@ -401,16 +401,16 @@ func (c *Controller) executeProjectRunCommand(ctx context.Context, run domain.Pr
 		if sendErr != nil {
 			return
 		}
-		chunk.Text = execution.StripCommandResultPayload(chunk.Text)
-		if chunk.Text == "" {
+		filtered, visible := execution.FilterCommandStreamChunk(chunk)
+		if !visible {
 			return
 		}
-		if err := appendProjectRunLogChunk(logsPath, chunk); err != nil {
+		if err := appendProjectRunLogChunk(logsPath, filtered); err != nil {
 			sendErr = err
 			return
 		}
 		if sink != nil && sink.SendChunk != nil {
-			sendErr = sink.SendChunk(run.RunID, chunk, time.Now().UTC())
+			sendErr = sink.SendChunk(run.RunID, filtered, time.Now().UTC())
 		}
 	}
 	execCtx, cancel := execution.ExecContext(ctx, 0)

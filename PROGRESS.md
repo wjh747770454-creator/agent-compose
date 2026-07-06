@@ -236,7 +236,7 @@
       - final result parser/sanitizer 未改动，仍只基于 `__AGENT_RESULT__` marker。
     - 下一目标：3.3 迁移 command/exec/loader streaming。
 
-- [ ] 3.3 迁移 command、exec、run 和 loader streaming filter
+- [x] 3.3 迁移 command、exec、run 和 loader streaming filter
   - 依赖：1.2、3.1。
   - 工作内容：
     - 迁移 `pkg/agentcompose/api/exec.go`，用 `FilterCommandStreamChunk` 替换手写 strip。
@@ -244,9 +244,9 @@
     - 迁移 `pkg/agentcompose/adapters/loader_command_executor.go`，避免 streaming/interim cell output 暴露 `__COMMAND_RESULT__`。
     - 保留 command stdout/stderr 原始 stream 属性。
   - 可并行子任务：
-    - [ ] 可并行：迁移 ExecService stream path 和测试。
-    - [ ] 可并行：迁移 project run command path 和测试。
-    - [ ] 可并行：迁移 loader command stream path 和测试。
+    - [x] 可并行：迁移 ExecService stream path 和测试。
+    - [x] 可并行：迁移 project run command path 和测试。
+    - [x] 可并行：迁移 loader command stream path 和测试。
   - 测试方案：
     - `./scripts/with-go-toolchain.sh go test ./pkg/agentcompose/api ./pkg/runs ./pkg/agentcompose/adapters`
   - 验收标准：
@@ -254,10 +254,18 @@
     - `__COMMAND_RESULT__` 不进入 transcript、run logs、notebook cell output。
     - 非零 exit code 保留 stdout/stderr/output 并标记失败。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - `pkg/agentcompose/api/exec.go` 的 ExecStream writer 改为 `execution.FilterCommandStreamChunk`，filtered chunk 才写 transcript 和 v2 stream response。
+      - `pkg/runs/controller.go` 的 command run streaming/log append 路径改为 `FilterCommandStreamChunk`，filtered chunk 才进入 run log 和 stream sink。
+      - `pkg/agentcompose/adapters/loader_command_executor.go` 的 loader command streaming/interim cell output 改为 `FilterCommandStreamChunk`，payload-only chunk 不再进入 cell output 或 session stream。
+      - 增强 `pkg/agentcompose/api/handler_coverage_test.go`、`pkg/runs/coverage_shape_workflows_test.go`，新增 `pkg/agentcompose/adapters/loader_command_executor_test.go`，覆盖 command payload 不进入 transcript/run logs/cell output，以及非零 exit code 保留 stdout/stderr/output 并标记 run failed。
+    - 验证：
+      - `./scripts/with-go-toolchain.sh go test ./pkg/agentcompose/api ./pkg/runs ./pkg/agentcompose/adapters`：通过。
+      - `rg -n "StripCommandResultPayload|FilterCommandStreamChunk|__COMMAND_RESULT__|CommandResultPrefix" pkg/agentcompose pkg/runs pkg/execution`：production streaming callsite 均使用 `FilterCommandStreamChunk`；strip helper 只保留在 `pkg/execution`。
+    - 审计与例外：
+      - 本任务未改 final command result parser，最终结果仍由 `ParseCommandExecResult` 基于 marker 解析。
+      - `projectRunAgentExecutionStream` 的 agent run log append 不属于 command payload path，按 3.4 阶段三收口继续审计。
     - 下一目标：3.4 阶段三 focused 集成验收。
 
 - [ ] 3.4 阶段三 focused 集成验收

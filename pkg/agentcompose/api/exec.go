@@ -143,25 +143,25 @@ func (h *ExecHandler) executeProjectCommand(ctx context.Context, req *agentcompo
 		if sendErr != nil {
 			return
 		}
-		chunk.Text = execution.StripCommandResultPayload(chunk.Text)
-		if chunk.Text == "" {
+		filtered, visible := execution.FilterCommandStreamChunk(chunk)
+		if !visible {
 			return
 		}
-		if err := appendExecTranscriptChunk(transcriptPath, chunk); err != nil {
+		if err := appendExecTranscriptChunk(transcriptPath, filtered); err != nil {
 			sendErr = err
 			return
 		}
 		if send != nil {
 			createdAt := time.Now().UTC()
-			isStderr := domain.NormalizeStdioStream(chunk.Stream) == domain.StdioStderr
+			isStderr := domain.NormalizeStdioStream(filtered.Stream) == domain.StdioStderr
 			sendErr = send(&agentcomposev2.ExecStreamResponse{
 				EventType:  agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_OUTPUT,
 				ExecId:     execID,
 				SessionId:  session.Summary.ID,
 				RunId:      runID,
-				Chunk:      chunk.Text,
+				Chunk:      filtered.Text,
 				IsStderr:   isStderr,
-				Transcript: TranscriptEventFromExecChunk(chunk, createdAt),
+				Transcript: TranscriptEventFromExecChunk(filtered, createdAt),
 			})
 		}
 	}

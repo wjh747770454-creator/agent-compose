@@ -386,8 +386,13 @@ func TestExecHandlerRunSelectorAndStreamSenderWorkflow(t *testing.T) {
 		events[1].GetTranscript().GetText() == "" {
 		t.Fatalf("stream events = %#v", events)
 	}
+	for _, event := range events {
+		if strings.Contains(event.GetChunk(), execution.CommandResultPrefix) || strings.Contains(event.GetTranscript().GetText(), execution.CommandResultPrefix) {
+			t.Fatalf("stream event leaked command payload: %#v", event)
+		}
+	}
 	transcript, err := os.ReadFile(filepath.Join(sessionRoot, "state", "exec", "exec-run", "transcript.txt"))
-	if err != nil || !strings.Contains(string(transcript), "hi\n") {
+	if err != nil || !strings.Contains(string(transcript), "hi\n") || strings.Contains(string(transcript), execution.CommandResultPrefix) {
 		t.Fatalf("transcript = %q err=%v", string(transcript), err)
 	}
 
