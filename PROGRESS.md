@@ -482,20 +482,34 @@
 
 参考文档：[实施计划 阶段 8](docs/plan/runtime-cache-lifecycle-implementation-plan.md#阶段-8文档质量门禁和真实-runtime-smoke)
 
-- [ ] 8.1 更新用户和设计文档
+- [x] 8.1 更新用户和设计文档
   - 依赖：7.2。
   - 工作内容：更新 `docs/command-line-manual.md`、`docs/zh-CN/command-line-manual.md`、`docs/design/agent-compose_design.md`、中文对应设计文档；说明 `CacheService`、`cache` 命令、dry-run 默认、`--force`、保护状态、`BOX_CACHE_TTL` 新语义。
   - 可并行子任务：
-    - [ ] 可并行：更新 CLI 使用文档。
-    - [ ] 可并行：更新架构/API 设计文档。
-    - [ ] 可并行：审计 `.env.example` 和部署文档是否提到 `BOX_CACHE_TTL`。
+    - [x] 可并行：更新 CLI 使用文档。
+    - [x] 可并行：更新架构/API 设计文档。
+    - [x] 可并行：审计 `.env.example` 和部署文档是否提到 `BOX_CACHE_TTL`。
   - 测试方案：运行 `task docs` 如仍为 placeholder 则记录；运行 focused grep 检查旧语义；最终运行 `task lint`、`task build`、`task test`。
   - 验收标准：文档与实现一致；不新增无必要环境变量；dry-run/force 行为清晰。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - 更新英文和中文 CLI manual，加入 `inspect cache <cache-id>`、`cache ls`、`cache inspect`、`cache prune`、`cache rm`、cache domain/type、保护状态、`--older-than`、`--include-referenced`、dry-run 默认和 `--force` 删除语义。
+      - 更新英文和中文设计文档，加入 `CacheService` v2 API 列表、cache CLI 命令、daemon-authoritative inventory/removal 边界、`pkg/runtimecache` 不导入 Connect 的分层要求，以及 `RemoveImage`/`rmi` 不删除 materialized/runtime/session cache 的边界。
+      - 更新 README、中文 README、`.env.example` 和中文 CLI 当前设计文档，说明 `agent-compose cache ls|inspect|prune|rm`，并把 `BOX_CACHE_TTL` 写为不再驱动 BoxLite 启动隐藏 GC；TTL 清理应通过显式 `agent-compose cache prune --older-than ... --force` 或后续 scheduled maintenance。
+      - 修复 `pkg/driver/runtime_cache_sources_microsandbox.go` 中 `task lint` 暴露的 staticcheck S1016，使用等价 type conversion 调用 Microsandbox remover。
+    - 验证：
+      - `task docs`（当前输出 `docs not configured`）
+      - `rg -n "BOX_CACHE_TTL|maybeRunCacheGC|startup.*GC|启动.*GC|cache prune|CacheService|agent-compose cache" README.md docs .env.example`
+      - `rg -n "connectrpc|connect\\." pkg/runtimecache || true`
+      - `git diff --check`
+      - `task lint`（首次发现 staticcheck S1016，修复后重跑通过）
+      - `task build`
+      - `task test`（首次因 `runtime/javascript` 缺少 Vitest 依赖失败；执行 `npm ci --no-audit --no-fund` 后重跑通过，coverage summary：unit 71.94%、integration 67.63%、E2E 67.11%、combined 74.62%）
+    - 审计与例外：
+      - focused grep 中 `docs/spec/runtime-cache-lifecycle-spec.md` 仍保留若干“当前代码状态”旧语义描述；该文件是本轮实现前的过程 spec，未作为当前 operator-facing 文档改写。
+      - `.env.example` 未新增环境变量，只补充现有 `BOX_CACHE_TTL` 注释。
+      - 真实 BoxLite/Microsandbox smoke 为 opt-in，本任务未运行；补跑命令：`SMOKE_RUNTIME_DRIVERS=all task test:runtime-smoke`。
     - 下一目标：8.2 全量门禁和 smoke。
 
 - [ ] 8.2 运行全量质量门禁和 runtime smoke

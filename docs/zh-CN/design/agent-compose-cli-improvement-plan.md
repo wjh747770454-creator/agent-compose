@@ -56,10 +56,11 @@ CLI 是 agent-compose daemon 的操作入口。它负责读取本地 project 配
 | `resume` | 基于 v1 `SessionService.ResumeSession` 恢复 sandbox。 |
 | `rm` | 调用 v2 `SandboxService.RemoveSandbox` 删除 sandbox；running sandbox 需要 `--force`。 |
 | `exec` | 调用 v2 `ExecService.ExecStream` 在已有 sandbox 中执行一次 command transcript。 |
-| `inspect` | 查看 project、agent、run、sandbox/session 或 image 详情。 |
+| `inspect` | 查看 project、agent、run、sandbox/session、image 或 cache 详情。 |
 | `images` | 列出 daemon image store 中的镜像。 |
 | `pull` | 拉取当前 project 的 agent images，或拉取指定 OCI image reference。 |
-| `rmi` | 删除镜像。 |
+| `rmi` | 删除镜像 metadata/store entry；不删除 materialized/runtime/session cache。 |
+| `cache` | 查看、dry-run 和显式清理 daemon runtime cache inventory，包含 `ls`、`inspect`、`prune`、`rm`。 |
 | `image` | 旧 image 命令树，保留兼容并输出 deprecated warning。 |
 
 `build` 和 `push` 仍未作为稳定 CLI 发布。它们涉及 image build、制品命名、远端仓库、鉴权和发布策略，需要单独设计。
@@ -72,6 +73,7 @@ CLI 面向 v2 API 的当前服务边界：
 - `RunService`：`RunAgent`、`StartRun`、`RunAgentStream`、`GetRun`、`ListRuns`、`FollowRunLogs`、`StopRun`。
 - `ExecService`：`Exec`、`ExecStream`。
 - `ImageService`：`ListImages`、`PullImage`、`InspectImage`、`RemoveImage`。
+- `CacheService`：`ListCaches`、`InspectCache`、`PruneCaches`、`RemoveCache`。
 - `SandboxService`：`RemoveSandbox`、`GetSandboxStats`。
 
 CLI 仍复用 v1 `SessionService` 的 `StopSession`、`ResumeSession`、`GetSession`、`ListSessions` 和 `GetSessionProxy` 等 session 能力。对外文案使用 sandbox，内部 ID 当前与 session id 兼容。
@@ -235,6 +237,8 @@ session store 会把 Jupyter options 写入 `proxy/jupyter.json`。driver 启动
 - inspect 其他错误返回带 image backend/store 上下文的错误。
 
 Docker daemon 只是可选 image backend；OCI cache 是 daemonless backend。BoxLite 和 Microsandbox 可以在启动 runtime 时从 OCI image 派生自身 artifact，但 `pull` 不属于 runtime driver 能力。
+
+`rmi` 同样只面向 image store/backend。materialized image cache、runtime-derived driver cache 和 session-ephemeral state 的清理由 `cache ls|inspect|prune|rm` 显式完成，并复用 `CacheService` 的 dry-run、`--force`、保护状态和安全路径检查。
 
 ## Sandbox lifecycle
 

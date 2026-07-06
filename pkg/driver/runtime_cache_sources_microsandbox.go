@@ -28,5 +28,5 @@ func (s microsandboxRuntimeCacheSource) List(ctx context.Context) (runtimecache.
 }
 
 func (s microsandboxRuntimeCacheSource) Remove(ctx context.Context, item runtimecache.Item) error {
-	return microsandboxSessionEphemeralRemover{microsandboxHome: s.microsandboxHome}.Remove(ctx, item)
+	return microsandboxSessionEphemeralRemover(s).Remove(ctx, item)
 }

@@ -130,6 +130,9 @@ Current main commands:
 - `images`, `image ls`, `pull`, `image pull`, `rmi`, `image rm`,
   `image inspect`: call `ImageService` to manage the daemon image store. The
   default store is selected by daemon `IMAGE_STORE_MODE`.
+- `cache ls`, `cache inspect`, `cache prune`, `cache rm`: call `CacheService`
+  to list, inspect, dry-run, and explicitly remove daemon runtime cache items.
+  The CLI never reads or deletes daemon cache paths directly.
 - `inspect <project|agent|run|session>`: inspect project-related objects.
 
 ## `agent-compose.yml` Model
@@ -271,11 +274,18 @@ The v2 API is for project/run/image/exec workflows:
   - `PullImage`
   - `InspectImage`
   - `RemoveImage`
+- `CacheService`
+  - `ListCaches`
+  - `InspectCache`
+  - `PruneCaches`
+  - `RemoveCache`
 
 `RemoveProject(remove_history=true)` currently returns unimplemented. The
 default `down` semantics preserve history. `ImageService` supports both Docker
 daemon store and OCI cache store; when request store is `UNSPECIFIED`, the
-daemon image store mode selects the backend.
+daemon image store mode selects the backend. `CacheService` is the explicit
+runtime cache lifecycle boundary for materialized image cache, runtime-derived
+driver cache, and session-ephemeral state.
 
 v2 `ProjectSpec` is the wire shape used by CLI and API clients to pass the
 current compose state. `AgentSpec.scheduler` contains:
@@ -466,9 +476,45 @@ Docker backend, but status comes from cache metadata:
   image identity has multiple refs, `force` is required. `prune_children` does
   not remove blobs in OCI cache and returns a warning. Blob cleanup is left to a
   dedicated future mechanism; current deletion is conservative metadata deletion.
+  `RemoveImage` and CLI `rmi` do not delete materialized image cache,
+  runtime-derived driver cache, or session-ephemeral state.
 - Not found, invalid reference, conflict, internal, and unavailable errors map
   to stable Connect codes. Error messages retain operation, image ref, and cache
   endpoint.
+
+## Runtime Cache Lifecycle
+
+Runtime cache lifecycle is explicit and daemon-authoritative. `CacheService`
+builds inventory from daemon-owned facts and driver adapters, returns warnings
+for incomplete scans, and performs deletion only through inventory-generated
+safe paths. `pkg/runtimecache` owns the cache model, filters, path safety, and
+dry-run/remove rules, and it does not import Connect.
+
+Cache domains:
+
+- `oci-image-store`: OCI image metadata/layout owned by image cache.
+- `materialized-image-cache`: runtime inputs derived from images, such as
+  BoxLite OCI layouts and Microsandbox rootfs directories under
+  `<DATA_ROOT>/image-cache`.
+- `runtime-derived-cache`: runtime-driver artifacts under driver homes, such as
+  BoxLite image artifacts.
+- `session-ephemeral-state`: per-session runtime state, such as Microsandbox
+  docker disks and sandbox state.
+
+Protection is conservative:
+
+- `active` and `unknown` items are never removed.
+- `referenced` items are skipped by default; `cache prune --include-referenced
+  --force` can remove them when they are not active or unknown.
+- `unused`, `expired`, and `orphaned` items are removed only when the request is
+  forced.
+- `cache prune` and `cache rm` default to dry-run. Real deletion requires
+  `--force`.
+
+`BOX_CACHE_TTL` no longer drives hidden BoxLite startup-path garbage
+collection. If TTL-based cleanup is needed, operators should use explicit cache
+commands such as `cache prune --older-than 7d --force`; future scheduled
+maintenance must use the same cache inventory and protection rules.
 
 For `up/run`, the `docker` driver ensures the required image is available.
 `boxlite` and `microsandbox` project/run preparation does not fail just because

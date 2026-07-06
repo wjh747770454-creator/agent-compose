@@ -385,7 +385,7 @@ agent-compose logs --run-id run_123 --json
 
 ## `inspect`：查看资源详情
 
-查看 project 下资源或 daemon image 的详细信息。
+查看 project 下资源、daemon image 或 runtime cache item 的详细信息。
 `inspect project` 和 `inspect agent <agent>` 要求该 project 已存在于 daemon 中；执行 `agent-compose down` 后，需要先重新执行 `agent-compose up`，再使用它们。
 
 ```bash
@@ -395,6 +395,7 @@ agent-compose inspect run <run-id>
 agent-compose inspect sandbox <sandbox>
 agent-compose inspect session <sandbox>
 agent-compose inspect image <image>
+agent-compose inspect cache <cache-id>
 ```
 
 说明：
@@ -405,6 +406,7 @@ agent-compose inspect image <image>
 - `inspect sandbox <sandbox>` 查看 sandbox/runtime 详情。
 - `inspect session <sandbox>` 是兼容旧入口，会输出 deprecated warning；新命令应使用 `inspect sandbox`。
 - `inspect image <image>` 查看镜像详情。
+- `inspect cache <cache-id>` 查看一个 daemon runtime cache item，包括引用、阻止删除原因和 warnings。
 
 ## 镜像命令
 
@@ -423,7 +425,7 @@ agent-compose inspect image <image>
 - `images`：列出镜像。
 - `pull`：拉取当前 project 中所有 agent 引用的镜像。
 - `pull <image>`：拉取指定镜像；如果本地 OCI image backend/store 已存在该镜像，会直接成功并输出 skipped/already exists warning，不会再次 pull。
-- `rmi <image>`：删除镜像。
+- `rmi <image>`：删除镜像 metadata/store entry，不删除 materialized image cache、runtime-derived cache 或 session ephemeral state。
 - `inspect image <image>`：查看镜像详情。
 
 常用选项：
@@ -434,7 +436,58 @@ agent-compose inspect image <image>
 | `images` | `--query <text>` | 按镜像引用过滤。 |
 | `pull` | `--platform <os/arch[/variant]>` | 指定拉取平台。 |
 | `rmi` | `--force` | 强制删除镜像。 |
-| `rmi` | `--prune-children` | 删除无 tag 的 child images。 |
+| `rmi` | `--prune-children` | 请求 image backend 清理 child images。OCI cache 当前会返回 warning，不删除 blobs，也不删除 runtime/materialized cache。 |
+
+## Cache 命令
+
+查看并显式清理 daemon runtime cache inventory。只有 daemon 会扫描 cache path 并执行删除；CLI 只发送过滤条件并展示结果。
+
+```bash
+agent-compose cache ls
+agent-compose cache inspect <cache-id>
+agent-compose cache prune
+agent-compose cache rm <cache-id>
+agent-compose inspect cache <cache-id>
+```
+
+Cache domain 在 CLI 中用 `--type` 表示：
+
+- `oci`：daemon OCI image store metadata/layout。
+- `materialized`：从镜像派生出的 runtime 输入，例如 BoxLite OCI layout 或 Microsandbox rootfs。
+- `runtime`：runtime driver home 下的派生缓存，例如 BoxLite image artifacts。
+- `session`：session 级 runtime state，例如 Microsandbox docker disks。
+
+保护状态：
+
+- `active`：正在被 running/resuming runtime 使用，永不删除。
+- `referenced`：当前不 active，但仍被 stopped session、project/image metadata 或 runtime metadata 引用。默认跳过；`cache prune --include-referenced --force` 可以删除。
+- `unused`、`expired`、`orphaned`：设置 `--force` 后可删除。
+- `unknown`：引用或安全检查不完整，永不删除。
+
+常用选项：
+
+| 命令 | 参数 | 说明 |
+| --- | --- | --- |
+| `cache ls`, `cache prune` | `--driver <docker|boxlite|microsandbox|all>` | 按 runtime driver 过滤。 |
+| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|session>` | 按 cache type 过滤。 |
+| `cache ls`, `cache prune` | `--status <active|referenced|unused|expired|orphaned|unknown>` | 按保护状态过滤。 |
+| `cache prune` | `--unused`, `--orphaned`, `--expired` | status 快捷参数；彼此互斥，也不能与 `--status` 同用。 |
+| `cache prune` | `--older-than <duration>` | 匹配超过指定时长的 cache，例如 `7d` 或 `168h`。 |
+| `cache prune` | `--include-referenced` | 允许删除 referenced items；active 和 unknown 仍受保护。 |
+| `cache prune`, `cache rm` | `--force` | 实际删除符合条件的 item。没有 `--force` 时两个命令都是 dry-run。 |
+
+示例：
+
+```bash
+agent-compose cache ls --type materialized
+agent-compose cache inspect <cache-id>
+agent-compose cache prune --driver boxlite --unused
+agent-compose cache prune --type session --orphaned --force
+agent-compose cache prune --older-than 7d --force
+agent-compose cache rm <cache-id> --force
+```
+
+`cache prune` 和 `cache rm` 默认 dry-run，不带 `--force` 不删除文件。dry-run 展示 protected skipped items 不算错误。对 protected item 执行 forced `cache rm` 会非零退出，并展示跳过原因。
 
 兼容说明：
 

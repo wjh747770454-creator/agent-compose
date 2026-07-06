@@ -141,6 +141,7 @@ The main commands are:
 - `agent-compose ps`: list project agents, recent runs, and active sessions.
 - `agent-compose down`: disable managed schedulers and stop running sessions.
 - `agent-compose images`, `pull`, `rmi`, `image inspect`: manage daemon-side images.
+- `agent-compose cache ls|inspect|prune|rm`: inspect and explicitly clean daemon runtime caches. `prune` and `rm` are dry-run unless `--force` is set.
 
 Useful flags and environment variables:
 
@@ -297,7 +298,9 @@ Important variables include:
 - `IMAGE_STORE_MODE`, `IMAGE_CACHE_ROOT`, `IMAGE_REGISTRY`,
   `IMAGE_INSECURE_REGISTRIES`: image store and OCI cache settings.
 - `BOXLITE_HOME`, `BOXLITE_RUNTIME_DIR`, `BOX_ROOTFS_PATH`, `BOX_CACHE_TTL`:
-  BoxLite settings.
+  BoxLite settings. `BOX_CACHE_TTL` no longer runs hidden startup GC; use
+  explicit `agent-compose cache prune --older-than ... --force` for cache
+  cleanup.
 - `BOX_DISK_SIZE_GB`: shared guest disk size for VM-type drivers (the boxlite
   box disk and the microsandbox docker disk). Default 6 GiB.
 - `DOCKER_HOME`: Docker runtime state directory.

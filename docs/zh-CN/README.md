@@ -71,6 +71,7 @@ agent-compose down
 - `agent-compose ps`：查看 project agent、latest run 和 running session 状态。
 - `agent-compose down`：禁用 daemon 管理的 scheduler，并停止该 project 的 running sessions。
 - `agent-compose images|pull|rmi|image inspect`：管理 daemon 侧 image store。
+- `agent-compose cache ls|inspect|prune|rm`：查看并显式清理 daemon runtime cache；`prune` 和 `rm` 默认 dry-run，只有传 `--force` 才会删除。
 
 ## Compose 配置
 

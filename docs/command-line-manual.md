@@ -374,7 +374,7 @@ agent-compose logs --run-id run_123 --json
 
 ## `inspect`: Inspect Resources
 
-Inspect project resources or daemon images.
+Inspect project resources, daemon images, or runtime cache items.
 `inspect project` and `inspect agent <agent>` require the project to already exist on the daemon; after `agent-compose down`, run `agent-compose up` again before using them.
 
 ```bash
@@ -384,6 +384,7 @@ agent-compose inspect run <run-id>
 agent-compose inspect sandbox <sandbox>
 agent-compose inspect session <sandbox>
 agent-compose inspect image <image>
+agent-compose inspect cache <cache-id>
 ```
 
 Details:
@@ -394,6 +395,7 @@ Details:
 - `inspect sandbox <sandbox>` shows sandbox/runtime details.
 - `inspect session <sandbox>` is a deprecated compatibility entrypoint; use `inspect sandbox`.
 - `inspect image <image>` shows image details.
+- `inspect cache <cache-id>` shows one daemon runtime cache item, including references, blocked reasons, and warnings.
 
 ## Image Commands
 
@@ -412,7 +414,7 @@ Commands:
 - `images`: list images.
 - `pull`: pull all agent images referenced by the current project.
 - `pull <image>`: pull a specific image. If the local OCI image backend/store already has the image, the command succeeds directly with a skipped/already exists warning and does not pull again.
-- `rmi <image>`: remove an image.
+- `rmi <image>`: remove an image metadata/store entry. It does not delete materialized image cache, runtime-derived cache, or session ephemeral state.
 - `inspect image <image>`: inspect an image.
 
 Common options:
@@ -423,7 +425,58 @@ Common options:
 | `images` | `--query <text>` | Filter by image reference. |
 | `pull` | `--platform <os/arch[/variant]>` | Pull for a specific platform. |
 | `rmi` | `--force` | Force image removal. |
-| `rmi` | `--prune-children` | Remove untagged child images. |
+| `rmi` | `--prune-children` | Request child-image pruning from the image backend. OCI cache currently returns a warning and does not remove blobs or runtime/materialized cache. |
+
+## Cache Commands
+
+List and explicitly prune daemon runtime cache inventory. The daemon is the only component that scans cache paths and performs deletion; the CLI only sends filters and displays results.
+
+```bash
+agent-compose cache ls
+agent-compose cache inspect <cache-id>
+agent-compose cache prune
+agent-compose cache rm <cache-id>
+agent-compose inspect cache <cache-id>
+```
+
+Cache domains are shown as command-level `--type` values:
+
+- `oci`: daemon OCI image store metadata/layout.
+- `materialized`: runtime input generated from images, such as BoxLite OCI layout or Microsandbox rootfs.
+- `runtime`: runtime-derived cache under driver homes, such as BoxLite image artifacts.
+- `session`: session-scoped runtime state, such as Microsandbox docker disks.
+
+Protection status:
+
+- `active`: currently used by a running/resuming runtime; never removed.
+- `referenced`: not active, but still referenced by stopped session, project/image metadata, or runtime metadata. Skipped by default; `cache prune --include-referenced --force` can remove it.
+- `unused`, `expired`, `orphaned`: eligible for removal when `--force` is set.
+- `unknown`: reference or safety checks were incomplete; never removed.
+
+Common options:
+
+| Command | Option | Description |
+| --- | --- | --- |
+| `cache ls`, `cache prune` | `--driver <docker|boxlite|microsandbox|all>` | Filter by runtime driver. |
+| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|session>` | Filter by cache type. |
+| `cache ls`, `cache prune` | `--status <active|referenced|unused|expired|orphaned|unknown>` | Filter by protection status. |
+| `cache prune` | `--unused`, `--orphaned`, `--expired` | Status shortcuts; mutually exclusive with each other and with `--status`. |
+| `cache prune` | `--older-than <duration>` | Match caches older than a duration such as `7d` or `168h`. |
+| `cache prune` | `--include-referenced` | Allow referenced items to be removed; active and unknown items remain protected. |
+| `cache prune`, `cache rm` | `--force` | Actually remove eligible items. Without `--force`, both commands are dry-run. |
+
+Examples:
+
+```bash
+agent-compose cache ls --type materialized
+agent-compose cache inspect <cache-id>
+agent-compose cache prune --driver boxlite --unused
+agent-compose cache prune --type session --orphaned --force
+agent-compose cache prune --older-than 7d --force
+agent-compose cache rm <cache-id> --force
+```
+
+`cache prune` and `cache rm` default to dry-run and do not delete files without `--force`. A dry-run that shows protected skipped items is not an error. A forced `cache rm` for a protected item exits non-zero and prints why it was skipped.
 
 Compatibility:
 
