@@ -385,15 +385,15 @@
       - `pkg/agentcompose/app` 当前没有独立 RunService stream unit test；本次通过 app focused package gate 编译覆盖 app stream response 字段，通过 CLI RunService fake 和 API helper tests 覆盖 stream routing/mapping。
     - 下一目标：4.3 生成并验证 TypeScript proto client。
 
-- [ ] 4.3 生成并验证 `proto-client` TypeScript 产物
+- [x] 4.3 生成并验证 `proto-client` TypeScript 产物
   - 依赖：4.1。
   - 工作内容：
     - 在 `proto-client` 安装依赖并运行生成。
     - 确认 generated client 暴露 `StdioStream` enum，且不再暴露 v2 `isStderr`。
     - 构建 `@chaitin-ai/agent-compose-client`。
   - 可并行子任务：
-    - [ ] 可并行：审计 `proto-client/src` 或 `dist` 中 v2 stream 字段。
-    - [ ] 可并行：审计外部 `agent-compose-ui` 迁移风险并记录，不在本仓库内修改。
+    - [x] 可并行：审计 `proto-client/src` 或 `dist` 中 v2 stream 字段。
+    - [x] 可并行：审计外部 `agent-compose-ui` 迁移风险并记录，不在本仓库内修改。
   - 测试方案：
     - `cd proto-client && npm ci`
     - `cd proto-client && npm run gen`
@@ -403,10 +403,23 @@
     - v2 TypeScript client 反映 `StdioStream` enum。
     - 若发现外部 UI 需要迁移，完成总结中记录发布切分风险。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - `proto-client` 使用当前 v2 proto 重新生成 `src/agentcompose/v2/agentcompose_pb.ts`、Connect client 和 health/v1/v1/v2 TypeScript 源码。
+      - `npm run build` 生成 `dist/` JavaScript 与 declaration output，验证 `@chaitin-ai/agent-compose-client` 可编译。
+      - 生成结果中 v2 `RunAgentStreamResponse`、`TranscriptEvent`、`ExecStreamResponse` 均暴露 `stream` enum 字段，`StdioStream` enum 包含 `UNSPECIFIED`、`STDOUT`、`STDERR`。
+    - 验证：
+      - `cd proto-client && npm ci`：通过，安装 9 个包，0 个漏洞。
+      - `cd proto-client && npm run gen`：通过。
+      - `cd proto-client && npm run build`：通过。
+      - `node --version`：`v24.12.0`；`npm --version`：`11.6.2`；`protoc --version`：`libprotoc 3.21.12`。
+      - `rg -n "export enum StdioStream|STDIO_STREAM_UNSPECIFIED|STDIO_STREAM_STDOUT|STDIO_STREAM_STDERR|name: \"stream\"|StdioStream\\.UNSPECIFIED" src/agentcompose/v2/agentcompose_pb.ts dist/agentcompose/v2/agentcompose_pb.d.ts dist/agentcompose/v2/agentcompose_pb.js`：确认 src/dist 都包含 v2 enum 与三个 stream 字段。
+      - `rg -n "isStderr|is_stderr" src/agentcompose/v2 dist/agentcompose/v2 -g '*.ts' -g '*.js'`：无命中。
+      - `rg -n "export enum StdioStream|stream = StdioStream|name: \"stream\"|isStderr|is_stderr|field: string kind|name: \"kind\"" src/agentcompose/v2/agentcompose_pb.ts`：剩余 `kind` 为 `TriggerSpec.kind`，不是 `TranscriptEvent` stream 通道。
+    - 审计与例外：
+      - `proto-client/.gitignore` 当前忽略 `src/`、`dist/`、`node_modules/` 和 `*.tgz`；因此本任务生成和构建产物用于验证但不会作为 tracked diff 提交。
+      - `git ls-files proto-client/src proto-client/dist proto-client/package-lock.json proto-client/package.json proto-client/tsconfig.json proto-client/.gitignore`：仅 package metadata 和 `.gitignore` 已被跟踪，生成目录未被跟踪。
+      - 外部 `agent-compose-ui` 不在本仓库内；发布切分风险是 UI 需要从 v2 `isStderr`/`TranscriptEvent.kind` 迁移到 `stream`/`StdioStream` 后再消费此 v2 client。
     - 下一目标：4.4 阶段四 CLI/API/proto 收口。
 
 - [ ] 4.4 阶段四 CLI/API/proto 收口
