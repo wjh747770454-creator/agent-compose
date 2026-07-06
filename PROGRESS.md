@@ -546,12 +546,15 @@
       - `SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke`（已尝试，host `/dev/kvm` permission denied，BoxLite real runtime start 未通过；OCI image variant 因未设置 `SMOKE_OCI_IMAGE_REF` 跳过）
       - `SMOKE_RUNTIME_DRIVERS=microsandbox task test:runtime-smoke`（已尝试，Microsandbox sandbox process SIGABRT before agent relay became available；OCI image variant 因未设置 `SMOKE_OCI_IMAGE_REF` 跳过）
       - `git diff --check`
+      - `gh pr list --repo chaitin/agent-compose --head runtime-cache-lifecycle-spec --state all --limit 10`（无输出，当前分支无 PR）
+      - `gh run list --repo chaitin/agent-compose --branch runtime-cache-lifecycle-spec --limit 20`（无输出，当前分支无 Actions runs）
     - 审计与例外：
       - BoxLite smoke 未通过的直接原因是当前主机 `/dev/kvm: permission denied`；需要在具备 KVM 权限的环境补跑：`SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke`。
       - Microsandbox smoke 未通过的直接表现是 sandbox process `SIGABRT` 且 agent relay 未就绪；需要在具备 Microsandbox runtime/虚拟化依赖的环境补跑：`SMOKE_RUNTIME_DRIVERS=microsandbox task test:runtime-smoke`。可加 `SMOKE_KEEP_TMP=1` 保留临时目录排查。
       - Go/CLI/API/runtimecache/imagecache focused tests、proto-client 生成/build、`task lint`、`task build`、`task test` 均已通过；残余风险仅限当前本机无法证明真实 BoxLite/Microsandbox runtime smoke。
       - `task test:runtime-smoke` 即使只指定单 driver，也会先执行 BoxLite 和 Microsandbox dev artifact prepare deps；本轮 artifact prepare 成功或命中 up-to-date。
       - `SMOKE_OCI_IMAGE_REF` 未设置，因此 go-containerregistry OCI image consumption smoke variants按测试设计跳过；补跑 OCI variants 需要设置可启动的 agent-compose guest image ref。
+      - `.github/workflows/ci.yml` 仅在 pull request 和 `main` push 触发；本分支当前没有 open PR，因此最终 push 后没有远端 CI run 可等待。创建 PR 后应执行 `gh pr checks --repo chaitin/agent-compose --watch`。
     - 下一目标：无。
 
 ## 停止条件
