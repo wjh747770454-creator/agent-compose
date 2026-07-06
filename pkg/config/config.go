@@ -16,6 +16,7 @@ import (
 
 const DefaultWorkspaceUploadLimitBytes int64 = 1 << 30
 const DefaultAgentComposeSocketPath = "/var/run/agent-compose.sock"
+const DefaultAgentTimeout = 10 * time.Hour
 const defaultGuestHomePath = "/root"
 
 const (
@@ -156,7 +157,7 @@ func NewConfig(di do.Injector) (*Config, error) {
 			llmTimeout = parsed
 		}
 	}
-	agentTimeout := 10 * time.Minute
+	agentTimeout := DefaultAgentTimeout
 	if raw := os.Getenv("AGENT_TIMEOUT"); raw != "" {
 		if parsed, err := time.ParseDuration(raw); err != nil {
 			logger.Warn("failed to parse AGENT_TIMEOUT", "value", raw, "error", err)

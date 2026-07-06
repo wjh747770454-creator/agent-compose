@@ -46,7 +46,7 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 		agentTimeout = request.Timeout
 	}
 	if agentTimeout <= 0 {
-		agentTimeout = 10 * time.Minute
+		agentTimeout = appconfig.DefaultAgentTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, agentTimeout)
 	defer cancel()
