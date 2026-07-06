@@ -204,9 +204,23 @@ type AgentResumeInfo struct {
 	UpdatedAt           time.Time `json:"updated_at,omitempty"`
 }
 
+type StdioStream string
+
+const (
+	StdioStdout StdioStream = "stdout"
+	StdioStderr StdioStream = "stderr"
+)
+
+func NormalizeStdioStream(stream StdioStream) StdioStream {
+	if stream == StdioStderr {
+		return StdioStderr
+	}
+	return StdioStdout
+}
+
 type ExecChunk struct {
-	Text     string
-	IsStderr bool
+	Text   string
+	Stream StdioStream
 }
 
 type SessionEvent struct {

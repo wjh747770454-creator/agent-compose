@@ -17,7 +17,7 @@ func (a *ExecStreamAccumulator) WriteChunk(chunk domain.ExecChunk) {
 		return
 	}
 	a.output.WriteString(chunk.Text)
-	if chunk.IsStderr {
+	if domain.NormalizeStdioStream(chunk.Stream) == domain.StdioStderr {
 		a.stderr.WriteString(chunk.Text)
 		return
 	}
