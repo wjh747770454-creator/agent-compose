@@ -153,14 +153,13 @@ func (h *ExecHandler) executeProjectCommand(ctx context.Context, req *agentcompo
 		}
 		if send != nil {
 			createdAt := time.Now().UTC()
-			isStderr := domain.NormalizeStdioStream(filtered.Stream) == domain.StdioStderr
 			sendErr = send(&agentcomposev2.ExecStreamResponse{
 				EventType:  agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_OUTPUT,
 				ExecId:     execID,
 				SessionId:  session.Summary.ID,
 				RunId:      runID,
 				Chunk:      filtered.Text,
-				IsStderr:   isStderr,
+				Stream:     StdioStreamToProto(filtered.Stream),
 				Transcript: TranscriptEventFromExecChunk(filtered, createdAt),
 			})
 		}

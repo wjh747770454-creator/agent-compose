@@ -348,7 +348,7 @@
       - `proto-client` TypeScript 生成产物按 4.3 单独更新。
     - 下一目标：4.2 迁移 API/app/CLI v2 stream 使用。
 
-- [ ] 4.2 迁移 API、app 和 CLI 到 v2 `stream`
+- [x] 4.2 迁移 API、app 和 CLI 到 v2 `stream`
   - 依赖：4.1、3.4。
   - 工作内容：
     - 更新 `pkg/agentcompose/api/run.go` 的 `TranscriptEventFromExecChunk`，返回 v2 `StdioStream`。
@@ -357,9 +357,9 @@
     - `STDIO_STREAM_UNSPECIFIED` 按 stdout。
     - `--json` 继续 suppress 实时 transcript。
   - 可并行子任务：
-    - [ ] 可并行：迁移 RunService stream API tests。
-    - [ ] 可并行：迁移 ExecService stream API tests。
-    - [ ] 可并行：迁移 CLI stream writer tests。
+    - [x] 可并行：迁移 RunService stream API tests。
+    - [x] 可并行：迁移 ExecService stream API tests。
+    - [x] 可并行：迁移 CLI stream writer tests。
   - 测试方案：
     - `./scripts/with-go-toolchain.sh go test ./cmd/agent-compose ./pkg/agentcompose/app ./pkg/agentcompose/api`
   - 验收标准：
@@ -367,10 +367,22 @@
     - CLI 根据 v2 `stream` 正确写本机 stdout/stderr。
     - `--json` 行为保持兼容。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - `pkg/agentcompose/api/run.go` 新增 `StdioStreamToProto`，将 domain stdout/stderr 映射为 v2 `StdioStream`，空/未知 stream 按 stdout 输出。
+      - `TranscriptEventFromExecChunk` 改为写入 v2 `TranscriptEvent.Stream`，不再写 `Kind` 或 `IsStderr`。
+      - `pkg/agentcompose/api/exec.go` 的 `ExecStreamResponse` 输出事件改为设置 `Stream` 字段。
+      - `pkg/agentcompose/app/run_controller.go` 的 `RunAgentStreamResponse` 输出事件改为设置 `Stream` 字段。
+      - `cmd/agent-compose/main.go` 的 `writeTranscriptOrChunk` 改为从 event/transcript `Stream` 选择 stdout/stderr，`STDIO_STREAM_UNSPECIFIED` 走 stdout；`--json` suppress transcript 的分支未改变。
+      - 更新 CLI fake v2 stream response 和 API coverage test，覆盖 stdout/stderr/unspecified stream 路由与 server-side v2 stream 字段。
+    - 验证：
+      - `./scripts/with-go-toolchain.sh go test ./cmd/agent-compose ./pkg/agentcompose/app ./pkg/agentcompose/api`：通过。
+      - `./scripts/with-go-toolchain.sh go test -count=1 ./cmd/agent-compose ./pkg/agentcompose/app ./pkg/agentcompose/api`：通过。
+      - `rg -n "GetIsStderr|IsStderr|is_stderr|TranscriptEvent\\{Kind|\\.GetKind\\(\\)|StdioStreamToProto|GetStream\\(\\)" cmd/agent-compose pkg/agentcompose/api pkg/agentcompose/app proto/agentcompose/v2 -g '*.go'`：CLI/API/app v2 stream path 只使用 `GetStream`/`StdioStreamToProto`；剩余 `IsStderr` 命中是 v1/session legacy compatibility boundaries，剩余 `GetKind` 为 loader trigger kind。
+    - 审计与例外：
+      - 本任务未生成 TypeScript `proto-client`，按 4.3 单独执行。
+      - 本任务未扩大 CLI JSON schema 或参数；`--json` 仍跳过实时 transcript 并输出最终 JSON。
+      - `pkg/agentcompose/app` 当前没有独立 RunService stream unit test；本次通过 app focused package gate 编译覆盖 app stream response 字段，通过 CLI RunService fake 和 API helper tests 覆盖 stream routing/mapping。
     - 下一目标：4.3 生成并验证 TypeScript proto client。
 
 - [ ] 4.3 生成并验证 `proto-client` TypeScript 产物

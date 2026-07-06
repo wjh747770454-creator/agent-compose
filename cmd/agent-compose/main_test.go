@@ -1159,7 +1159,7 @@ agents:
 			if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
 				EventType:  agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
 				RunId:      "run-success",
-				Transcript: &agentcomposev2.TranscriptEvent{Kind: "stdout", Text: "live output\n"},
+				Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT, Text: "live output\n"},
 			}); err != nil {
 				return err
 			}
@@ -2042,7 +2042,7 @@ agents:
 				EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
 				RunId:     "run-failed",
 				Chunk:     "agent failed\n",
-				IsStderr:  true,
+				Stream:    agentcomposev2.StdioStream_STDIO_STREAM_STDERR,
 			}); err != nil {
 				return err
 			}
@@ -2951,7 +2951,7 @@ agents:
 					ExecId:     "exec-cli",
 					SessionId:  "session-exec",
 					RunId:      "run-exec",
-					Transcript: &agentcomposev2.TranscriptEvent{Kind: "stdout", Text: "exec stdout\n"},
+					Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT, Text: "exec stdout\n"},
 				}); err != nil {
 					return err
 				}
@@ -2960,7 +2960,7 @@ agents:
 					ExecId:     "exec-cli",
 					SessionId:  "session-exec",
 					RunId:      "run-exec",
-					Transcript: &agentcomposev2.TranscriptEvent{Kind: "stderr", Text: "exec stderr\n", IsStderr: true},
+					Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDERR, Text: "exec stderr\n"},
 				}); err != nil {
 					return err
 				}
@@ -3072,14 +3072,14 @@ func TestCLIExecInteractiveReservedUnsupported(t *testing.T) {
 	}
 }
 
-func TestWriteTranscriptOrChunkRoutesTranscriptAndLegacyChunks(t *testing.T) {
+func TestWriteTranscriptOrChunkRoutesTranscriptAndChunks(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
-	if err := writeTranscriptOrChunk(&stdout, &stderr, &agentcomposev2.TranscriptEvent{Text: "err\n", IsStderr: true}, "ignored\n", false); err != nil {
+	if err := writeTranscriptOrChunk(&stdout, &stderr, &agentcomposev2.TranscriptEvent{Text: "err\n", Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDERR}, "ignored\n", agentcomposev2.StdioStream_STDIO_STREAM_STDOUT); err != nil {
 		t.Fatalf("write transcript returned error: %v", err)
 	}
-	if err := writeTranscriptOrChunk(&stdout, &stderr, nil, "out\n", false); err != nil {
-		t.Fatalf("write legacy chunk returned error: %v", err)
+	if err := writeTranscriptOrChunk(&stdout, &stderr, nil, "out\n", agentcomposev2.StdioStream_STDIO_STREAM_UNSPECIFIED); err != nil {
+		t.Fatalf("write unspecified chunk returned error: %v", err)
 	}
 	if stdout.String() != "out\n" || stderr.String() != "err\n" {
 		t.Fatalf("stdout/stderr = %q / %q", stdout.String(), stderr.String())

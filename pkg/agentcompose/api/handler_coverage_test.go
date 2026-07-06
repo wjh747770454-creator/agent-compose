@@ -26,6 +26,28 @@ import (
 	"agent-compose/proto/agentcompose/v2/agentcomposev2connect"
 )
 
+func TestTranscriptEventFromExecChunkMapsStdioStream(t *testing.T) {
+	createdAt := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name   string
+		stream domain.StdioStream
+		want   agentcomposev2.StdioStream
+	}{
+		{name: "stdout", stream: domain.StdioStdout, want: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT},
+		{name: "stderr", stream: domain.StdioStderr, want: agentcomposev2.StdioStream_STDIO_STREAM_STDERR},
+		{name: "unspecified", want: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT},
+		{name: "unknown", stream: domain.StdioStream("other"), want: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			event := TranscriptEventFromExecChunk(domain.ExecChunk{Text: "chunk", Stream: tc.stream}, createdAt)
+			if event.GetStream() != tc.want || event.GetText() != "chunk" || event.GetCreatedAt() == "" {
+				t.Fatalf("event = %#v, want stream %s", event, tc.want)
+			}
+		})
+	}
+}
+
 func TestPrepareStreamingHeadersPreservesNoTransform(t *testing.T) {
 	headers := http.Header{}
 	PrepareStreamingHeaders(headers)
@@ -385,6 +407,10 @@ func TestExecHandlerRunSelectorAndStreamSenderWorkflow(t *testing.T) {
 		events[1].GetEventType() != agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_OUTPUT ||
 		events[1].GetTranscript().GetText() == "" {
 		t.Fatalf("stream events = %#v", events)
+	}
+	if events[1].GetStream() != agentcomposev2.StdioStream_STDIO_STREAM_STDOUT ||
+		events[1].GetTranscript().GetStream() != agentcomposev2.StdioStream_STDIO_STREAM_STDOUT {
+		t.Fatalf("stream event stdio stream = event %s transcript %s", events[1].GetStream(), events[1].GetTranscript().GetStream())
 	}
 	for _, event := range events {
 		if strings.Contains(event.GetChunk(), execution.CommandResultPrefix) || strings.Contains(event.GetTranscript().GetText(), execution.CommandResultPrefix) {

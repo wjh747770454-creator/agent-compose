@@ -120,16 +120,19 @@ func ProjectRunSourceFilterFromProto(source agentcomposev2.RunSource) string {
 	}
 }
 
-func TranscriptEventFromExecChunk(chunk domain.ExecChunk, createdAt time.Time) *agentcomposev2.TranscriptEvent {
-	kind := "stdout"
-	isStderr := domain.NormalizeStdioStream(chunk.Stream) == domain.StdioStderr
-	if isStderr {
-		kind = "stderr"
+func StdioStreamToProto(stream domain.StdioStream) agentcomposev2.StdioStream {
+	switch domain.NormalizeStdioStream(stream) {
+	case domain.StdioStderr:
+		return agentcomposev2.StdioStream_STDIO_STREAM_STDERR
+	default:
+		return agentcomposev2.StdioStream_STDIO_STREAM_STDOUT
 	}
+}
+
+func TranscriptEventFromExecChunk(chunk domain.ExecChunk, createdAt time.Time) *agentcomposev2.TranscriptEvent {
 	return &agentcomposev2.TranscriptEvent{
-		Kind:      kind,
+		Stream:    StdioStreamToProto(chunk.Stream),
 		Text:      chunk.Text,
-		IsStderr:  isStderr,
 		CreatedAt: FormatProjectTime(createdAt),
 	}
 }

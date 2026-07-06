@@ -95,12 +95,11 @@ func (d runControllerDelegate) RunAgentStream(ctx context.Context, req *connect.
 			return nil
 		},
 		SendChunk: func(runID string, chunk domain.ExecChunk, createdAt time.Time) error {
-			isStderr := domain.NormalizeStdioStream(chunk.Stream) == domain.StdioStderr
 			if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
 				EventType:  agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
 				RunId:      runID,
 				Chunk:      chunk.Text,
-				IsStderr:   isStderr,
+				Stream:     api.StdioStreamToProto(chunk.Stream),
 				CreatedAt:  api.FormatProjectTime(createdAt),
 				Transcript: api.TranscriptEventFromExecChunk(chunk, createdAt),
 			}); err != nil {
