@@ -42,6 +42,7 @@ import (
 	"agent-compose/pkg/compose"
 	"agent-compose/pkg/config"
 	"agent-compose/pkg/health"
+	domain "agent-compose/pkg/model"
 	"agent-compose/pkg/projects"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 	"agent-compose/proto/agentcompose/v1/agentcomposev1connect"
@@ -515,7 +516,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 
 	runOptions := composeRunOptions{}
 	runCmd := &cobra.Command{
-		Use:   "run <agent> [prompt...]",
+		Use:   "run <agent> <trigger-name>",
 		Short: "Run a project agent",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -523,7 +524,6 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 		},
 	}
 	runCmd.Flags().StringVar(&runOptions.Prompt, "prompt", "", "Prompt to send to the agent")
-	runCmd.Flags().StringVar(&runOptions.Trigger, "trigger", "", "Trigger to run for the agent")
 	runCmd.Flags().StringVar(&runOptions.Command, "command", "", "Bash command to execute in the agent sandbox")
 	runCmd.Flags().StringVar(&runOptions.SandboxID, "sandbox", "", "Reuse an existing sandbox")
 	// Deprecated: use --sandbox instead.
@@ -760,7 +760,6 @@ type composeListProjectsOptions struct {
 
 type composeRunOptions struct {
 	Prompt        string
-	Trigger       string
 	Command       string
 	SessionID     string
 	SandboxID     string
@@ -1171,7 +1170,7 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 	commandFlagChanged := cmd.Flags().Changed("command")
 	prompt := normalizeOptionalRunModeValue(normalizedOptions.Prompt)
 	commandText := normalizeOptionalRunModeValue(normalizedOptions.Command)
-	triggerID := strings.TrimSpace(normalizedOptions.Trigger)
+	triggerID := ""
 	if promptFlagChanged && normalizedOptions.Prompt == optionalRunModeFlagNoValue && len(args) > 1 {
 		prompt = strings.TrimSpace(args[1])
 		args = append(args[:1], args[2:]...)
@@ -1186,9 +1185,6 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 	if normalizedOptions.Interactive && cli.JSON {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive cannot be combined with --json")}
 	}
-	if normalizedOptions.Interactive && triggerID != "" {
-		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive cannot be combined with --trigger")}
-	}
 	if normalizedOptions.Interactive && promptFlagChanged == commandFlagChanged {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive requires exactly one of --prompt or --command")}
 	}
@@ -1197,6 +1193,17 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		return err
 	}
 	agentName := strings.TrimSpace(args[0])
+	if !normalizedOptions.Interactive && triggerID == "" && prompt == "" && commandText == "" {
+		if len(args) > 2 {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run accepts at most one trigger name positional argument")}
+		}
+		if len(args) == 2 {
+			triggerID, err = resolveComposeRunTriggerName(normalized, projectID, agentName, args[1])
+			if err != nil {
+				return err
+			}
+		}
+	}
 	if normalizedOptions.Interactive && promptFlagChanged {
 		if err := validateInteractivePromptProvider(normalized, agentName); err != nil {
 			return err
@@ -1204,6 +1211,9 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 	}
 	if !normalizedOptions.Interactive && cmd.Flags().Changed("command") && commandText == "" {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --command requires a non-empty command")}
+	}
+	if !normalizedOptions.Interactive && cmd.Flags().Changed("prompt") && prompt == "" {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --prompt requires a non-empty prompt")}
 	}
 	modeCount := 0
 	if !normalizedOptions.Interactive {
@@ -1214,26 +1224,31 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		}
 	}
 	if modeCount > 1 {
-		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run requires only one of --trigger, --prompt, or --command")}
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run requires only one of trigger name, --prompt, or --command")}
 	}
 	if !normalizedOptions.Interactive && (triggerID != "" || prompt != "" || commandText != "") && len(args) > 1 {
-		mode := "--prompt"
-		if triggerID != "" {
-			mode = "--trigger"
-		} else if commandText != "" {
+		mode := ""
+		if cmd.Flags().Changed("prompt") {
+			mode = "--prompt"
+		} else if cmd.Flags().Changed("command") {
 			mode = "--command"
 		}
-		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run with %s does not accept legacy positional prompt arguments", mode)}
+		if mode != "" {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run with %s does not accept additional positional arguments", mode)}
+		}
 	}
 	if normalizedOptions.Interactive && len(args) > 1 {
-		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive does not accept legacy positional prompt arguments")}
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive does not accept additional positional arguments")}
 	}
-	if !normalizedOptions.Interactive && prompt == "" && len(args) > 1 {
-		// Deprecated: positional prompt arguments will become the trigger position in a future release.
-		if err := writeDeprecatedWarning(cmd.ErrOrStderr(), "agent-compose run <agent> [prompt...]", "agent-compose run <agent> --prompt"); err != nil {
-			return err
+	if !normalizedOptions.Interactive && triggerID == "" && prompt == "" && commandText == "" {
+		agent, ok := composeRunAgentSpec(normalized, agentName)
+		if !ok {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("agent %q is not configured in this project", agentName)}
 		}
-		prompt = strings.Join(args[1:], " ")
+		if agent.Scheduler == nil || len(agent.Scheduler.Triggers) == 0 {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("agent %q has no configured triggers; use --prompt or --command", agentName)}
+		}
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run requires a trigger name, --prompt, or --command")}
 	}
 	clientConfig, err := resolveCLIClientConfig(cli.Host)
 	if err != nil {
@@ -1528,6 +1543,43 @@ func normalizeComposeRunOptions(cmd *cobra.Command, options composeRunOptions) (
 		options.SessionID = options.SandboxID
 	}
 	return options, nil
+}
+
+func resolveComposeRunTriggerName(normalized *compose.NormalizedProjectSpec, projectID, agentName, triggerName string) (string, error) {
+	triggerName = strings.TrimSpace(triggerName)
+	if triggerName == "" {
+		return "", commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run trigger name cannot be empty")}
+	}
+	agent, ok := composeRunAgentSpec(normalized, agentName)
+	if !ok {
+		return "", commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("agent %q is not configured in this project", agentName)}
+	}
+	if agent.Scheduler == nil || len(agent.Scheduler.Triggers) == 0 {
+		return "", commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("agent %q has no configured triggers; use --prompt or --command", agentName)}
+	}
+	for index, trigger := range agent.Scheduler.Triggers {
+		if strings.TrimSpace(trigger.Name) == triggerName {
+			id, err := domain.StableManagedTriggerID(projectID, agent.Name, "", triggerName, index)
+			if err != nil {
+				return "", commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("resolve trigger %q for agent %q: %w", triggerName, agentName, err)}
+			}
+			return id, nil
+		}
+	}
+	return "", commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("trigger %q is not configured for agent %q", triggerName, agentName)}
+}
+
+func composeRunAgentSpec(normalized *compose.NormalizedProjectSpec, agentName string) (compose.NormalizedAgentSpec, bool) {
+	agentName = strings.TrimSpace(agentName)
+	if normalized == nil {
+		return compose.NormalizedAgentSpec{}, false
+	}
+	for _, agent := range normalized.Agents {
+		if strings.TrimSpace(agent.Name) == agentName {
+			return agent, true
+		}
+	}
+	return compose.NormalizedAgentSpec{}, false
 }
 
 func normalizeOptionalRunModeValue(value string) string {

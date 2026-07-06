@@ -1181,11 +1181,11 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, runCount, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--sandbox", "session-reuse", "--keep-running", "reviewer", "check", "this")
+	stdout, stderr, runCount, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--sandbox", "session-reuse", "--keep-running", "reviewer", "--prompt", "check this")
 	if exitCode != 0 {
 		t.Fatalf("run success exit code = %d, stderr=%q", exitCode, stderr)
 	}
-	if stdout != "live output\n" || !strings.Contains(stderr, "agent-compose run <agent> [prompt...] is deprecated") || strings.Contains(stdout, "deprecated") {
+	if stdout != "live output\n" || stderr != "" {
 		t.Fatalf("run success stdout/stderr = %q / %q", stdout, stderr)
 	}
 	if runCount != 0 {
@@ -1195,11 +1195,11 @@ agents:
 		t.Fatal("RunAgentStream was not called")
 	}
 
-	legacyOut, legacyErr, _, legacyCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--session-id", "session-reuse", "--keep-running", "reviewer", "check", "this")
+	legacyOut, legacyErr, _, legacyCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--session-id", "session-reuse", "--keep-running", "reviewer", "--prompt", "check this")
 	if legacyCode != 0 {
 		t.Fatalf("run --session-id exit code = %d, stderr=%q", legacyCode, legacyErr)
 	}
-	if legacyOut != "live output\n" || !strings.Contains(legacyErr, "agent-compose run --session-id is deprecated") || !strings.Contains(legacyErr, "agent-compose run <agent> [prompt...] is deprecated") || strings.Contains(legacyOut, "deprecated") {
+	if legacyOut != "live output\n" || !strings.Contains(legacyErr, "agent-compose run --session-id is deprecated") || strings.Contains(legacyOut, "deprecated") {
 		t.Fatalf("run --session-id stdout/stderr = %q / %q", legacyOut, legacyErr)
 	}
 }
@@ -1745,13 +1745,18 @@ name: cli-run-trigger
 agents:
   reviewer:
     provider: codex
+    scheduler:
+      triggers:
+        - name: nightly-review
+          cron: "0 1 * * *"
+          prompt: review nightly
 `)
 	var sawRequest bool
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
 				sawRequest = true
-				if req.Msg.GetAgentName() != "reviewer" || req.Msg.GetTriggerId() != "nightly-review" || req.Msg.GetPrompt() != "" {
+				if req.Msg.GetAgentName() != "reviewer" || !strings.HasPrefix(req.Msg.GetTriggerId(), "trigger-nightly-review-") || req.Msg.GetPrompt() != "" {
 					t.Fatalf("RunAgentStream trigger request = %#v", req.Msg)
 				}
 				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
@@ -1773,9 +1778,9 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "reviewer", "--trigger", "nightly-review")
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "reviewer", "nightly-review")
 	if exitCode != 0 || stdout != "" || stderr != "" {
-		t.Fatalf("run --trigger code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+		t.Fatalf("run trigger code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
 	}
 	if !sawRequest {
 		t.Fatal("RunAgentStream was not called")
@@ -1788,6 +1793,11 @@ name: cli-run-trigger-warning
 agents:
   reviewer:
     provider: codex
+    scheduler:
+      triggers:
+        - name: nightly-warning
+          cron: "0 2 * * *"
+          prompt: review nightly
 `)
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
@@ -1813,14 +1823,14 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "reviewer", "--trigger", "trigger-1")
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "reviewer", "nightly-warning")
 	if exitCode != 0 || stdout != "" || !strings.Contains(stderr, "warning: trigger trigger-1 is disabled") {
-		t.Fatalf("run --trigger warning code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+		t.Fatalf("run trigger warning code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
 	}
 
-	jsonOut, jsonErr, _, jsonCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--json", "reviewer", "--trigger", "trigger-1")
+	jsonOut, jsonErr, _, jsonCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--json", "reviewer", "nightly-warning")
 	if jsonCode != 0 || jsonErr != "" || !strings.Contains(jsonOut, `"warnings"`) || !strings.Contains(jsonOut, "trigger trigger-1 is disabled") {
-		t.Fatalf("run --trigger --json warning code/stdout/stderr = %d / %q / %q", jsonCode, jsonOut, jsonErr)
+		t.Fatalf("run trigger --json warning code/stdout/stderr = %d / %q / %q", jsonCode, jsonOut, jsonErr)
 	}
 }
 
@@ -1830,6 +1840,17 @@ name: cli-run-input-errors
 agents:
   reviewer:
     provider: codex
+`)
+	composeWithTriggerPath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-input-trigger-errors
+agents:
+  reviewer:
+    provider: codex
+    scheduler:
+      triggers:
+        - name: nightly
+          cron: "0 2 * * *"
+          prompt: review nightly
 `)
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
@@ -1847,34 +1868,49 @@ agents:
 		want string
 	}{
 		{
-			name: "trigger and prompt flags",
-			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--trigger", "nightly", "--prompt", "check"},
-			want: "only one of --trigger, --prompt, or --command",
+			name: "trigger flag unsupported",
+			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--trigger", "nightly"},
+			want: "unknown flag: --trigger",
 		},
 		{
 			name: "command and prompt flags",
 			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--command", "echo hi", "--prompt", "check"},
-			want: "only one of --trigger, --prompt, or --command",
+			want: "only one of trigger name, --prompt, or --command",
 		},
 		{
-			name: "command and trigger flags",
-			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--command", "echo hi", "--trigger", "nightly"},
-			want: "only one of --trigger, --prompt, or --command",
-		},
-		{
-			name: "trigger and positional prompt",
-			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--trigger", "nightly", "legacy"},
-			want: "does not accept legacy positional prompt",
-		},
-		{
-			name: "prompt flag and positional prompt",
+			name: "prompt flag and positional trigger",
 			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--prompt", "check", "legacy"},
-			want: "does not accept legacy positional prompt",
+			want: "does not accept additional positional arguments",
 		},
 		{
-			name: "command flag and positional prompt",
+			name: "command flag and positional trigger",
 			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--command", "echo hi", "legacy"},
-			want: "does not accept legacy positional prompt",
+			want: "does not accept additional positional arguments",
+		},
+		{
+			name: "positional trigger without configured triggers",
+			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "nightly"},
+			want: "has no configured triggers; use --prompt or --command",
+		},
+		{
+			name: "one positional arg with configured triggers",
+			args: []string{"run", "--host", server.URL, "--file", composeWithTriggerPath, "reviewer"},
+			want: "run requires a trigger name, --prompt, or --command",
+		},
+		{
+			name: "one positional arg with unknown agent",
+			args: []string{"run", "--host", server.URL, "--file", composeWithTriggerPath, "missing"},
+			want: `agent "missing" is not configured in this project`,
+		},
+		{
+			name: "positional trigger name not configured",
+			args: []string{"run", "--host", server.URL, "--file", composeWithTriggerPath, "reviewer", "missing"},
+			want: `trigger "missing" is not configured for agent "reviewer"`,
+		},
+		{
+			name: "too many positional trigger arguments",
+			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "nightly", "extra"},
+			want: "at most one trigger name positional argument",
 		},
 		{
 			name: "empty command flag",
@@ -1917,11 +1953,6 @@ agents:
 			want: "requires exactly one of --prompt or --command",
 		},
 		{
-			name: "trigger",
-			args: []string{"run", "--file", composePath, "reviewer", "-i", "--trigger", "nightly"},
-			want: "cannot be combined with --trigger",
-		},
-		{
 			name: "json",
 			args: []string{"run", "--file", composePath, "--json", "reviewer", "-i", "--prompt"},
 			want: "cannot be combined with --json",
@@ -1932,9 +1963,9 @@ agents:
 			want: "requires exactly one of --prompt or --command",
 		},
 		{
-			name: "positional prompt",
+			name: "additional positional argument",
 			args: []string{"run", "--file", composePath, "reviewer", "-i", "--prompt", "first", "legacy"},
-			want: "does not accept legacy positional prompt",
+			want: "does not accept additional positional arguments",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2028,7 +2059,7 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "--json", "reviewer")
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "--json", "reviewer", "--prompt", "clean")
 	if exitCode != 0 || stderr != "" {
 		t.Fatalf("run --rm --json code/stderr = %d / %q", exitCode, stderr)
 	}
@@ -2122,7 +2153,7 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "reviewer")
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "reviewer", "--prompt", "clean")
 	if exitCode != 9 {
 		t.Fatalf("run --rm failed exit code = %d, want 9; stderr=%q", exitCode, stderr)
 	}
@@ -2165,7 +2196,7 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "reviewer")
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--rm", "reviewer", "--prompt", "clean")
 	if exitCode == 0 {
 		t.Fatalf("run --rm cleanup error exit code = %d, want non-zero", exitCode)
 	}

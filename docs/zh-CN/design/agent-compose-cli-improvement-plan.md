@@ -117,25 +117,25 @@ agents:
 
 `agent-compose run <agent>` 当前支持三类单次输入：
 
-- `--trigger <trigger>`：手动运行 project 中 managed scheduler/loader trigger。
+- `<trigger-name>`：按名称手动运行 project 中 managed scheduler/loader trigger。
 - `--prompt "..."`：向 provider 发送一轮 prompt。
 - `--command "..."`：在 agent sandbox 中通过 guest `agent-compose-runtime exec` 执行一次 shell command。
 
 互斥规则：
 
-- `--trigger`、`--prompt`、`--command` 一次只能选择一种。
-- 使用上述 flag 后不能再使用 legacy positional prompt。
-- legacy `run <agent> [prompt...]` 保留兼容并输出 deprecated warning。
+- trigger name、`--prompt`、`--command` 一次只能选择一种。
+- 使用 `--prompt` 或 `--command` 后不能再传额外位置参数。
+- prompt 输入必须使用 `--prompt`；`run <agent> <trigger-name>` 的第二个位置参数不再作为 prompt 处理。
 - `--session-id` 是 `--sandbox` 的 deprecated alias。
 
 ### Trigger 解析
 
-`run --trigger` 不只是把 trigger id 写入 metadata。`pkg/runs.Controller` 会在 `BeginRun` 前解析当前 project/agent 的 managed scheduler loader：
+`run <agent> <trigger-name>` 会在 CLI 侧基于当前 `agent-compose.yml` 查找 trigger name，并把对应的 trigger 提交给 daemon。`pkg/runs.Controller` 会在 `BeginRun` 前解析当前 project/agent 的 managed scheduler loader：
 
 - trigger 必须属于当前 project 和 agent。
 - disabled scheduler 或 disabled trigger 可由 operator 手动运行，但 run response/summary/detail 会带 warning。
 - trigger prompt 会进入实际 `ExecuteAgentRequest.Message`，并写入 `project_run.prompt`。
-- 原始 `trigger_id` 和解析出的 `scheduler_id` 保留在 run summary/detail。
+- 解析出的 scheduler 信息会保留在 run summary/detail。
 
 ### Cleanup policy
 
@@ -257,7 +257,6 @@ Docker daemon 只是可选 image backend；OCI cache 是 daemonless backend。Bo
 | `agent-compose image pull <image>` | `agent-compose pull <image>` |
 | `agent-compose image rm <image>` | `agent-compose rmi <image>` |
 | `agent-compose image inspect <image>` | `agent-compose inspect image <image>` |
-| `agent-compose run <agent> [prompt...]` | `agent-compose run <agent> --prompt "..."` |
 | `agent-compose run --session-id <id>` | `agent-compose run --sandbox <sandbox>` |
 | `agent-compose exec --agent/--run-id/--session-id ...` | `agent-compose exec <sandbox> ...` |
 | `agent-compose logs --session-id <id>` | `agent-compose logs --sandbox <sandbox>` |

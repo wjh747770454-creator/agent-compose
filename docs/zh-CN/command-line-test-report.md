@@ -202,13 +202,15 @@ AUTH_USERNAME=admin AUTH_PASSWORD=... \
 
 结论：新镜像命令 `images/pull/rmi/inspect image` 可用；旧 `image` 命令树没有删除，兼容 warning 正确输出到 stderr。
 
-## 9. Run 兼容入口测试
+## 9. Run 输入模式测试
 
 | 测试项 | 命令结构 | 关键参数 | 预期 | 结果 |
 | --- | --- | --- | --- | --- |
-| positional prompt 兼容 warning | `<prefix> run reviewer legacy positional prompt` | 旧 positional prompt | stderr 输出 deprecated warning，并提示使用 `--prompt` | 通过 |
+| prompt flag | `<prefix> run reviewer --prompt "review current workspace"` | 显式 prompt | prompt 发送给 provider；不输出 deprecated warning | 通过 |
+| positional trigger name | `<prefix> run reviewer nightly-review` | trigger name | CLI 按 trigger name 找到对应配置后提交 run | 通过 |
+| 无 trigger 配置 | `<prefix> run reviewer nightly-review` | 未配置 trigger 的 agent | 返回 usage error，并提示使用 `--prompt` 或 `--command` | 通过 |
 
-说明：该命令会进入真实 provider 执行路径，测试环境没有把 provider 完成结果作为确定性 E2E 断言。本轮验证重点是旧 positional prompt 入口的兼容 warning 行为，以及 warning 不写入 JSON stdout 的约束。
+说明：prompt 输入必须使用 `--prompt`。`run <agent> <trigger-name>` 的第二个位置参数表示 trigger name，不再作为 prompt 兼容入口。
 
 ## 10. 历史延期命令边界测试
 

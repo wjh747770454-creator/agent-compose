@@ -136,7 +136,7 @@ Notes:
 Start a sandbox for an agent, or continue work in an existing sandbox.
 
 ```bash
-agent-compose run <agent> --trigger <trigger>
+agent-compose run <agent> <trigger-name>
 agent-compose run <agent> --prompt "..."
 agent-compose run <agent> --command "..."
 agent-compose run <agent> --sandbox <sandbox> --prompt "..."
@@ -146,16 +146,16 @@ Input modes:
 
 | Mode | Usage | Description |
 | --- | --- | --- |
-| trigger | `run <agent> --trigger <trigger>` | Run a trigger defined in the project config. |
+| trigger | `run <agent> <trigger-name>` | Run a named trigger defined in the project config. |
 | prompt | `run <agent> --prompt "..."` | Send a prompt to the agent provider. |
 | command | `run <agent> --command "..."` | Start or reuse the agent sandbox and execute a shell command through guest `agent-compose-runtime exec`; stdout/stderr transcript is streamed and persisted to the run record without protocol payload markers. |
 | prompt REPL | `run <agent> -i --prompt` | Read prompts line by line from stdin. Each non-empty input creates one run and reuses the same sandbox. |
 | command REPL | `run <agent> -i --command` | Read commands line by line from stdin. Each non-empty input creates one run and reuses the same sandbox. |
 | sandbox reuse | `run <agent> --sandbox <sandbox> --prompt "..."` | Continue in a specific sandbox. |
 
-Compatibility:
-
-- `run <agent> [prompt...]` still joins positional arguments into a prompt, but this entrypoint is deprecated. It prints a warning to stderr. New scripts should use `--prompt`.
+Prompt input must use `--prompt`. Positional prompt arguments are not supported.
+If the agent has no configured triggers, `run <agent> <trigger-name>` fails with
+a usage error; use `--prompt` or `--command` for ad hoc work.
 
 | Option | Description |
 | --- | --- |
@@ -171,7 +171,7 @@ Compatibility:
 Examples:
 
 ```bash
-agent-compose run reviewer --trigger pr-opened
+agent-compose run reviewer pr-opened
 agent-compose run reviewer --prompt "Review the staged changes"
 agent-compose run builder --command "task build"
 agent-compose run tester --command "task test" --keep-running
@@ -185,9 +185,10 @@ agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the note
 Rules:
 
 - Choose only one of trigger, prompt, or command.
-- Do not combine `--prompt`, `--trigger`, or `--command` with legacy positional prompt arguments.
+- `run <agent> <trigger-name>` accepts exactly one trigger name positional argument.
+- Do not combine `--prompt` or `--command` with additional positional arguments.
 - `run -d/--detach` and `run -i/--interactive` are mutually exclusive.
-- `run -i/--interactive` must select `--prompt` or `--command`; it cannot be combined with `--trigger` or `--json`.
+- `run -i/--interactive` must select `--prompt` or `--command`; it cannot be combined with `--json`.
 - Empty REPL lines do not create runs. Enter `/exit` or press Ctrl+D to exit.
 - REPL mode is not TTY/PTY or running stdin passthrough. Each input is one independent `RunAgentStream` call that reuses the same sandbox.
 - Detached runs can be observed with the printed `agent-compose logs --run-id <run-id> --follow` command, or managed later with `stop` and `logs`.

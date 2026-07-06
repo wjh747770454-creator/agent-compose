@@ -344,7 +344,7 @@ validation. Inline QJS schedulers call existing
 `LoaderManager.Validate(ctx, "scheduler", script)`, where the QJS loader engine
 evaluates the script and collects triggers registered through
 `scheduler.interval`, `scheduler.timeout`, `scheduler.on`, and
-`scheduler.cron`. Syntax errors, duplicate trigger ids, and invalid
+`scheduler.cron`. Syntax errors, duplicate trigger names, and invalid
 timer/cron/event parameters are converted into project validation issues at the
 path `agents.<name>.scheduler.script`.
 

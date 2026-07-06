@@ -257,7 +257,7 @@ Project 是 `agent-compose.yml` 在 daemon 中的持久化实例。project id、
 
 受管资源只修改带 managed metadata 的 agent definition、loader 和 trigger。同名手工资源不会被覆盖或删除。
 
-`ValidateProject` 和 `ApplyProject` 对 scheduler 使用同一条构建路径。声明式 scheduler 只做 compose 和 loader trigger 结构校验；inline QJS scheduler 会调用现有 `LoaderManager.Validate(ctx, "scheduler", script)`，由 QJS loader engine 求值脚本并收集 `scheduler.interval`、`scheduler.timeout`、`scheduler.on`、`scheduler.cron` 注册出来的 triggers。语法错误、重复 trigger id、非法 timer/cron/event 参数会转换成路径为 `agents.<name>.scheduler.script` 的 project validation issue。
+`ValidateProject` 和 `ApplyProject` 对 scheduler 使用同一条构建路径。声明式 scheduler 只做 compose 和 loader trigger 结构校验；inline QJS scheduler 会调用现有 `LoaderManager.Validate(ctx, "scheduler", script)`，由 QJS loader engine 求值脚本并收集 `scheduler.interval`、`scheduler.timeout`、`scheduler.on`、`scheduler.cron` 注册出来的 triggers。语法错误、重复 trigger name、非法 timer/cron/event 参数会转换成路径为 `agents.<name>.scheduler.script` 的 project validation issue。
 
 reconcile 顺序保持保守：先把 `ProjectScheduler` 和受管 `Loader` staged 为 disabled，替换 loader triggers，再启用 loader 和 scheduler。替换 trigger 或启用失败时会执行 cleanup，避免留下已经启用但 trigger/script 不一致的 scheduler。
 

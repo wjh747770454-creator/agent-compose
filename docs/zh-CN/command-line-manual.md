@@ -138,7 +138,7 @@ agent-compose -f /path/to/project/agent-compose.yml down
 为指定 agent 启动一个 sandbox，或在已有 sandbox 中继续运行。
 
 ```bash
-agent-compose run <agent> --trigger <trigger>
+agent-compose run <agent> <trigger-name>
 agent-compose run <agent> --prompt "..."
 agent-compose run <agent> --command "..."
 agent-compose run <agent> --sandbox <sandbox> --prompt "..."
@@ -148,16 +148,15 @@ agent-compose run <agent> --sandbox <sandbox> --prompt "..."
 
 | 模式 | 用法 | 说明 |
 | --- | --- | --- |
-| trigger | `run <agent> --trigger <trigger>` | 运行配置中定义的 trigger。 |
+| trigger | `run <agent> <trigger-name>` | 按名称运行 project 配置中定义的 trigger。 |
 | prompt | `run <agent> --prompt "..."` | 向 agent provider 发送 prompt。 |
 | command | `run <agent> --command "..."` | 启动或复用该 agent 的 sandbox 后通过 guest `agent-compose-runtime exec` 执行 shell 命令；命令 transcript 会实时输出，并写入该次 run 记录。 |
 | prompt REPL | `run <agent> -i --prompt` | 从 stdin 逐行读取 prompt；每条非空输入创建一次 run，并复用同一个 sandbox。 |
 | command REPL | `run <agent> -i --command` | 从 stdin 逐行读取 command；每条非空输入创建一次 run，并复用同一个 sandbox。 |
 | sandbox 复用 | `run <agent> --sandbox <sandbox> --prompt "..."` | 在指定 sandbox 中继续运行。 |
 
-兼容说明：
-
-- `run <agent> [prompt...]` 仍会把第二个及后续 positional 参数拼成 prompt，但该入口已废弃，会在 stderr 输出 deprecated warning；新脚本应使用 `--prompt`。
+prompt 输入必须使用 `--prompt`。不再支持 positional prompt 参数。
+如果 agent 没有配置 trigger，`run <agent> <trigger-name>` 会返回 usage error；临时任务请使用 `--prompt` 或 `--command`。
 
 选项：
 
@@ -175,7 +174,7 @@ agent-compose run <agent> --sandbox <sandbox> --prompt "..."
 示例：
 
 ```bash
-agent-compose run reviewer --trigger pr-opened
+agent-compose run reviewer pr-opened
 agent-compose run reviewer --prompt "Review the staged changes"
 agent-compose run builder --command "task build"
 agent-compose run tester --command "task test" --keep-running
@@ -189,9 +188,10 @@ agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the note
 互斥规则：
 
 - trigger、prompt、command 一次只能选择一种。
-- 使用 `--prompt`、`--trigger` 或 `--command` 时，不能再传 legacy positional prompt 参数。
+- `run <agent> <trigger-name>` 只接受一个 trigger name 位置参数。
+- 使用 `--prompt` 或 `--command` 时，不能再传额外位置参数。
 - `run -d/--detach` 和 `run -i/--interactive` 互斥。
-- `run -i/--interactive` 必须选择 `--prompt` 或 `--command`，不能与 `--trigger` 或 `--json` 组合。
+- `run -i/--interactive` 必须选择 `--prompt` 或 `--command`，不能与 `--json` 组合。
 - REPL 中空行不会创建 run；输入 `/exit` 或 Ctrl+D 退出。
 - REPL 不是 TTY/PTY 或运行中 stdin 透传；每条输入都是一次独立 `RunAgentStream`，但复用同一个 sandbox。
 - detached run 可通过输出的 `agent-compose logs --run-id <run-id> --follow` 命令观察输出，也可继续使用 `stop`/`logs` 操作该 run。

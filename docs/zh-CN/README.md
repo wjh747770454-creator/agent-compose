@@ -65,7 +65,8 @@ agent-compose down
 
 - `agent-compose daemon`：启动长期运行的 HTTP/Connect daemon。
 - `agent-compose up`：读取本地 `agent-compose.yml`，把 project 定义和 scheduler 应用到 daemon。
-- `agent-compose run <agent>`：手动运行一次 project agent。
+- `agent-compose run <agent> <trigger-name>`：按名称运行已配置的 trigger。
+- `agent-compose run <agent> --prompt "..."` / `--command "..."`：手动执行临时 prompt 或 shell command。
 - `agent-compose logs`：查看 project run 日志。
 - `agent-compose ps`：查看 project agent、latest run 和 running session 状态。
 - `agent-compose down`：禁用 daemon 管理的 scheduler，并停止该 project 的 running sessions。
