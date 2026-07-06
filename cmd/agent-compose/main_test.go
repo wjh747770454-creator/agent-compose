@@ -1432,6 +1432,14 @@ agents:
 				}); err != nil {
 					return err
 				}
+				if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
+					RunId:     "run-command",
+					Chunk:     "command stderr\n",
+					Stream:    agentcomposev2.StdioStream_STDIO_STREAM_STDERR,
+				}); err != nil {
+					return err
+				}
 				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
 					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
 					RunId:     "run-command",
@@ -1452,7 +1460,7 @@ agents:
 	defer server.Close()
 
 	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "reviewer", "--command", "echo command")
-	if exitCode != 0 || stderr != "" || stdout != "command stdout\n" {
+	if exitCode != 0 || stderr != "command stderr\n" || stdout != "command stdout\n" {
 		t.Fatalf("run --command code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
 	}
 	if !sawRequest {

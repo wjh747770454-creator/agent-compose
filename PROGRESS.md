@@ -422,16 +422,16 @@
       - 外部 `agent-compose-ui` 不在本仓库内；发布切分风险是 UI 需要从 v2 `isStderr`/`TranscriptEvent.kind` 迁移到 `stream`/`StdioStream` 后再消费此 v2 client。
     - 下一目标：4.4 阶段四 CLI/API/proto 收口。
 
-- [ ] 4.4 阶段四 CLI/API/proto 收口
+- [x] 4.4 阶段四 CLI/API/proto 收口
   - 依赖：4.2、4.3。
   - 工作内容：
     - 更新 CLI tests 中的 fake v2 stream response。
     - 覆盖非 JSON `run --command` stdout/stderr transcript、`exec` stream、`--json` suppress transcript、unspecified stream as stdout。
     - 审计 `cmd pkg proto proto-client` 中剩余 v2 `is_stderr` 使用。
   - 可并行子任务：
-    - [ ] 可并行：CLI run stream 测试。
-    - [ ] 可并行：CLI exec stream 测试。
-    - [ ] 可并行：v2 legacy field 搜索审计。
+    - [x] 可并行：CLI run stream 测试。
+    - [x] 可并行：CLI exec stream 测试。
+    - [x] 可并行：v2 legacy field 搜索审计。
   - 测试方案：
     - `./scripts/with-go-toolchain.sh go test ./cmd/agent-compose ./pkg/agentcompose/app ./pkg/agentcompose/api`
     - `cd proto-client && npm run gen && npm run build`
@@ -440,10 +440,22 @@
     - v2 `RunAgentStreamResponse`、`ExecStreamResponse`、`TranscriptEvent` 不再包含 `is_stderr`。
     - v1 legacy `is_stderr` 保留且被审计记录。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - `cmd/agent-compose/main_test.go` 的 `run --command` integration test 增加 explicit stderr stream event，并保留未指定 stream 的 stdout chunk，以覆盖 `STDIO_STREAM_UNSPECIFIED` 作为 stdout 和 `STDIO_STREAM_STDERR` 写入本机 stderr。
+      - 阶段四 CLI fake v2 stream response 均已迁移到 `Stream`/`TranscriptEvent.Stream`，不再使用 v2 `IsStderr` 或 `TranscriptEvent.Kind`。
+      - `exec` CLI integration test 已覆盖 stdout/stderr transcript stream 和 `--json` suppress realtime transcript；4.4 复用并通过 focused gate 收口。
+    - 验证：
+      - `./scripts/with-go-toolchain.sh go test ./cmd/agent-compose ./pkg/agentcompose/app ./pkg/agentcompose/api`：通过。
+      - `cd proto-client && npm run gen && npm run build`：通过。
+      - `rg -n "IsStderr|is_stderr|isStderr|GetIsStderr|TranscriptEvent\\{Kind" cmd pkg proto runtime proto-client docs README.md -g '!**/node_modules/**'`：无 v2 proto/generated、CLI 或 proto-client legacy stream 字段命中；剩余命中分类见审计。
+      - `rg -n "isStderr|is_stderr|export enum StdioStream|name: \"stream\"|name: \"kind\"" proto-client/src/agentcompose/v2 proto-client/dist/agentcompose/v2 -g '*.ts' -g '*.js'`：确认 proto-client v2 src/dist 暴露 `StdioStream` 和三个 `stream` 字段；无 `isStderr`/`is_stderr` 命中，剩余 `kind` 为 `TriggerSpec.kind`。
+      - `rg -n "chunk_type|payload_kind|typed payload|stdin forwarding|stdin forward|--stdin|GetIsStderr|TranscriptEvent\\{Kind" cmd pkg proto runtime proto-client docs README.md -g '!**/node_modules/**'`：未发现新增 typed payload、payload kind、stdin forwarding 或 v2 CLI legacy getter；命中为 spec/plan 禁止项文字和 v1 generated getters。
+    - 审计与例外：
+      - 合法剩余 `is_stderr`/`IsStderr` 命中包括 `proto/agentcompose/v1` schema/generated code，以及 `pkg/agentcompose/api/kernel.go`、`agent_handler.go`、`session_model.go` 的 v1/session legacy bool output boundaries。
+      - `pkg/agentcompose/adapters/agent_executor.go`、`loader_command_executor.go` 中的 `isStderr` 是本地变量名，用于把 filtered domain stream 写入 cell stdout/stderr，不是 v2 API field。
+      - `docs/spec/output-protocol-contract-spec.md`、`docs/plan/output-protocol-contract-implementation-plan.md` 和 `docs/zh-CN/design/agent-compose-cli-improvement-plan.md` 中的旧字段文字属于规格/历史描述或后续文档任务审计范围；5.x/文档阶段继续处理文档语义。
+      - `proto-client/src`、`proto-client/dist` 和 `proto-client/node_modules` 仍为 ignored generated/install output，未作为 tracked diff 提交。
     - 下一目标：5.1 固化 runtime/javascript 行为。
 
 ## 5. 阶段五：固化 runtime/javascript 行为和 runtime contract 文档
