@@ -95,6 +95,14 @@ func StripAgentResultPayload(raw string) string {
 	return raw[:idx]
 }
 
+func StripCommandResultPayload(raw string) string {
+	idx := strings.Index(raw, CommandResultPrefix)
+	if idx < 0 {
+		return raw
+	}
+	return raw[:idx]
+}
+
 func SanitizeAgentExecResult(result domain.ExecResult) domain.ExecResult {
 	cleaned := result
 	cleaned.Stdout = StripAgentResultPayload(result.Stdout)

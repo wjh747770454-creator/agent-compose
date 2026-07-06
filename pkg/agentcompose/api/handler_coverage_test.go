@@ -593,8 +593,8 @@ type apiExecRuntime struct {
 
 func (r *apiExecRuntime) ExecStream(_ context.Context, _ *domain.Session, _ domain.VMState, spec domain.ExecSpec, writer domain.ExecStreamWriter) (domain.ExecResult, error) {
 	r.spec = spec
-	writer(domain.ExecChunk{Text: "$ echo hi\n", IsStderr: true})
-	writer(domain.ExecChunk{Text: "hi\n", IsStderr: true})
+	writer(domain.ExecChunk{Text: "$ echo hi\n"})
+	writer(domain.ExecChunk{Text: "hi\n"})
 	payload := apiRuntimeCommandPayload(domain.RuntimeCommandResult{Stdout: "hi\n", Output: "hi\n", ExitCode: 0, Success: true})
 	writer(domain.ExecChunk{Text: payload})
 	return domain.ExecResult{Stdout: payload, Output: "$ echo hi\nhi\n" + payload, ExitCode: 0, Success: true}, nil

@@ -1027,8 +1027,8 @@ type fakeControllerRuntime struct {
 
 func (r *fakeControllerRuntime) ExecStream(_ context.Context, _ *domain.Session, _ domain.VMState, spec domain.ExecSpec, writer domain.ExecStreamWriter) (domain.ExecResult, error) {
 	r.spec = spec
-	writer(domain.ExecChunk{Text: "$ bash -lc 'echo command'\n", IsStderr: true})
-	writer(domain.ExecChunk{Text: "command output\n", IsStderr: true})
+	writer(domain.ExecChunk{Text: "$ bash -lc 'echo command'\n"})
+	writer(domain.ExecChunk{Text: "command output\n"})
 	payload := fakeRuntimeCommandPayload(domain.RuntimeCommandResult{Stdout: "command output\n", Output: "command output\n", ExitCode: 0, Success: true})
 	writer(domain.ExecChunk{Text: payload})
 	return domain.ExecResult{Stdout: payload, Output: "$ bash -lc 'echo command'\ncommand output\n" + payload, ExitCode: 0, Success: true}, nil

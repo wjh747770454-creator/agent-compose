@@ -143,7 +143,8 @@ func (h *ExecHandler) executeProjectCommand(ctx context.Context, req *agentcompo
 		if sendErr != nil {
 			return
 		}
-		if !chunk.IsStderr {
+		chunk.Text = execution.StripCommandResultPayload(chunk.Text)
+		if chunk.Text == "" {
 			return
 		}
 		if err := appendExecTranscriptChunk(transcriptPath, chunk); err != nil {

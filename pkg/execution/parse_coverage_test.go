@@ -28,6 +28,12 @@ func TestParseAgentAndCommandExecResultWorkflows(t *testing.T) {
 	}
 
 	commandPayload := CommandResultPrefix + `{"stdout":"out","stderr":"err","output":"out","exitCode":7,"success":false}`
+	if stripped := StripCommandResultPayload("out\n" + commandPayload); stripped != "out\n" {
+		t.Fatalf("command stripped = %q", stripped)
+	}
+	if stripped := StripCommandResultPayload(commandPayload); stripped != "" {
+		t.Fatalf("command payload stripped = %q", stripped)
+	}
 	command, err := ParseCommandExecResult(domain.ExecResult{Stdout: "noise\n" + commandPayload})
 	if err != nil {
 		t.Fatalf("ParseCommandExecResult returned error: %v", err)
