@@ -56,6 +56,33 @@ func (s *ConfigStore) UpsertProject(ctx context.Context, project ProjectRecord) 
 	return s.GetProject(ctx, project.ID)
 }
 
+func (s *ConfigStore) MarkProjectRemoved(ctx context.Context, projectID string) (ProjectRecord, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return ProjectRecord{}, fmt.Errorf("project id is required")
+	}
+	existing, found, err := s.getProject(ctx, projectID, true)
+	if err != nil {
+		return ProjectRecord{}, err
+	}
+	if !found {
+		return ProjectRecord{}, domain.ResourceError(domain.ErrNotFound, "project", projectID, fmt.Sprintf("project %s not found", projectID), sql.ErrNoRows)
+	}
+	if !existing.RemovedAt.IsZero() {
+		return existing, nil
+	}
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE project SET updated_at = ?, removed_at = ? WHERE id = ? AND removed_at = 0`,
+		now.Unix(), now.Unix(), projectID)
+	if err != nil {
+		return ProjectRecord{}, fmt.Errorf("mark project %s removed: %w", projectID, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return s.getProjectRequired(ctx, projectID, true)
+	}
+	return s.getProjectRequired(ctx, projectID, true)
+}
+
 func (s *ConfigStore) SaveProjectRevision(ctx context.Context, revision ProjectRevisionRecord) (ProjectRevisionRecord, bool, error) {
 	revision.ProjectID = strings.TrimSpace(revision.ProjectID)
 	revision.SpecHash = strings.TrimSpace(revision.SpecHash)
@@ -476,6 +503,18 @@ func (s *ConfigStore) getProject(ctx context.Context, projectID string, includeR
 		return ProjectRecord{}, false, err
 	}
 	return item, true, nil
+}
+
+func (s *ConfigStore) getProjectRequired(ctx context.Context, projectID string, includeRemoved bool) (ProjectRecord, error) {
+	item, found, err := s.getProject(ctx, projectID, includeRemoved)
+	if err != nil {
+		return ProjectRecord{}, err
+	}
+	if !found {
+		id := strings.TrimSpace(projectID)
+		return ProjectRecord{}, domain.ResourceError(domain.ErrNotFound, "project", id, fmt.Sprintf("project %s not found", id), sql.ErrNoRows)
+	}
+	return item, nil
 }
 
 func (s *ConfigStore) GetProjectIfExists(ctx context.Context, projectID string, includeRemoved bool) (ProjectRecord, bool, error) {

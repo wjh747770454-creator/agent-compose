@@ -43,6 +43,7 @@ type ControllerStore interface {
 	GetProjectIfExists(context.Context, string, bool) (domain.ProjectRecord, bool, error)
 	ListProjects(context.Context, domain.ProjectListOptions) (domain.ProjectListResult, error)
 	UpsertProject(context.Context, domain.ProjectRecord) (domain.ProjectRecord, error)
+	MarkProjectRemoved(context.Context, string) (domain.ProjectRecord, error)
 	SaveProjectRevision(context.Context, domain.ProjectRevisionRecord) (domain.ProjectRevisionRecord, bool, error)
 	GetProjectAgent(context.Context, string, string) (domain.ProjectAgentRecord, error)
 	UpsertProjectAgent(context.Context, domain.ProjectAgentRecord) (domain.ProjectAgentRecord, error)
@@ -303,7 +304,7 @@ func (c *Controller) RemoveProject(ctx context.Context, req RemoveRequest) (Remo
 	if req.RemoveHistory {
 		return RemoveResult{}, ErrUnimplemented
 	}
-	project, err := c.ResolveProjectRef(ctx, req.Project)
+	project, err := c.resolveProjectRef(ctx, req.Project, true)
 	if err != nil {
 		return RemoveResult{}, err
 	}
@@ -318,6 +319,20 @@ func (c *Controller) RemoveProject(ctx context.Context, req RemoveRequest) (Remo
 	if err != nil {
 		return RemoveResult{Project: project, Changes: changes}, err
 	}
+	if project.RemovedAt.IsZero() {
+		removedProject, err := c.store.MarkProjectRemoved(ctx, project.ID)
+		if err != nil {
+			return RemoveResult{Project: project, Changes: changes}, err
+		}
+		project = removedProject
+		changes = append(changes, Change{
+			Action:       ChangeActionRemoved,
+			ResourceType: "project",
+			ResourceID:   project.ID,
+			Name:         project.Name,
+			Message:      "removed by project down",
+		})
+	}
 	agents, err := c.store.ListProjectAgents(ctx, project.ID)
 	if err != nil {
 		return RemoveResult{}, err
@@ -330,10 +345,24 @@ func (c *Controller) RemoveProject(ctx context.Context, req RemoveRequest) (Remo
 }
 
 func (c *Controller) ResolveProjectRef(ctx context.Context, ref ProjectRef) (domain.ProjectRecord, error) {
+	return c.resolveProjectRef(ctx, ref, false)
+}
+
+func (c *Controller) resolveProjectRef(ctx context.Context, ref ProjectRef, includeRemoved bool) (domain.ProjectRecord, error) {
 	if c.store == nil {
 		return domain.ProjectRecord{}, fmt.Errorf("config store is required")
 	}
 	if projectID := strings.TrimSpace(ref.ProjectID); projectID != "" {
+		if includeRemoved {
+			project, found, err := c.store.GetProjectIfExists(ctx, projectID, true)
+			if err != nil {
+				return domain.ProjectRecord{}, err
+			}
+			if found {
+				return project, nil
+			}
+			return domain.ProjectRecord{}, domain.ResourceError(domain.ErrNotFound, "project", projectID, fmt.Sprintf("project %s not found", projectID), sql.ErrNoRows)
+		}
 		return c.store.GetProject(ctx, projectID)
 	}
 	name := strings.TrimSpace(ref.Name)
@@ -343,12 +372,22 @@ func (c *Controller) ResolveProjectRef(ctx context.Context, ref ProjectRef) (dom
 		if err != nil {
 			return domain.ProjectRecord{}, err
 		}
+		if includeRemoved {
+			project, found, err := c.store.GetProjectIfExists(ctx, projectID, true)
+			if err != nil {
+				return domain.ProjectRecord{}, err
+			}
+			if found {
+				return project, nil
+			}
+			return domain.ProjectRecord{}, domain.ResourceError(domain.ErrNotFound, "project", projectID, fmt.Sprintf("project %s not found", projectID), sql.ErrNoRows)
+		}
 		return c.store.GetProject(ctx, projectID)
 	}
 	if name == "" {
 		return domain.ProjectRecord{}, domain.ClassifyError(domain.ErrRequired, "project id or name is required", nil)
 	}
-	result, err := c.store.ListProjects(ctx, domain.ProjectListOptions{Query: name, Limit: 200})
+	result, err := c.store.ListProjects(ctx, domain.ProjectListOptions{Query: name, IncludeRemoved: includeRemoved, Limit: 200})
 	if err != nil {
 		return domain.ProjectRecord{}, err
 	}

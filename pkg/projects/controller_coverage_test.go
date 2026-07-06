@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-compose/pkg/compose"
 	appconfig "agent-compose/pkg/config"
@@ -92,6 +93,36 @@ agents:
 	}
 }
 
+func TestControllerRemoveProjectMarksProjectRemovedAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	store := &controllerCoverageStore{
+		projects: []domain.ProjectRecord{{ID: "project-1", Name: "down-project", SourcePath: "/repo/agent-compose.yaml"}},
+	}
+	controller := NewController(ControllerDependencies{
+		Store:    store,
+		Sessions: controllerCoverageSessionStore{},
+	})
+	removed, err := controller.RemoveProject(ctx, RemoveRequest{Project: ProjectRef{ProjectID: "project-1"}})
+	if err != nil {
+		t.Fatalf("RemoveProject returned error: %v", err)
+	}
+	if removed.Project.RemovedAt.IsZero() {
+		t.Fatalf("RemoveProject project was not marked removed: %#v", removed.Project)
+	}
+	assertProjectChange(t, removed.Changes, ChangeActionRemoved, "project", "project-1")
+	if result, err := store.ListProjects(ctx, domain.ProjectListOptions{}); err != nil || result.TotalCount != 0 {
+		t.Fatalf("ListProjects after remove result=%#v err=%v", result, err)
+	}
+
+	repeated, err := controller.RemoveProject(ctx, RemoveRequest{Project: ProjectRef{ProjectID: "project-1"}})
+	if err != nil {
+		t.Fatalf("repeated RemoveProject returned error: %v", err)
+	}
+	if len(repeated.Changes) != 0 {
+		t.Fatalf("repeated RemoveProject changes=%#v, want unchanged", repeated.Changes)
+	}
+}
+
 func TestIntegrationControllerValidateApplyDryRunAndResolveWorkflows(t *testing.T) {
 	TestControllerValidateApplyDryRunAndResolveWorkflows(t)
 }
@@ -116,23 +147,53 @@ type controllerCoverageStore struct {
 
 func (s *controllerCoverageStore) GetProject(_ context.Context, id string) (domain.ProjectRecord, error) {
 	for _, project := range s.projects {
-		if project.ID == id {
+		if project.ID == id && project.RemovedAt.IsZero() {
 			return project, nil
 		}
 	}
 	return domain.ProjectRecord{}, sql.ErrNoRows
 }
 
-func (s *controllerCoverageStore) GetProjectIfExists(context.Context, string, bool) (domain.ProjectRecord, bool, error) {
+func (s *controllerCoverageStore) GetProjectIfExists(_ context.Context, id string, includeRemoved bool) (domain.ProjectRecord, bool, error) {
+	for _, project := range s.projects {
+		if project.ID == id && (includeRemoved || project.RemovedAt.IsZero()) {
+			return project, true, nil
+		}
+	}
 	return domain.ProjectRecord{}, false, nil
 }
 
-func (s *controllerCoverageStore) ListProjects(context.Context, domain.ProjectListOptions) (domain.ProjectListResult, error) {
-	return domain.ProjectListResult{Projects: s.projects}, nil
+func (s *controllerCoverageStore) ListProjects(_ context.Context, options domain.ProjectListOptions) (domain.ProjectListResult, error) {
+	var projects []domain.ProjectRecord
+	query := strings.TrimSpace(options.Query)
+	for _, project := range s.projects {
+		if !options.IncludeRemoved && !project.RemovedAt.IsZero() {
+			continue
+		}
+		if query != "" && project.Name != query {
+			continue
+		}
+		projects = append(projects, project)
+	}
+	return domain.ProjectListResult{Projects: projects, TotalCount: len(projects)}, nil
 }
 
 func (s *controllerCoverageStore) UpsertProject(context.Context, domain.ProjectRecord) (domain.ProjectRecord, error) {
 	return domain.ProjectRecord{}, nil
+}
+
+func (s *controllerCoverageStore) MarkProjectRemoved(_ context.Context, projectID string) (domain.ProjectRecord, error) {
+	for i, project := range s.projects {
+		if project.ID == projectID {
+			if project.RemovedAt.IsZero() {
+				project.RemovedAt = time.Now().UTC()
+				project.UpdatedAt = project.RemovedAt
+				s.projects[i] = project
+			}
+			return project, nil
+		}
+	}
+	return domain.ProjectRecord{}, sql.ErrNoRows
 }
 
 func (s *controllerCoverageStore) SaveProjectRevision(context.Context, domain.ProjectRevisionRecord) (domain.ProjectRevisionRecord, bool, error) {
@@ -197,4 +258,20 @@ func (s *controllerCoverageStore) ReplaceLoaderTriggers(context.Context, string,
 
 func (s *controllerCoverageStore) SetLoaderEnabled(context.Context, string, bool) error {
 	return nil
+}
+
+type controllerCoverageSessionStore struct{}
+
+func (controllerCoverageSessionStore) ListSessions(context.Context, domain.SessionListOptions) (domain.SessionListResult, error) {
+	return domain.SessionListResult{}, nil
+}
+
+func assertProjectChange(t *testing.T, changes []Change, action, resourceType, resourceID string) {
+	t.Helper()
+	for _, change := range changes {
+		if change.Action == action && change.ResourceType == resourceType && change.ResourceID == resourceID {
+			return
+		}
+	}
+	t.Fatalf("changes %#v did not contain %s %s %s", changes, action, resourceType, resourceID)
 }

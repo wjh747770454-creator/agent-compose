@@ -3,6 +3,7 @@ package configstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -181,6 +182,23 @@ func testConfigStoreProjectCRUDCoverageWorkflows(t *testing.T) {
 	}
 	if runs, err := store.ListProjectRunsForSession(ctx, "session-1"); err != nil || len(runs) != 1 {
 		t.Fatalf("ListProjectRunsForSession runs=%#v err=%v", runs, err)
+	}
+	removed, err := store.MarkProjectRemoved(ctx, project.ID)
+	if err != nil || removed.RemovedAt.IsZero() {
+		t.Fatalf("MarkProjectRemoved removed=%#v err=%v", removed, err)
+	}
+	if _, err := store.GetProject(ctx, project.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetProject after remove err=%v, want not found", err)
+	}
+	if result, err := store.ListProjects(ctx, domain.ProjectListOptions{Query: "updated", Limit: 10}); err != nil || result.TotalCount != 0 {
+		t.Fatalf("ListProjects after remove result=%#v err=%v", result, err)
+	}
+	if result, err := store.ListProjects(ctx, domain.ProjectListOptions{Query: "updated", IncludeRemoved: true, Limit: 10}); err != nil || result.TotalCount != 1 || result.Projects[0].RemovedAt.IsZero() {
+		t.Fatalf("ListProjects include removed result=%#v err=%v", result, err)
+	}
+	reactivated, err := store.UpsertProject(ctx, project)
+	if err != nil || !reactivated.RemovedAt.IsZero() {
+		t.Fatalf("UpsertProject reactivated=%#v err=%v", reactivated, err)
 	}
 	if placeholders(0) != "" || placeholders(3) != "?,?,?" {
 		t.Fatalf("placeholders returned unexpected values")
