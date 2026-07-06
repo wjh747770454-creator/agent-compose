@@ -4,8 +4,12 @@
 
 相关代码：
 
+- stream 模型：`pkg/model/model.go`、`pkg/driver/types.go`
+- marker 解析与 stream filtering：`pkg/execution/parse.go`
 - host agent 调用：`pkg/agentcompose/adapters/agent_runner.go`
 - host 执行与落库：`pkg/agentcompose/adapters/cell_executor.go`、`pkg/agentcompose/adapters/agent_executor.go`、`pkg/storage/sessionstore`
+- v2 stream API：`proto/agentcompose/v2/agentcompose.proto`
+- CLI stream writer：`cmd/agent-compose/main.go`
 - runtime CLI 源码：`runtime/javascript/src/cli.ts`
 - runtime provider 适配器：`runtime/javascript/src/runners/`
 - guest SDK：`runtime/agent-compose-runtime-sdk/`
@@ -265,11 +269,43 @@ artifact dir 只来自 command request 或 CLI 参数，不再作为全局环境
 
 当前不使用 stdin。prompt 必须通过 `--message-file` 指定。
 
-### 6.2 stderr：人类可读 transcript
+### 6.2 Stdio stream 与协议 marker 边界
+
+runtime driver 以 `ExecChunk{Text, Stream}` 传输输出。driver 层和 host
+domain model 都使用 stdout/stderr stream enum，空值或未指定 stream 会归一为
+stdout。`Stream` 只表示原始 stdio 通道，不表示内部/外部、隐藏/可见、机器可读/人类可读。
+
+协议 payload 只有两个 marker：
+
+- `__AGENT_RESULT__`
+- `__COMMAND_RESULT__`
+
+host 只通过这些 marker 判断哪些字节是协议 payload，不能通过 stdout/stderr
+判断。`docker`、`boxlite`、`microsandbox` driver 不解析也不过滤这些 marker。
+
+v2 Connect API 用同一套 `StdioStream` 表达通道：
+
+```proto
+enum StdioStream {
+  STDIO_STREAM_UNSPECIFIED = 0;
+  STDIO_STREAM_STDOUT = 1;
+  STDIO_STREAM_STDERR = 2;
+}
+```
+
+`RunAgentStreamResponse`、`ExecStreamResponse` 和 `TranscriptEvent` 都携带
+`stream` 字段。CLI 和 host 消费方把 `STDIO_STREAM_UNSPECIFIED` 按 stdout
+处理。v1 API 为兼容保留历史 `is_stderr` 字段，只在 v1/session 兼容边界把
+stream 转换为 bool。
+
+该边界不引入 `chunk_type`、`payload_kind`、typed payload event、新 CLI
+参数、JSON schema 变更或 stdin 转发。
+
+### 6.3 stderr：人类可读 transcript
 
 JS runtime 将 agent 运行过程中的人类可读输出写到 stderr。host 的 `ExecStream` 会把 stderr chunk 作为流式输出传给 `SendAgentMessageStream`，并最终落到 cell 的 `stderr` / `output`。
 
-### 6.3 stdout：结构化结果
+### 6.4 stdout：结构化结果
 
 `prompt` 子命令成功完成后，在 stdout 输出一行结构化结果：
 
