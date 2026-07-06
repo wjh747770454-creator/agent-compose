@@ -240,6 +240,51 @@ agent-compose ps --json
 
 `--verbose` 增加 project、driver、image、Jupyter、workspace 和错误摘要等信息。
 
+## `sandbox`：管理 sandbox
+
+使用 `sandbox` 命令组可以在同一个命名空间下管理当前 project 的 sandbox。兼容入口 `ps`、`stop`、`resume` 和 `rm` 仍然可用。
+
+```bash
+agent-compose sandbox ls
+agent-compose sandbox ls --all --json
+agent-compose sandbox stop <sandbox>
+agent-compose sandbox resume <sandbox>
+agent-compose sandbox rm <sandbox>
+agent-compose sandbox rm --force <sandbox>
+agent-compose sandbox prune
+agent-compose sandbox prune --older-than 7d
+agent-compose sandbox prune --status error --json
+agent-compose sandbox prune --agent worker --driver microsandbox --force
+```
+
+子命令：
+
+| 命令 | 说明 |
+| --- | --- |
+| `sandbox ls` | 等价于 `ps`；支持 `--all/-a`、`--status`、`--verbose` 和 `--json`。 |
+| `sandbox stop <sandbox...>` | 等价于 `stop`；停止一个或多个 sandbox。 |
+| `sandbox resume <sandbox...>` | 等价于 `resume`；恢复一个或多个 stopped sandbox。 |
+| `sandbox rm <sandbox...>` | 等价于 `rm`；删除一个或多个 sandbox。仅在确认要删除 running sandbox 时使用 `--force`。 |
+| `sandbox prune` | 对当前 project 中 stopped 或 failed sandbox 做 dry-run 清理预览；使用 `--force` 才会删除匹配项。 |
+
+`sandbox prune` 参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--status <status>[,<status>...]` | 覆盖默认的 `stopped,failed` 状态过滤。`running` 和 `pending` 会被拒绝；running sandbox 请使用 `sandbox rm --force <sandbox>`。 |
+| `--agent <agent>` | 只匹配指定 agent name 的 sandbox。 |
+| `--driver <docker|boxlite|microsandbox>` | 只匹配指定 runtime driver 的 sandbox。 |
+| `--older-than <duration>` | 匹配 `updated_at` 早于指定时长的 sandbox；缺少 `updated_at` 时回退使用 `created_at`。时长示例：`7d`、`168h`。 |
+| `--force` | 实际删除匹配的 sandbox。不带该参数时，`sandbox prune` 只做 dry-run。 |
+
+行为规则：
+
+- `sandbox prune` 只处理属于当前 compose project 的 sandbox。
+- `sandbox prune` 永远不会删除 `running` 或 `pending` sandbox，也不会向 `RemoveSandbox` 发送 `force=true`。
+- 无法解析的时间会被跳过，并在 warnings 中报告。
+- `sandbox prune` 通过 `SandboxService.RemoveSandbox` 删除 sandbox/session 记录；它不清理 runtime cache 文件。daemon runtime cache inventory 仍由 `cache prune` 或 `cache rm` 管理。
+- forced prune 中某个 sandbox 删除失败时，命令会继续处理后续匹配项，输出 skipped 项，并以非零退出码结束。
+
 ## `stats`：查看 sandbox 资源统计
 
 查看运行中 sandbox 的资源统计快照。未指定 sandbox 参数时，显示当前 compose project 下所有 running sandbox 的统计。
@@ -490,7 +535,7 @@ agent-compose cache prune --older-than 7d --force
 agent-compose cache rm <cache-id> --force
 ```
 
-`cache prune` 和 `cache rm` 默认 dry-run，不带 `--force` 不删除文件。dry-run 展示 protected skipped items 不算错误。对 protected item 执行 forced `cache rm` 会非零退出，并展示跳过原因。
+`cache prune` 和 `cache rm` 默认 dry-run，不带 `--force` 不删除文件。dry-run 展示 protected skipped items 不算错误。对 protected item 执行 forced `cache rm` 会非零退出，并展示跳过原因。`sandbox prune` 不删除 runtime cache 文件；cache 清理请使用这些 cache 命令。
 
 兼容说明：
 

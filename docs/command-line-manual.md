@@ -233,6 +233,51 @@ Default columns:
 
 `--verbose` adds project, driver, image, Jupyter, workspace, and error summary fields.
 
+## `sandbox`: Manage Sandboxes
+
+Use the `sandbox` command group to manage project sandboxes from a single namespace. The compatibility commands `ps`, `stop`, `resume`, and `rm` remain available.
+
+```bash
+agent-compose sandbox ls
+agent-compose sandbox ls --all --json
+agent-compose sandbox stop <sandbox>
+agent-compose sandbox resume <sandbox>
+agent-compose sandbox rm <sandbox>
+agent-compose sandbox rm --force <sandbox>
+agent-compose sandbox prune
+agent-compose sandbox prune --older-than 7d
+agent-compose sandbox prune --status error --json
+agent-compose sandbox prune --agent worker --driver microsandbox --force
+```
+
+Subcommands:
+
+| Command | Description |
+| --- | --- |
+| `sandbox ls` | Equivalent to `ps`; supports `--all/-a`, `--status`, `--verbose`, and `--json`. |
+| `sandbox stop <sandbox...>` | Equivalent to `stop`; stops one or more sandboxes. |
+| `sandbox resume <sandbox...>` | Equivalent to `resume`; resumes one or more stopped sandboxes. |
+| `sandbox rm <sandbox...>` | Equivalent to `rm`; removes one or more sandboxes. Use `--force` only when intentionally removing running sandboxes. |
+| `sandbox prune` | Dry-run cleanup for stopped or failed sandboxes in the current project. Use `--force` to remove matched sandboxes. |
+
+`sandbox prune` options:
+
+| Option | Description |
+| --- | --- |
+| `--status <status>[,<status>...]` | Override the default `stopped,failed` status filter. `running` and `pending` are rejected; use `sandbox rm --force <sandbox>` for running sandboxes. |
+| `--agent <agent>` | Match only sandboxes for one agent name. |
+| `--driver <docker|boxlite|microsandbox>` | Match only sandboxes using one runtime driver. |
+| `--older-than <duration>` | Match sandboxes whose `updated_at`, or `created_at` when `updated_at` is missing, is older than a duration such as `7d` or `168h`. |
+| `--force` | Actually remove matched sandboxes. Without this flag, `sandbox prune` is a dry-run. |
+
+Rules:
+
+- `sandbox prune` only considers sandboxes that belong to the current compose project.
+- `sandbox prune` never removes `running` or `pending` sandboxes and never sends `force=true` to `RemoveSandbox`.
+- Time values that cannot be parsed are skipped and reported as warnings.
+- `sandbox prune` removes sandbox/session records through `SandboxService.RemoveSandbox`; it does not clean runtime cache files. Use `cache prune` or `cache rm` for daemon runtime cache inventory.
+- If a forced prune fails to remove one matched sandbox, it continues with later matches, writes the skipped item, and exits non-zero.
+
 ## `stats`: Show Sandbox Resource Stats
 
 Show resource stats snapshots for running sandboxes. Without a sandbox argument, the command shows all running sandboxes for the current compose project.
@@ -477,7 +522,7 @@ agent-compose cache prune --older-than 7d --force
 agent-compose cache rm <cache-id> --force
 ```
 
-`cache prune` and `cache rm` default to dry-run and do not delete files without `--force`. A dry-run that shows protected skipped items is not an error. A forced `cache rm` for a protected item exits non-zero and prints why it was skipped.
+`cache prune` and `cache rm` default to dry-run and do not delete files without `--force`. A dry-run that shows protected skipped items is not an error. A forced `cache rm` for a protected item exits non-zero and prints why it was skipped. `sandbox prune` does not delete runtime cache files; use these cache commands for cache cleanup.
 
 Compatibility:
 

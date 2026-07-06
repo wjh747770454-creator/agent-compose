@@ -163,21 +163,29 @@
       - 未修改 proto、generated Connect 文件、runtime driver、部署 compose 或 image build 行为。
     - 下一目标：4.2 更新中英文 CLI 手册。
 
-- [ ] 4.2 更新中英文 CLI 手册
+- [x] 4.2 更新中英文 CLI 手册
   - 依赖：4.1。
   - 工作内容：更新 `docs/command-line-manual.md` 和 `docs/zh-CN/command-line-manual.md`；新增 `sandbox` 命令组说明、`sandbox prune` 参数、dry-run/force 示例；明确 `sandbox prune` 不清理 runtime cache，cache 文件仍由 `cache prune` 管理。
   - 可并行子任务：
-    - [ ] 可并行：英文手册更新。
-    - [ ] 可并行：中文手册更新。
-    - [ ] 可并行：检查 README 中是否已有命令索引需要同步提示；如无必要，记录不修改原因。
+    - [x] 可并行：英文手册更新。
+    - [x] 可并行：中文手册更新。
+    - [x] 可并行：检查 README 中是否已有命令索引需要同步提示；如无必要，记录不修改原因。
   - 测试方案：文档检查；运行 focused CLI tests 确认文档更新未伴随行为回归。
   - 验收标准：中英文手册语义一致；示例命令与实际 flags 一致；不暗示 `sandbox prune` 会删除 runtime cache。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：待完成。
+    - 状态：已完成。
+    - 变更：
+      - 更新 `docs/command-line-manual.md`，新增 `sandbox` 命令组、`sandbox prune` 参数、dry-run/force 示例、安全规则和 cache 分工说明。
+      - 更新 `docs/zh-CN/command-line-manual.md`，保持与英文手册一致的命令、参数、示例和安全语义。
+      - 更新 `README.md` CLI 命令索引，新增 `agent-compose sandbox ls|stop|resume|rm|prune`，并明确 `sandbox prune` 不删除 runtime cache 文件。
+    - 验证：
+      - `go test ./cmd/agent-compose -run 'TestIntegrationCLI(PSTableAndJSON|RemoveSandboxes|Sandbox)' -count=1`
+      - `rg -n 'sandbox prune|runtime cache files|runtime cache 文件|sandbox ls\|stop\|resume\|rm\|prune' README.md docs/command-line-manual.md docs/zh-CN/command-line-manual.md`
+    - 审计与例外：
+      - 中英文手册均列出 `--status`、`--agent`、`--driver`、`--older-than`、`--force`，示例与实际 flags 一致。
+      - README 存在 CLI 命令索引，已同步更新；`docs/README.md` 仅链接手册，无需同步命令列表。
+      - 文档明确说明 `sandbox prune` 只通过 `SandboxService.RemoveSandbox` 删除 sandbox/session 记录，runtime cache 仍由 `cache prune` 或 `cache rm` 管理。
+    - 下一目标：5.1 运行 focused 测试并审计范围。
 
 ## 阶段 5：完整验证和收口
 
