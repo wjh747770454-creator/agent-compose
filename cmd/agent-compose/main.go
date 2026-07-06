@@ -1347,9 +1347,6 @@ func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options c
 			return commandExitError{Code: exitCodeUsage, Err: err}
 		}
 	}
-	if options.Force {
-		return commandExitError{Code: exitCodeUnsupported, Err: fmt.Errorf("sandbox prune --force is not implemented yet")}
-	}
 	composePath, normalized, projectID, err := resolveComposeProject(cli)
 	if err != nil {
 		return err
@@ -1369,17 +1366,49 @@ func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options c
 		return commandExitErrorForConnect(fmt.Errorf("build sandbox prune candidates for project %s: %w", normalized.Name, err))
 	}
 	output := composeSandboxPruneDryRunOutput(psOutput.Sandboxes, statusFilter, options, olderThanSeconds)
+	if options.Force {
+		output.DryRun = false
+		for _, sandbox := range output.Matched {
+			if err := removeSandbox(cmd.Context(), clients.sandbox, sandbox.Sandbox, false); err != nil {
+				output.Skipped = append(output.Skipped, composeSandboxPruneSkipped{
+					Sandbox: sandbox.Sandbox,
+					Reason:  fmt.Sprintf("remove failed: %s", err),
+				})
+				continue
+			}
+			output.Removed = append(output.Removed, sandbox.Sandbox)
+		}
+	}
 	if cli.JSON {
 		data, err := json.MarshalIndent(output, "", "  ")
 		if err != nil {
 			return err
 		}
-		return writeCommandOutput(cmd.OutOrStdout(), append(data, '\n'))
+		if err := writeCommandOutput(cmd.OutOrStdout(), append(data, '\n')); err != nil {
+			return err
+		}
+	} else if output.DryRun {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Dry-run: %d matched, 0 skipped, %d would be removed.\n", len(output.Matched), len(output.Matched)); err != nil {
+			return err
+		}
+		if err := writeStringListSection(cmd.OutOrStdout(), "Warnings", output.Warnings); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Removed %d sandbox(es); %d matched, %d skipped.\n", len(output.Removed), len(output.Matched), len(output.Skipped)); err != nil {
+			return err
+		}
+		if err := writeStringListSection(cmd.OutOrStdout(), "Removed", output.Removed); err != nil {
+			return err
+		}
+		if err := writeStringListSection(cmd.OutOrStdout(), "Warnings", output.Warnings); err != nil {
+			return err
+		}
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Dry-run: %d matched, 0 skipped, %d would be removed.\n", len(output.Matched), len(output.Matched)); err != nil {
-		return err
+	if len(output.Skipped) > 0 {
+		return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("sandbox prune skipped %d sandbox(es)", len(output.Skipped))}
 	}
-	return writeStringListSection(cmd.OutOrStdout(), "Warnings", output.Warnings)
+	return nil
 }
 
 func composeSandboxPruneDryRunOutput(sandboxes []composePSSandboxOutput, statusFilter map[string]bool, options composeSandboxPruneOptions, olderThanSeconds uint64) composeSandboxPruneOutput {

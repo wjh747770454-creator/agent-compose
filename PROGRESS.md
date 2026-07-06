@@ -111,20 +111,29 @@
 
 参考文档：[docs/plan/sandbox-cli-prune-implementation-plan.md](docs/plan/sandbox-cli-prune-implementation-plan.md) 阶段 3。
 
-- [ ] 3.1 实现 `sandbox prune --force` 删除路径
+- [x] 3.1 实现 `sandbox prune --force` 删除路径
   - 依赖：2.2。
   - 工作内容：当 `--force` 为 true 时遍历 matched sandbox；逐个调用 `removeSandbox(ctx, clients.sandbox, id, false)`；成功项加入 `Removed`；失败项加入 `Skipped` 并继续后续删除；存在 skipped 时输出后返回非零。
   - 可并行子任务：
-    - [ ] 可并行：补充 sandbox remove stub 断言，确保 prune 删除永远传 `force=false`。
-    - [ ] 可并行：梳理 partial failure 输出和退出码应与现有 `cache rm/prune` 风格保持接近。
+    - [x] 可并行：补充 sandbox remove stub 断言，确保 prune 删除永远传 `force=false`。
+    - [x] 可并行：梳理 partial failure 输出和退出码应与现有 `cache rm/prune` 风格保持接近。
   - 测试方案：新增 CLI integration tests，覆盖全部删除成功、一个删除失败后继续、存在 skipped 返回非零、未匹配项不删除。
   - 验收标准：删除顺序与 matched 顺序一致；partial failure 不吞错误；running/pending 不会通过 prune 删除。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：待完成。
+    - 状态：已完成。
+    - 变更：
+      - `sandbox prune --force` 会按 `matched` 顺序逐个调用 `removeSandbox(ctx, clients.sandbox, sandboxID, false)`。
+      - 删除成功的 sandbox ID 写入 `removed`；删除失败的项写入 `skipped`，reason 以 `remove failed:` 开头，并继续处理后续 matched sandbox。
+      - forced prune 存在 skipped 时先输出结果，再返回非零 `exitCodeGeneral`。
+      - forced prune 复用 2.2 的候选选择和安全过滤，running/pending/foreign sandbox 不进入删除路径。
+    - 验证：
+      - `go test ./cmd/agent-compose -run 'TestIntegrationCLI(PSTableAndJSON|RemoveSandboxes|Sandbox)|TestParseOlderThanSeconds|TestComposeSandboxPruneOutputJSONShape' -count=1`
+    - 审计与例外：
+      - 测试断言 `RemoveSandbox` 调用顺序与 matched 顺序一致，并断言 prune 删除路径永远传 `force=false`。
+      - partial failure 测试证明一个删除失败后仍会继续删除后续 matched sandbox，最终通过 skipped 和非零退出码暴露失败。
+      - 文本输出仍是临时摘要，完整 matched/skipped 表格和 text/JSON 输出整理留给 4.1。
+      - 未修改 proto、generated Connect 文件、runtime driver、部署 compose 或 image build 行为。
+    - 下一目标：4.1 实现 prune 输出格式。
 
 ## 阶段 4：文本输出、JSON 输出和 CLI 手册更新
 

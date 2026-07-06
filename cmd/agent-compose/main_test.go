@@ -2954,6 +2954,134 @@ agents:
 	}
 }
 
+func TestIntegrationCLISandboxPruneForceRemovesMatchedAndReportsSkipped(t *testing.T) {
+	type removeRequest struct {
+		sandbox string
+		force   bool
+	}
+	tests := []struct {
+		name          string
+		failSandbox   string
+		wantExitCode  int
+		wantRemoved   []string
+		wantSkipped   []string
+		wantRemoveSeq []removeRequest
+	}{
+		{
+			name:         "all success",
+			wantExitCode: 0,
+			wantRemoved:  []string{"session-remove-a", "session-remove-b", "session-remove-c"},
+			wantRemoveSeq: []removeRequest{
+				{sandbox: "session-remove-a"},
+				{sandbox: "session-remove-b"},
+				{sandbox: "session-remove-c"},
+			},
+		},
+		{
+			name:         "partial failure",
+			failSandbox:  "session-remove-b",
+			wantExitCode: exitCodeGeneral,
+			wantRemoved:  []string{"session-remove-a", "session-remove-c"},
+			wantSkipped:  []string{"session-remove-b"},
+			wantRemoveSeq: []removeRequest{
+				{sandbox: "session-remove-a"},
+				{sandbox: "session-remove-b"},
+				{sandbox: "session-remove-c"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-prune-force
+agents:
+  reviewer:
+    provider: codex
+  worker:
+    provider: codex
+`)
+			project := testCLIProject("project-cli-prune-force", "cli-prune-force", composePath)
+			sessions := []*agentcomposev1.SessionSummary{
+				testCLISessionSummary("session-remove-a", "STOPPED", "project-cli-prune-force", "reviewer", ""),
+				testCLISessionSummary("session-remove-b", "FAILED", "project-cli-prune-force", "worker", ""),
+				testCLISessionSummary("session-running", "RUNNING", "project-cli-prune-force", "reviewer", ""),
+				testCLISessionSummary("session-foreign", "STOPPED", "foreign-project", "reviewer", ""),
+				testCLISessionSummary("session-remove-c", "STOPPED", "project-cli-prune-force", "worker", ""),
+			}
+			var removed []removeRequest
+			server := newComposeServiceStubServer(t, composeServiceStubs{
+				project: projectServiceStub{
+					getProject: func(ctx context.Context, req *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error) {
+						return connect.NewResponse(&agentcomposev2.GetProjectResponse{Project: project}), nil
+					},
+				},
+				run: runServiceStub{
+					listRuns: func(ctx context.Context, req *connect.Request[agentcomposev2.ListRunsRequest]) (*connect.Response[agentcomposev2.ListRunsResponse], error) {
+						return connect.NewResponse(&agentcomposev2.ListRunsResponse{Runs: []*agentcomposev2.RunSummary{}}), nil
+					},
+				},
+				session: sessionServiceStub{
+					listSessions: func(ctx context.Context, req *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error) {
+						return connect.NewResponse(&agentcomposev1.ListSessionsResponse{Sessions: sessions}), nil
+					},
+				},
+				sandbox: sandboxServiceStub{
+					removeSandbox: func(ctx context.Context, req *connect.Request[agentcomposev2.RemoveSandboxRequest]) (*connect.Response[agentcomposev2.RemoveSandboxResponse], error) {
+						removed = append(removed, removeRequest{sandbox: req.Msg.GetSandboxId(), force: req.Msg.GetForce()})
+						if req.Msg.GetForce() {
+							t.Fatalf("sandbox prune RemoveSandbox force = true for %s", req.Msg.GetSandboxId())
+						}
+						if req.Msg.GetSandboxId() == tc.failSandbox {
+							return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete denied"))
+						}
+						return connect.NewResponse(&agentcomposev2.RemoveSandboxResponse{SandboxId: req.Msg.GetSandboxId(), Removed: true}), nil
+					},
+				},
+			})
+			defer server.Close()
+
+			stdout, stderr, _, exitCode := executeCLICommand("sandbox", "prune", "--host", server.URL, "--file", composePath, "--json", "--force")
+			if exitCode != tc.wantExitCode {
+				t.Fatalf("sandbox prune --force exit code = %d, want %d; stderr=%q", exitCode, tc.wantExitCode, stderr)
+			}
+			if tc.wantExitCode == 0 && stderr != "" {
+				t.Fatalf("sandbox prune --force stderr = %q, want empty", stderr)
+			}
+			if tc.wantExitCode != 0 && !strings.Contains(stderr, "sandbox prune skipped") {
+				t.Fatalf("sandbox prune --force stderr = %q, want skipped summary", stderr)
+			}
+			var decoded composeSandboxPruneOutput
+			if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+				t.Fatalf("sandbox prune --force JSON decode failed: %v\n%s", err, stdout)
+			}
+			if decoded.DryRun {
+				t.Fatalf("sandbox prune --force output is dry-run: %#v", decoded)
+			}
+			if !reflect.DeepEqual(decoded.Removed, tc.wantRemoved) {
+				t.Fatalf("removed = %#v, want %#v", decoded.Removed, tc.wantRemoved)
+			}
+			var skipped []string
+			for _, item := range decoded.Skipped {
+				skipped = append(skipped, item.Sandbox)
+				if !strings.Contains(item.Reason, "remove failed") {
+					t.Fatalf("skipped reason = %q", item.Reason)
+				}
+			}
+			if !reflect.DeepEqual(skipped, tc.wantSkipped) {
+				t.Fatalf("skipped = %#v, want %#v", skipped, tc.wantSkipped)
+			}
+			if !reflect.DeepEqual(removed, tc.wantRemoveSeq) {
+				t.Fatalf("RemoveSandbox calls = %#v, want %#v", removed, tc.wantRemoveSeq)
+			}
+			for _, item := range decoded.Matched {
+				if item.Sandbox == "session-running" || item.Sandbox == "session-foreign" {
+					t.Fatalf("matched unsafe/unowned sandbox in forced prune: %#v", decoded.Matched)
+				}
+			}
+		})
+	}
+}
+
 func TestIntegrationCLISandboxPruneRejectsUnsafeStatuses(t *testing.T) {
 	for _, status := range []string{"running", "pending"} {
 		t.Run(status, func(t *testing.T) {
