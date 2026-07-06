@@ -77,13 +77,13 @@ func (d *SessionDriver) saveSessionStartInfo(session *domain.Session, vmState do
 }
 
 func (d *SessionDriver) StopSessionVM(ctx context.Context, session *domain.Session) error {
-	ctx, cancel := context.WithTimeout(ctx, d.Config.SessionStopTimeout)
-	defer cancel()
-
 	driver, err := driverpkg.ResolveSessionRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(ctx, driverpkg.SessionStopContextTimeout(driver, d.Config.SessionStopTimeout))
+	defer cancel()
+
 	runtime, err := d.Runtimes.ForDriver(driver)
 	if err != nil {
 		return err

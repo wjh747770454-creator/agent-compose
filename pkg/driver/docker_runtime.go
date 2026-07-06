@@ -29,6 +29,9 @@ const (
 	dockerSessionLabelPrefix = "agent-compose"
 	dockerSessionLabelID     = dockerSessionLabelPrefix + ".session_id"
 	dockerSessionLabelDriver = dockerSessionLabelPrefix + ".driver"
+
+	dockerStopAPIMargin             = 5 * time.Second
+	dockerStopFallbackActionTimeout = 5 * time.Second
 )
 
 type dockerRuntime struct {
@@ -150,10 +153,16 @@ func (r *dockerRuntime) StopSession(ctx context.Context, session *Session, vmSta
 			timeoutSeconds = 0
 		}
 		if err := dockerClient.ContainerStop(ctx, containerInfo.ID, containerapi.StopOptions{Timeout: &timeoutSeconds}); err != nil && !isDockerNotFound(err) {
-			return false, fmt.Errorf("stop docker container %s: %w", containerInfo.ID, err)
+			if stopped, inspectErr := r.containerStoppedAfterStopError(containerInfo.ID); inspectErr != nil {
+				return false, fmt.Errorf("stop docker container %s: %w; inspect after stop failure: %v", containerInfo.ID, err, inspectErr)
+			} else if !stopped {
+				return false, fmt.Errorf("stop docker container %s: %w", containerInfo.ID, err)
+			}
 		}
 	}
-	if err := dockerClient.ContainerRemove(ctx, containerInfo.ID, containerapi.RemoveOptions{Force: true}); err != nil && !isDockerNotFound(err) {
+	removeCtx, cancel := dockerFallbackContextIfDone(ctx)
+	defer cancel()
+	if err := dockerClient.ContainerRemove(removeCtx, containerInfo.ID, containerapi.RemoveOptions{Force: true}); err != nil && !isDockerNotFound(err) {
 		return false, fmt.Errorf("remove docker container %s: %w", containerInfo.ID, err)
 	}
 	return false, nil
@@ -312,12 +321,7 @@ func (r *dockerRuntime) getOrCreateContainer(ctx context.Context, dockerClient *
 			dockerSessionLabelDriver: RuntimeDriverDocker,
 		},
 	}
-	hostConfig := &containerapi.HostConfig{
-		Mounts:       mounts,
-		PortBindings: portBindings,
-		AutoRemove:   false,
-		NetworkMode:  networkMode,
-	}
+	hostConfig := dockerSessionHostConfig(mounts, portBindings, networkMode)
 	createResp, err := dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, name)
 	if err != nil {
 		return containerapi.InspectResponse{}, false, fmt.Errorf("create docker container for session %s: %w", session.Summary.ID, err)
@@ -327,6 +331,60 @@ func (r *dockerRuntime) getOrCreateContainer(ctx context.Context, dockerClient *
 		return containerapi.InspectResponse{}, false, fmt.Errorf("inspect docker container %s: %w", createResp.ID, err)
 	}
 	return containerInfo, true, nil
+}
+
+func (r *dockerRuntime) containerStoppedAfterStopError(containerID string) (bool, error) {
+	inspectCtx, cancel := context.WithTimeout(context.Background(), dockerStopFallbackActionTimeout)
+	defer cancel()
+	dockerClient, err := r.newClient()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = dockerClient.Close() }()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		containerInfo, err := dockerClient.ContainerInspect(inspectCtx, containerID)
+		if isDockerNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if containerInfo.State == nil || !containerInfo.State.Running {
+			return true, nil
+		}
+		select {
+		case <-inspectCtx.Done():
+			return false, nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func dockerFallbackContextIfDone(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.Background(), dockerStopFallbackActionTimeout)
+}
+
+func dockerSessionHostConfig(mounts []mountapi.Mount, portBindings nat.PortMap, networkMode containerapi.NetworkMode) *containerapi.HostConfig {
+	useInit := true
+	return &containerapi.HostConfig{
+		Mounts:       mounts,
+		PortBindings: portBindings,
+		AutoRemove:   false,
+		NetworkMode:  networkMode,
+		Init:         &useInit,
+	}
+}
+
+func SessionStopContextTimeout(driver string, stopTimeout time.Duration) time.Duration {
+	if driver != RuntimeDriverDocker || stopTimeout <= 0 {
+		return stopTimeout
+	}
+	return stopTimeout + dockerStopAPIMargin
 }
 
 func (r *dockerRuntime) dockerGuestNetworkMode(ctx context.Context, dockerClient *client.Client) containerapi.NetworkMode {

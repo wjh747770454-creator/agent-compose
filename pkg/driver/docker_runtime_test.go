@@ -65,6 +65,36 @@ func TestDockerRuntimeContainerEnvUsesRuntimeWorkspaceVariable(t *testing.T) {
 	}
 }
 
+func TestDockerSessionHostConfigEnablesInit(t *testing.T) {
+	hostConfig := dockerSessionHostConfig(
+		[]mountapi.Mount{{Type: mountapi.TypeBind, Source: "/host/workspace", Target: "/workspace"}},
+		nil,
+		containerapi.NetworkMode("bridge"),
+	)
+	if hostConfig.Init == nil || !*hostConfig.Init {
+		t.Fatalf("docker session host config Init = %v, want true", hostConfig.Init)
+	}
+	if hostConfig.AutoRemove {
+		t.Fatalf("docker session host config AutoRemove = true, want false")
+	}
+	if hostConfig.NetworkMode != containerapi.NetworkMode("bridge") || len(hostConfig.Mounts) != 1 {
+		t.Fatalf("docker session host config = %+v", hostConfig)
+	}
+}
+
+func TestSessionStopContextTimeoutAddsDockerAPIMargin(t *testing.T) {
+	stopTimeout := 30 * time.Second
+	if got := SessionStopContextTimeout(RuntimeDriverDocker, stopTimeout); got != 35*time.Second {
+		t.Fatalf("docker stop context timeout = %s, want 35s", got)
+	}
+	if got := SessionStopContextTimeout(RuntimeDriverBoxlite, stopTimeout); got != stopTimeout {
+		t.Fatalf("boxlite stop context timeout = %s, want %s", got, stopTimeout)
+	}
+	if got := SessionStopContextTimeout(RuntimeDriverDocker, 0); got != 0 {
+		t.Fatalf("zero docker stop context timeout = %s, want 0", got)
+	}
+}
+
 func TestDockerStatsFromResponseMapsStableMetrics(t *testing.T) {
 	startedAt := time.Date(2026, 7, 4, 8, 0, 0, 0, time.UTC)
 	sampledAt := startedAt.Add(90 * time.Second)

@@ -32,6 +32,30 @@ func (r fakeSessionRuntime) ExecStream(context.Context, *domain.Session, domain.
 	return domain.ExecResult{}, nil
 }
 
+type fakeStopDeadlineRuntime struct {
+	remaining time.Duration
+}
+
+func (r *fakeStopDeadlineRuntime) EnsureSession(context.Context, *domain.Session, domain.VMState, domain.ProxyState) (domain.SessionVMInfo, error) {
+	return domain.SessionVMInfo{}, nil
+}
+
+func (r *fakeStopDeadlineRuntime) StopSession(ctx context.Context, _ *domain.Session, _ domain.VMState) (bool, error) {
+	deadline, ok := ctx.Deadline()
+	if ok {
+		r.remaining = time.Until(deadline)
+	}
+	return false, nil
+}
+
+func (r *fakeStopDeadlineRuntime) Exec(context.Context, *domain.Session, domain.VMState, domain.ExecSpec) (domain.ExecResult, error) {
+	return domain.ExecResult{}, nil
+}
+
+func (r *fakeStopDeadlineRuntime) ExecStream(context.Context, *domain.Session, domain.VMState, domain.ExecSpec, domain.ExecStreamWriter) (domain.ExecResult, error) {
+	return domain.ExecResult{}, nil
+}
+
 type fakeDriverRuntime struct {
 	alive bool
 }
@@ -120,5 +144,43 @@ func TestSessionDriverStartSessionVMSavesRuntimeState(t *testing.T) {
 	}
 	if vmState.BoxID != "container-1" || vmState.BootstrapRef != updatedProxyState.JupyterURL {
 		t.Fatalf("vm state = %+v, want box id and bootstrap ref from runtime", vmState)
+	}
+}
+
+func TestSessionDriverStopSessionVMAddsDockerStopContextMargin(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	config := &appconfig.Config{
+		DataRoot:            root,
+		SessionRoot:         filepath.Join(root, "sessions"),
+		RuntimeDriver:       driverpkg.RuntimeDriverDocker,
+		DefaultImage:        "guest:latest",
+		GuestWorkspacePath:  "/workspace",
+		SessionStartTimeout: 2 * time.Second,
+		SessionStopTimeout:  2 * time.Second,
+	}
+	store, err := sessionstore.NewWithConfig(config)
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	session, err := store.CreateSession(ctx, "adapter session", "", driverpkg.RuntimeDriverDocker, "guest:latest", "", domain.SessionTypeManual, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+	runtime := &fakeStopDeadlineRuntime{}
+	driver := NewSessionDriver(config, store, nil, fakeRuntimeProvider{runtime: runtime})
+
+	if err := driver.StopSessionVM(ctx, session); err != nil {
+		t.Fatalf("StopSessionVM returned error: %v", err)
+	}
+	if runtime.remaining <= config.SessionStopTimeout+4*time.Second {
+		t.Fatalf("StopSessionVM context remaining = %s, want docker stop timeout plus API margin", runtime.remaining)
+	}
+	vmState, err := store.GetVMState(session.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetVMState returned error: %v", err)
+	}
+	if vmState.StoppedAt.IsZero() || vmState.LastError != "" {
+		t.Fatalf("vm state after stop = %+v", vmState)
 	}
 }
