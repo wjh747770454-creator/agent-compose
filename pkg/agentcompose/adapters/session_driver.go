@@ -118,9 +118,18 @@ func (d *SessionDriver) prepareSessionStart(ctx context.Context, driver string, 
 	if err != nil {
 		return err
 	}
-	managedEnv, err := runtimefacade.EnsureSessionLLMFacadeConfig(ctx, d.Config, d.ConfigDB, session, "codex", "", "session", "")
-	if err != nil {
-		return err
+	managedEnv := map[string]string{}
+	for _, agent := range []string{"codex", "claude"} {
+		agentEnv, err := runtimefacade.EnsureSessionLLMFacadeConfig(ctx, d.Config, d.ConfigDB, session, agent, "", "session", "")
+		if err != nil {
+			if agent == "claude" && runtimefacade.IsOptionalConfigError(err) {
+				continue
+			}
+			return err
+		}
+		for key, value := range agentEnv {
+			managedEnv[key] = value
+		}
 	}
 	if len(managedEnv) > 0 {
 		session.RuntimeEnvItems = llms.EnvItemsFromMap(managedEnv, false)
