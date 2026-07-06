@@ -233,19 +233,30 @@
       - 真实 BoxLite smoke 为 opt-in，本任务未运行；补跑命令：`SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke`。
     - 下一目标：4.2 移除 BoxLite 启动热路径隐式清理。
 
-- [ ] 4.2 移除 BoxLite 启动热路径 materialized cache GC
+- [x] 4.2 移除 BoxLite 启动热路径 materialized cache GC
   - 依赖：4.1。
   - 工作内容：从 `resolveRootfsPath()` 或等价 image resolution 热路径迁出 `maybeRunCacheGC()`；保留过期 materialized cache 判断能力给显式 prune 使用。
   - 可并行子任务：
-    - [ ] 可并行：补充回归测试证明 `EnsureSession` 和 image resolution 不触发 cleanup。
-    - [ ] 可并行：审计 `BOX_CACHE_TTL` 相关文档和配置引用。
+    - [x] 可并行：补充回归测试证明 `EnsureSession` 和 image resolution 不触发 cleanup。
+    - [x] 可并行：审计 `BOX_CACHE_TTL` 相关文档和配置引用。
   - 测试方案：`go test -tags boxlitecgo ./pkg/driver`，覆盖 `EnsureSession` 不调用 legacy cleanup、`resolveRootfsPath()` 不触发 `maybeRunCacheGC()`、当前 image cache 不被启动路径删除。
   - 验收标准：BoxLite session start/resume 不删除其他 image 或全局 cache 项。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - 从 `pkg/driver/boxlite_cgo.go` 的 `resolveRootfsPath()` 移除所有 `maybeRunCacheGC()` 调用，BoxLite image resolution 不再按 `BOX_CACHE_TTL` 清理 `<DATA_ROOT>/image-cache`。
+      - 保留 `pkg/driver/boxlite_cache_gc.go` 中的 `maybeRunCacheGC()`、`cleanupExpiredCacheDirs()` 和 artifact 过期判断 helper，供后续显式 prune/maintenance 接入。
+      - 在 `pkg/driver/boxlite_cache_gc_test.go` 增加 AST 回归测试，证明 `EnsureSession` 不调用 `cleanupLegacyBoxliteCaches()`，`resolveRootfsPath()` 不调用 `maybeRunCacheGC()`。
+      - 增加 filesystem 回归测试，构造已过期的 materialized `rootfs` 和 `oci.tmp`，验证 `resolveRootfsPath()` 在 `BoxCacheTTL` 已过期时也不会删除当前或其他 materialized cache。
+    - 验证：
+      - `./scripts/with-go-toolchain.sh go test -count=1 ./pkg/runtimecache`
+      - `./scripts/with-go-toolchain.sh go test -count=1 -tags boxlitecgo ./pkg/driver`
+      - `git diff --check`
+      - `rg -n "maybeRunCacheGC\\(" pkg/driver docs PROGRESS.md`
+    - 审计与例外：
+      - `maybeRunCacheGC(` 在 `pkg/driver` 中仅剩 helper 定义；启动和 image resolution 路径不再调用。
+      - `BOX_CACHE_TTL` 仍存在于配置、`.env.example` 和 `README.md` 的简短配置列表中；按阶段 8.1 的文档任务统一更新为“不再驱动启动热路径 GC，用于显式 prune 或后续维护”。
+      - 真实 BoxLite smoke 为 opt-in，本任务未运行；补跑命令：`SMOKE_RUNTIME_DRIVERS=boxlite task test:runtime-smoke`。
     - 下一目标：4.3 Microsandbox session-ephemeral adapter。
 
 - [ ] 4.3 实现 Microsandbox session-ephemeral inventory 和移除 startup sweep

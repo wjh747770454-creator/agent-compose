@@ -572,12 +572,10 @@ func parseBoxliteRegistry(value string) (string, C.enum_BoxliteRegistryTransport
 
 func (r *cgoBoxRuntime) resolveRootfsPath(ctx context.Context, imageRef string) (string, error) {
 	if strings.TrimSpace(r.config.BoxRootfsPath) != "" {
-		r.maybeRunCacheGC("")
 		return r.config.BoxRootfsPath, nil
 	}
 	imageRef = strings.TrimSpace(imageRef)
 	if imageRef == "" {
-		r.maybeRunCacheGC("")
 		return "", nil
 	}
 	layout, ok, err := r.materializeLocalImageRootfs(ctx, imageRef)
@@ -585,11 +583,9 @@ func (r *cgoBoxRuntime) resolveRootfsPath(ctx context.Context, imageRef string) 
 		return "", err
 	}
 	if ok {
-		r.maybeRunCacheGC(layout.ImageID)
 		slog.Info("agent-compose boxlite using materialized local image rootfs", "image", imageRef, "resolved_ref", layout.ResolvedRef, "rootfs_path", layout.RootfsPath)
 		return layout.RootfsPath, nil
 	}
-	r.maybeRunCacheGC("")
 	return "", nil
 }
 

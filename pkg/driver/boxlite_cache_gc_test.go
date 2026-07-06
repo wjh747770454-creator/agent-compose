@@ -5,12 +5,16 @@ package driver
 import (
 	"context"
 	"database/sql"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	appconfig "agent-compose/pkg/config"
 	"agent-compose/pkg/runtimecache"
 
 	_ "modernc.org/sqlite"
@@ -92,6 +96,57 @@ func TestCleanupExpiredCacheDirsPrunesStaleArtifactsInsideCurrentEntry(t *testin
 	}
 	if _, err := os.Stat(readyFlag); !os.IsNotExist(err) {
 		t.Fatalf("ready flag exists after cleanup, err=%v", err)
+	}
+}
+
+func TestBoxliteStartupPathsDoNotCallCacheCleanupHelpers(t *testing.T) {
+	ensureCalls := boxliteMethodCalls(t, "EnsureSession")
+	if containsString(ensureCalls, "cleanupLegacyBoxliteCaches") {
+		t.Fatalf("EnsureSession calls cleanupLegacyBoxliteCaches: %#v", ensureCalls)
+	}
+	resolveCalls := boxliteMethodCalls(t, "resolveRootfsPath")
+	if containsString(resolveCalls, "maybeRunCacheGC") {
+		t.Fatalf("resolveRootfsPath calls maybeRunCacheGC: %#v", resolveCalls)
+	}
+}
+
+func TestResolveRootfsPathDoesNotPruneMaterializedCache(t *testing.T) {
+	dataRoot := t.TempDir()
+	cacheDir := filepath.Join(dataRoot, "image-cache", "stale-image")
+	for _, path := range []string{
+		filepath.Join(cacheDir, "rootfs", "bin"),
+		filepath.Join(cacheDir, "oci.tmp", "index.json"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir parent for %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	staleAt := time.Now().UTC().Add(-2 * time.Hour)
+	for _, path := range []string{cacheDir, filepath.Join(cacheDir, "rootfs"), filepath.Join(cacheDir, "oci.tmp")} {
+		if err := os.Chtimes(path, staleAt, staleAt); err != nil {
+			t.Fatalf("chtimes %s: %v", path, err)
+		}
+	}
+	runtime := &cgoBoxRuntime{config: &appconfig.Config{
+		DataRoot:      dataRoot,
+		BoxRootfsPath: "/prebuilt/rootfs",
+		BoxCacheTTL:   time.Nanosecond,
+	}}
+
+	rootfsPath, err := runtime.resolveRootfsPath(context.Background(), "guest:latest")
+	if err != nil {
+		t.Fatalf("resolveRootfsPath: %v", err)
+	}
+	if rootfsPath != "/prebuilt/rootfs" {
+		t.Fatalf("rootfsPath = %q, want /prebuilt/rootfs", rootfsPath)
+	}
+	for _, path := range []string{cacheDir, filepath.Join(cacheDir, "rootfs"), filepath.Join(cacheDir, "oci.tmp")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("materialized cache path %s missing after resolveRootfsPath: %v", path, err)
+		}
 	}
 }
 
@@ -455,4 +510,45 @@ func writeBoxliteCacheFile(t *testing.T, boxliteHome string, parts ...string) st
 		t.Fatalf("write %s: %v", path, err)
 	}
 	return path
+}
+
+func boxliteMethodCalls(t *testing.T, methodName string) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "boxlite_cgo.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse boxlite_cgo.go: %v", err)
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Name.Name != methodName {
+			continue
+		}
+		var calls []string
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch fun := call.Fun.(type) {
+			case *ast.Ident:
+				calls = append(calls, fun.Name)
+			case *ast.SelectorExpr:
+				calls = append(calls, fun.Sel.Name)
+			}
+			return true
+		})
+		return calls
+	}
+	t.Fatalf("method %s not found in boxlite_cgo.go", methodName)
+	return nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
