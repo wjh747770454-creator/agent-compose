@@ -2820,12 +2820,151 @@ func TestIntegrationCLISandboxPruneFlagsAndOlderThanUsage(t *testing.T) {
 		t.Fatalf("sandbox prune invalid older-than stdout/stderr = %q / %q", stdout, stderr)
 	}
 
-	stdout, stderr, _, exitCode = executeCLICommand("sandbox", "prune", "--older-than", "7d")
-	if exitCode != exitCodeUnsupported {
-		t.Fatalf("sandbox prune valid older-than exit code = %d, want unsupported; stderr=%q", exitCode, stderr)
+}
+
+func TestIntegrationCLISandboxPruneDryRunFiltersAndSafety(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-prune-demo
+agents:
+  reviewer:
+    provider: codex
+  worker:
+    provider: codex
+`)
+	project := testCLIProject("project-cli-prune", "cli-prune-demo", composePath)
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339Nano)
+	newTime := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339Nano)
+
+	session := func(id, status, projectID, agent, driver, updatedAt string) *agentcomposev1.SessionSummary {
+		item := testCLISessionSummary(id, status, projectID, agent, "")
+		item.Driver = driver
+		item.UpdatedAt = updatedAt
+		return item
 	}
-	if stdout != "" || !strings.Contains(stderr, "sandbox prune is not implemented yet") {
-		t.Fatalf("sandbox prune valid older-than stdout/stderr = %q / %q", stdout, stderr)
+	createdFallback := session("session-created-fallback", "STOPPED", "project-cli-prune", "reviewer", "docker", "")
+	createdFallback.CreatedAt = oldTime
+	sessions := []*agentcomposev1.SessionSummary{
+		session("session-stopped", "STOPPED", "project-cli-prune", "reviewer", "docker", oldTime),
+		session("session-failed", "FAILED", "project-cli-prune", "worker", "boxlite", oldTime),
+		session("session-running", "RUNNING", "project-cli-prune", "reviewer", "docker", oldTime),
+		session("session-pending", "PENDING", "project-cli-prune", "worker", "boxlite", oldTime),
+		session("session-error", "ERROR", "project-cli-prune", "worker", "microsandbox", oldTime),
+		session("session-micro", "STOPPED", "project-cli-prune", "reviewer", "microsandbox", oldTime),
+		session("session-new", "STOPPED", "project-cli-prune", "reviewer", "docker", newTime),
+		createdFallback,
+		session("session-bad-time", "STOPPED", "project-cli-prune", "reviewer", "docker", "not-a-time"),
+		session("session-foreign", "STOPPED", "foreign-project", "reviewer", "docker", oldTime),
+	}
+	removeCalls := 0
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		project: projectServiceStub{
+			getProject: func(ctx context.Context, req *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetProjectResponse{Project: project}), nil
+			},
+		},
+		run: runServiceStub{
+			listRuns: func(ctx context.Context, req *connect.Request[agentcomposev2.ListRunsRequest]) (*connect.Response[agentcomposev2.ListRunsResponse], error) {
+				return connect.NewResponse(&agentcomposev2.ListRunsResponse{Runs: []*agentcomposev2.RunSummary{}}), nil
+			},
+		},
+		session: sessionServiceStub{
+			listSessions: func(ctx context.Context, req *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error) {
+				return connect.NewResponse(&agentcomposev1.ListSessionsResponse{Sessions: sessions}), nil
+			},
+		},
+		sandbox: sandboxServiceStub{
+			removeSandbox: func(ctx context.Context, req *connect.Request[agentcomposev2.RemoveSandboxRequest]) (*connect.Response[agentcomposev2.RemoveSandboxResponse], error) {
+				removeCalls++
+				t.Fatalf("dry-run prune called RemoveSandbox with %#v", req.Msg)
+				return nil, nil
+			},
+		},
+	})
+	defer server.Close()
+
+	runPrune := func(args ...string) composeSandboxPruneOutput {
+		t.Helper()
+		base := []string{"sandbox", "prune", "--host", server.URL, "--file", composePath, "--json"}
+		stdout, stderr, _, exitCode := executeCLICommand(append(base, args...)...)
+		if exitCode != 0 || stderr != "" {
+			t.Fatalf("sandbox prune %v code/stderr = %d / %q", args, exitCode, stderr)
+		}
+		var decoded composeSandboxPruneOutput
+		if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+			t.Fatalf("sandbox prune %v JSON decode failed: %v\n%s", args, err, stdout)
+		}
+		if !decoded.DryRun || len(decoded.Removed) != 0 || len(decoded.Skipped) != 0 {
+			t.Fatalf("sandbox prune %v output = %#v", args, decoded)
+		}
+		return decoded
+	}
+	matched := func(output composeSandboxPruneOutput) map[string]bool {
+		t.Helper()
+		result := map[string]bool{}
+		for _, sandbox := range output.Matched {
+			result[sandbox.Sandbox] = true
+		}
+		return result
+	}
+
+	defaultMatches := matched(runPrune())
+	for _, want := range []string{"session-stopped", "session-failed"} {
+		if !defaultMatches[want] {
+			t.Fatalf("default prune matched %#v, want %s", defaultMatches, want)
+		}
+	}
+	for _, notWant := range []string{"session-running", "session-pending", "session-error", "session-foreign"} {
+		if defaultMatches[notWant] {
+			t.Fatalf("default prune matched %#v, should not include %s", defaultMatches, notWant)
+		}
+	}
+
+	statusMatches := matched(runPrune("--status", "error"))
+	if !reflect.DeepEqual(statusMatches, map[string]bool{"session-error": true}) {
+		t.Fatalf("status error matches = %#v", statusMatches)
+	}
+
+	agentMatches := matched(runPrune("--agent", "worker"))
+	if !agentMatches["session-failed"] || agentMatches["session-error"] || agentMatches["session-pending"] {
+		t.Fatalf("agent worker matches = %#v", agentMatches)
+	}
+
+	driverMatches := matched(runPrune("--driver", "microsandbox"))
+	if !reflect.DeepEqual(driverMatches, map[string]bool{"session-micro": true}) {
+		t.Fatalf("driver microsandbox matches = %#v", driverMatches)
+	}
+
+	olderOutput := runPrune("--older-than", "24h")
+	olderMatches := matched(olderOutput)
+	for _, want := range []string{"session-stopped", "session-failed", "session-micro", "session-created-fallback"} {
+		if !olderMatches[want] {
+			t.Fatalf("older-than matches %#v, want %s", olderMatches, want)
+		}
+	}
+	for _, notWant := range []string{"session-new", "session-bad-time", "session-foreign"} {
+		if olderMatches[notWant] {
+			t.Fatalf("older-than matches %#v, should not include %s", olderMatches, notWant)
+		}
+	}
+	if len(olderOutput.Warnings) != 1 || !strings.Contains(olderOutput.Warnings[0], "session-bad-time") || !strings.Contains(olderOutput.Warnings[0], "invalid updated_at") {
+		t.Fatalf("older-than warnings = %#v", olderOutput.Warnings)
+	}
+	if removeCalls != 0 {
+		t.Fatalf("RemoveSandbox calls = %d, want 0", removeCalls)
+	}
+}
+
+func TestIntegrationCLISandboxPruneRejectsUnsafeStatuses(t *testing.T) {
+	for _, status := range []string{"running", "pending"} {
+		t.Run(status, func(t *testing.T) {
+			stdout, stderr, _, exitCode := executeCLICommand("sandbox", "prune", "--status", status)
+			if exitCode != exitCodeUsage {
+				t.Fatalf("sandbox prune --status %s exit code = %d, want usage; stderr=%q", status, exitCode, stderr)
+			}
+			if stdout != "" || !strings.Contains(stderr, "sandbox prune cannot target "+status+" sandboxes") {
+				t.Fatalf("sandbox prune --status %s stdout/stderr = %q / %q", status, stdout, stderr)
+			}
+		})
 	}
 }
 

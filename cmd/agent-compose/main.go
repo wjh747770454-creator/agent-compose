@@ -1335,13 +1335,126 @@ func runComposeSandboxRemoveCommand(cmd *cobra.Command, cli cliOptions, options 
 	return nil
 }
 
-func runComposeSandboxPruneCommand(_ *cobra.Command, _ cliOptions, options composeSandboxPruneOptions) error {
+func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options composeSandboxPruneOptions) error {
+	statusFilter, err := sandboxPruneStatusFilter(options.Status)
+	if err != nil {
+		return commandExitError{Code: exitCodeUsage, Err: err}
+	}
+	var olderThanSeconds uint64
 	if strings.TrimSpace(options.OlderThan) != "" {
-		if _, err := parseOlderThanSeconds(options.OlderThan); err != nil {
+		olderThanSeconds, err = parseOlderThanSeconds(options.OlderThan)
+		if err != nil {
 			return commandExitError{Code: exitCodeUsage, Err: err}
 		}
 	}
-	return commandExitError{Code: exitCodeUnsupported, Err: fmt.Errorf("sandbox prune is not implemented yet")}
+	if options.Force {
+		return commandExitError{Code: exitCodeUnsupported, Err: fmt.Errorf("sandbox prune --force is not implemented yet")}
+	}
+	composePath, normalized, projectID, err := resolveComposeProject(cli)
+	if err != nil {
+		return err
+	}
+	clients, err := newCLIServiceClients(cli)
+	if err != nil {
+		return err
+	}
+	project, err := clients.project.GetProject(cmd.Context(), connect.NewRequest(&agentcomposev2.GetProjectRequest{
+		Project: &agentcomposev2.ProjectRef{ProjectId: projectID},
+	}))
+	if err != nil {
+		return commandExitErrorForComposeProject(fmt.Errorf("get project %s: %w", normalized.Name, err), "sandbox prune", normalized.Name, composePath)
+	}
+	psOutput, err := composePSOutputFromProject(cmd.Context(), clients, project.Msg.GetProject(), composePSOptions{All: true})
+	if err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("build sandbox prune candidates for project %s: %w", normalized.Name, err))
+	}
+	output := composeSandboxPruneDryRunOutput(psOutput.Sandboxes, statusFilter, options, olderThanSeconds)
+	if cli.JSON {
+		data, err := json.MarshalIndent(output, "", "  ")
+		if err != nil {
+			return err
+		}
+		return writeCommandOutput(cmd.OutOrStdout(), append(data, '\n'))
+	}
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Dry-run: %d matched, 0 skipped, %d would be removed.\n", len(output.Matched), len(output.Matched)); err != nil {
+		return err
+	}
+	return writeStringListSection(cmd.OutOrStdout(), "Warnings", output.Warnings)
+}
+
+func composeSandboxPruneDryRunOutput(sandboxes []composePSSandboxOutput, statusFilter map[string]bool, options composeSandboxPruneOptions, olderThanSeconds uint64) composeSandboxPruneOutput {
+	output := composeSandboxPruneOutput{
+		DryRun:  true,
+		Matched: []composePSSandboxOutput{},
+		Removed: []string{},
+		Skipped: []composeSandboxPruneSkipped{},
+	}
+	agentFilter := strings.ToLower(strings.TrimSpace(options.Agent))
+	driverFilter := strings.ToLower(strings.TrimSpace(options.Driver))
+	var cutoff time.Time
+	if olderThanSeconds > 0 {
+		cutoff = time.Now().UTC().Add(-time.Duration(olderThanSeconds) * time.Second)
+	}
+	for _, sandbox := range sandboxes {
+		status := strings.ToLower(strings.TrimSpace(sandbox.Status))
+		if !statusFilter[status] {
+			continue
+		}
+		if agentFilter != "" && strings.ToLower(strings.TrimSpace(sandbox.Agent)) != agentFilter {
+			continue
+		}
+		if driverFilter != "" && strings.ToLower(strings.TrimSpace(sandbox.Driver)) != driverFilter {
+			continue
+		}
+		if !cutoff.IsZero() {
+			timestamp, _, err := sandboxPruneTimestamp(sandbox)
+			if err != nil {
+				output.Warnings = append(output.Warnings, fmt.Sprintf("sandbox %s skipped: %s", sandbox.Sandbox, err))
+				continue
+			}
+			if timestamp.After(cutoff) {
+				continue
+			}
+		}
+		output.Matched = append(output.Matched, sandbox)
+	}
+	return output
+}
+
+func sandboxPruneStatusFilter(value string) (map[string]bool, error) {
+	result := map[string]bool{}
+	for _, item := range strings.Split(value, ",") {
+		status := strings.ToLower(strings.TrimSpace(item))
+		if status == "" {
+			continue
+		}
+		if status == "running" || status == "pending" {
+			return nil, fmt.Errorf("sandbox prune cannot target %s sandboxes; use `agent-compose sandbox rm --force <sandbox>` for running sandboxes", status)
+		}
+		result[status] = true
+	}
+	if len(result) == 0 {
+		result["stopped"] = true
+		result["failed"] = true
+	}
+	return result, nil
+}
+
+func sandboxPruneTimestamp(sandbox composePSSandboxOutput) (time.Time, string, error) {
+	source := "updated_at"
+	value := strings.TrimSpace(sandbox.UpdatedAt)
+	if value == "" {
+		source = "created_at"
+		value = strings.TrimSpace(sandbox.CreatedAt)
+	}
+	if value == "" {
+		return time.Time{}, source, fmt.Errorf("missing updated_at and created_at")
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, source, fmt.Errorf("invalid %s %q", source, value)
+	}
+	return parsed.UTC(), source, nil
 }
 
 func removeSandbox(ctx context.Context, client agentcomposev2connect.SandboxServiceClient, sandboxID string, force bool) error {

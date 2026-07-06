@@ -82,20 +82,30 @@
       - 未修改 proto、generated Connect 文件、runtime driver、部署 compose 或 image build 行为。
     - 下一目标：2.2 实现 prune 候选选择和安全过滤。
 
-- [ ] 2.2 实现 prune 候选选择和安全过滤
+- [x] 2.2 实现 prune 候选选择和安全过滤
   - 依赖：2.1。
   - 工作内容：实现 `runComposeSandboxPruneCommand` 的 dry-run 路径；通过 `composePSOutputFromProject(..., composePSOptions{All: true})` 获取当前 project 全部 sandbox；默认匹配 `stopped,failed`；支持 `--status`、`--agent`、`--driver`、`--older-than`；禁止 `running/pending` 状态进入 prune。
   - 可并行子任务：
-    - [ ] 可并行：构造测试 fixtures，覆盖 running/stopped/failed/error/foreign project/不同 agent/不同 driver。
-    - [ ] 可并行：审计 `composePSSessionBelongsToProject` 的归属判断，确认 prune 复用时不会扩大清理范围。
+    - [x] 可并行：构造测试 fixtures，覆盖 running/stopped/failed/error/foreign project/不同 agent/不同 driver。
+    - [x] 可并行：审计 `composePSSessionBelongsToProject` 的归属判断，确认 prune 复用时不会扩大清理范围。
   - 测试方案：新增 CLI integration tests，覆盖默认 dry-run、`--status error`、`--agent worker`、`--driver microsandbox`、`--older-than 24h`、`--status running` 和 `--status pending`。
   - 验收标准：dry-run 不调用 `RemoveSandbox`；foreign project 不进入 matched；时间无法解析的项进入 warnings 而不是 matched；usage error 使用 `exitCodeUsage`。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：待完成。
+    - 状态：已完成。
+    - 变更：
+      - `runComposeSandboxPruneCommand` 现在解析当前 compose project，读取 daemon project，并通过 `composePSOutputFromProject(..., composePSOptions{All: true})` 构建当前 project 下候选 sandbox。
+      - 默认 dry-run 匹配 `stopped,failed`，并支持 `--status`、`--agent`、`--driver`、`--older-than` 过滤。
+      - `--status running` 和 `--status pending` 返回 `exitCodeUsage`，提示使用 `agent-compose sandbox rm --force <sandbox>` 处理运行中 sandbox。
+      - `--older-than` 使用 `updated_at`，缺失时回退 `created_at`；时间缺失或无法解析的 sandbox 会跳过并进入 `warnings`。
+      - dry-run JSON 输出 `dry_run=true`、`matched`、空 `removed`、空 `skipped`、`warnings`，且不会调用 `RemoveSandbox`。
+    - 验证：
+      - `go test ./cmd/agent-compose -run 'TestIntegrationCLI(PSTableAndJSON|RemoveSandboxes|Sandbox)|TestParseOlderThanSeconds|TestComposeSandboxPruneOutputJSONShape' -count=1`
+    - 审计与例外：
+      - prune 复用 `composePSOutputFromProject`，因此继续沿用 `composePSSessionBelongsToProject` 的 project 归属判断，没有扩大到 daemon 全局 sandbox。
+      - `--force` 仍返回 unsupported，占位等待 3.1 实现删除路径；本任务未添加任何删除调用。
+      - 文本输出仍是临时 dry-run 摘要；正式 text/JSON 输出整理留给 4.1。
+      - 未修改 proto、generated Connect 文件、runtime driver、部署 compose 或 image build 行为。
+    - 下一目标：3.1 实现 `sandbox prune --force` 删除路径。
 
 ## 阶段 3：实现 forced prune 删除和失败语义
 
