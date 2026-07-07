@@ -58,10 +58,11 @@ type LoaderSummary struct {
 }
 
 type Loader struct {
-	Summary  LoaderSummary   `json:"summary"`
-	Script   string          `json:"script"`
-	Triggers []LoaderTrigger `json:"triggers,omitempty"`
-	EnvItems []SessionEnvVar `json:"env_items,omitempty"`
+	Summary  LoaderSummary     `json:"summary"`
+	Script   string            `json:"script"`
+	Triggers []LoaderTrigger   `json:"triggers,omitempty"`
+	EnvItems []SessionEnvVar   `json:"env_items,omitempty"`
+	Volumes  []VolumeMountSpec `json:"volumes,omitempty"`
 }
 
 type LoaderTrigger struct {
@@ -117,17 +118,18 @@ type LoaderBinding struct {
 }
 
 type LoaderAgentRequest struct {
-	Agent          string          `json:"agent,omitempty"`
-	SessionPolicy  string          `json:"sessionPolicy,omitempty"`
-	Timeout        time.Duration   `json:"timeout,omitempty"`
-	Title          string          `json:"title,omitempty"`
-	Driver         string          `json:"driver,omitempty"`
-	GuestImage     string          `json:"guestImage,omitempty"`
-	PullPolicy     string          `json:"pullPolicy,omitempty"`
-	WorkspaceID    string          `json:"workspaceId,omitempty"`
-	JupyterEnabled bool            `json:"jupyter,omitempty"`
-	SessionEnv     []SessionEnvVar `json:"sessionEnv,omitempty"`
-	OutputSchema   string          `json:"outputSchema,omitempty"`
+	Agent          string            `json:"agent,omitempty"`
+	SessionPolicy  string            `json:"sessionPolicy,omitempty"`
+	Timeout        time.Duration     `json:"timeout,omitempty"`
+	Title          string            `json:"title,omitempty"`
+	Driver         string            `json:"driver,omitempty"`
+	GuestImage     string            `json:"guestImage,omitempty"`
+	PullPolicy     string            `json:"pullPolicy,omitempty"`
+	WorkspaceID    string            `json:"workspaceId,omitempty"`
+	JupyterEnabled bool              `json:"jupyter,omitempty"`
+	SessionEnv     []SessionEnvVar   `json:"sessionEnv,omitempty"`
+	Volumes        []VolumeMountSpec `json:"volumes,omitempty"`
+	OutputSchema   string            `json:"outputSchema,omitempty"`
 }
 
 type LoaderAgentResult struct {
@@ -161,6 +163,7 @@ type LoaderCommandRequest struct {
 	WorkspaceID    string            `json:"workspaceId,omitempty"`
 	JupyterEnabled bool              `json:"jupyter,omitempty"`
 	SessionEnv     []SessionEnvVar   `json:"sessionEnv,omitempty"`
+	Volumes        []VolumeMountSpec `json:"volumes,omitempty"`
 }
 
 type LoaderCommandResult struct {

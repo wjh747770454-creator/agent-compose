@@ -83,6 +83,7 @@ type CreateSessionOptions struct {
 	JupyterEnabled   bool
 	JupyterGuestPort int
 	JupyterExpose    bool
+	VolumeMounts     []domain.SessionVolumeMount
 }
 
 func (s *Store) CreateSession(ctx context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SessionWorkspace, envItems []SessionEnvVar, tags []SessionTag) (*Session, error) {
@@ -138,6 +139,7 @@ func (s *Store) CreateSessionWithOptions(_ context.Context, title, baseWorkspace
 		WorkspaceID:   strings.TrimSpace(workspaceID),
 		Workspace:     cloneSessionWorkspace(workspace),
 		EnvItems:      append([]SessionEnvVar(nil), envItems...),
+		VolumeMounts:  domain.NormalizeSessionVolumeMounts(options.VolumeMounts),
 	}
 
 	if session.Summary.Title == "" {
