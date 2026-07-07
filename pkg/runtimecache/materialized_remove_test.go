@@ -2,9 +2,11 @@ package runtimecache
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,6 +129,114 @@ func TestMaterializedRemoverRejectsMismatchedCacheID(t *testing.T) {
 	if err := (MaterializedRemover{Cache: cache}).Remove(context.Background(), item); err == nil {
 		t.Fatal("Remove returned nil error for mismatched cache id")
 	}
+}
+
+func TestValidateMaterializedRemoveItemRejectsInvalidItems(t *testing.T) {
+	valid := Item{
+		Domain:  DomainMaterializedImageCache,
+		Driver:  DriverAll,
+		Kind:    KindMaterializedOCILayout,
+		Path:    filepath.Join(t.TempDir(), "image", "oci"),
+		CacheID: "materialized-image-cache:all:materialized-oci-layout:0123456789abcdef",
+	}
+
+	tests := []struct {
+		name        string
+		item        Item
+		wantInvalid bool
+	}{
+		{
+			name: "wrong domain",
+			item: Item{
+				Domain:  DomainOCIImageStore,
+				Driver:  DriverAll,
+				Kind:    KindMaterializedOCILayout,
+				Path:    valid.Path,
+				CacheID: valid.CacheID,
+			},
+		},
+		{
+			name:        "empty cache id",
+			item:        Item{Domain: DomainMaterializedImageCache},
+			wantInvalid: true,
+		},
+		{
+			name: "malformed cache id",
+			item: Item{
+				Domain:  DomainMaterializedImageCache,
+				CacheID: "materialized-image-cache:all:materialized-oci-layout:not-a-hash",
+			},
+			wantInvalid: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateMaterializedRemoveItem(tt.item)
+			if err == nil {
+				t.Fatal("validateMaterializedRemoveItem returned nil error")
+			}
+			if tt.wantInvalid && !errors.Is(err, ErrInvalidCacheID) {
+				t.Fatalf("error = %v, want ErrInvalidCacheID", err)
+			}
+		})
+	}
+
+	if err := validateMaterializedRemoveItem(valid); err != nil {
+		t.Fatalf("validateMaterializedRemoveItem(valid) returned error: %v", err)
+	}
+}
+
+func TestMaterializedRemoverRejectsPreflightAndUnsafeItems(t *testing.T) {
+	cache := newRuntimeCacheImageCache(t)
+	remover := MaterializedRemover{Cache: cache}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := remover.Remove(ctx, Item{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Remove canceled error = %v, want context.Canceled", err)
+	}
+
+	if err := (MaterializedRemover{}).Remove(context.Background(), Item{}); err == nil || !strings.Contains(err.Error(), "requires image cache") {
+		t.Fatalf("Remove without cache error = %v, want image cache requirement", err)
+	}
+
+	outsidePath := filepath.Join(t.TempDir(), "outside-cache")
+	if err := os.WriteFile(outsidePath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write outside path: %v", err)
+	}
+	outside := Item{
+		Domain: DomainMaterializedImageCache,
+		Driver: DriverAll,
+		Kind:   KindMaterializedTempDir,
+		Path:   outsidePath,
+	}
+	var err error
+	outside.CacheID, err = GenerateCacheID(outside)
+	if err != nil {
+		t.Fatalf("GenerateCacheID(outside) returned error: %v", err)
+	}
+	if err := remover.Remove(context.Background(), outside); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("Remove outside path error = %v, want ErrUnsafePath", err)
+	}
+
+	unsupportedPath := filepath.Join(cache.MaterializationRoot(), "unsupported", "custom")
+	if err := os.MkdirAll(unsupportedPath, 0o755); err != nil {
+		t.Fatalf("mkdir unsupported path: %v", err)
+	}
+	unsupported := Item{
+		Domain: DomainMaterializedImageCache,
+		Driver: DriverAll,
+		Kind:   "materialized-custom",
+		Path:   unsupportedPath,
+	}
+	unsupported.CacheID, err = GenerateCacheID(unsupported)
+	if err != nil {
+		t.Fatalf("GenerateCacheID(unsupported) returned error: %v", err)
+	}
+	if err := remover.Remove(context.Background(), unsupported); err == nil || !strings.Contains(err.Error(), "unsupported materialized cache kind") {
+		t.Fatalf("Remove unsupported kind error = %v", err)
+	}
+	assertPathExists(t, unsupportedPath)
 }
 
 func materializedRemovalFixture(t *testing.T) (*imagecache.Cache, imagecache.ImageMetadata) {

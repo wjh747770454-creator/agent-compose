@@ -18,6 +18,9 @@ func TestCachePathsAndEnsure(t *testing.T) {
 	if cache.Root() != root {
 		t.Fatalf("Root = %q, want %q", cache.Root(), root)
 	}
+	if config := cache.Config(); config.Root != root {
+		t.Fatalf("Config Root = %q, want %q", config.Root, root)
+	}
 	if cache.MetadataPath() != filepath.Join(root, metadataFileName) {
 		t.Fatalf("MetadataPath = %q", cache.MetadataPath())
 	}
@@ -26,6 +29,14 @@ func TestCachePathsAndEnsure(t *testing.T) {
 	}
 	if _, err := os.Stat(cache.OCILayoutPath()); err != nil {
 		t.Fatalf("OCI layout dir was not created: %v", err)
+	}
+
+	fileRoot := filepath.Join(t.TempDir(), "file-root")
+	if err := os.WriteFile(fileRoot, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write file root: %v", err)
+	}
+	if _, err := New(Config{Root: fileRoot}); !IsKind(err, ErrorKindInternal) {
+		t.Fatalf("New file root err = %v, want internal image cache error", err)
 	}
 }
 

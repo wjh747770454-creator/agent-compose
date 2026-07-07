@@ -33,6 +33,34 @@ func TestCellArtifactsAndAgentFilesWorkflows(t *testing.T) {
 	if FirstNonZeroInt(0, 0, 7) != 7 {
 		t.Fatalf("FirstNonZeroInt failed")
 	}
+	for _, cellType := range []string{"", " JavaScript ", CellTypeShell, CellTypePython} {
+		if normalized, err := NormalizeCellType(cellType); err != nil || normalized == "" {
+			t.Fatalf("NormalizeCellType(%q) = %q/%v", cellType, normalized, err)
+		}
+	}
+	if _, err := NormalizeCellType(CellTypeAgent); err == nil {
+		t.Fatalf("NormalizeCellType agent returned nil error")
+	}
+	if config := AgentConfigFromDefinition(domain.AgentDefinition{ID: " agent-1 ", Provider: " ", Model: " model "}, " codex "); config.Provider != "codex" || config.AgentDefinitionID != "agent-1" || config.Model != "model" {
+		t.Fatalf("AgentConfigFromDefinition fallback = %#v", config)
+	}
+	if config := AgentConfigFromDefinition(domain.AgentDefinition{Provider: "opencode", Model: "ignored", EnvItems: []domain.SessionEnvVar{{Name: "OPENCODE_MODEL", Value: "env-model"}}}, "codex"); config.Model != "env-model" {
+		t.Fatalf("AgentConfigFromDefinition opencode = %#v", config)
+	}
+	ApplyAgentProviderEnv(nil, []domain.SessionEnvVar{{Name: "A", Value: "1"}})
+	sessionEnvTarget := &domain.Session{EnvItems: []domain.SessionEnvVar{{Name: "A", Value: "session"}}}
+	ApplyAgentProviderEnv(sessionEnvTarget, []domain.SessionEnvVar{{Name: "A", Value: "agent"}, {Name: "B", Value: "agent"}})
+	if env := domain.SessionEnvMap(sessionEnvTarget.ProviderEnvItems); env["A"] != "session" || env["B"] != "agent" {
+		t.Fatalf("ApplyAgentProviderEnv session env = %#v", sessionEnvTarget.ProviderEnvItems)
+	}
+	providerEnvTarget := &domain.Session{EnvItems: []domain.SessionEnvVar{{Name: "A", Value: "session"}}, ProviderEnvItems: []domain.SessionEnvVar{{Name: "A", Value: "provider"}}}
+	ApplyAgentProviderEnv(providerEnvTarget, []domain.SessionEnvVar{{Name: "A", Value: "agent"}})
+	if env := domain.SessionEnvMap(providerEnvTarget.ProviderEnvItems); env["A"] != "provider" {
+		t.Fatalf("ApplyAgentProviderEnv provider env = %#v", providerEnvTarget.ProviderEnvItems)
+	}
+	if SessionTagValue([]domain.SessionTag{{Name: " agent ", Value: " codex "}}, " agent ") != "" || SessionTagValue([]domain.SessionTag{{Name: "agent", Value: " codex "}}, "agent") != "codex" {
+		t.Fatalf("SessionTagValue returned unexpected value")
+	}
 
 	session := &domain.Session{Summary: domain.SessionSummary{WorkspacePath: filepath.Join(root, "session", "workspace")}}
 	config := &appconfig.Config{GuestStateRoot: "/guest/state"}

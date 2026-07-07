@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -88,5 +89,55 @@ func TestCellExecutorExecuteCellPersistsCellAndEvent(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Type != "kernel.cell.succeeded" {
 		t.Fatalf("events = %#v", events)
+	}
+
+	var started bool
+	var chunks []domain.ExecChunk
+	streamed, err := executor.ExecuteCellStream(ctx, session, execution.CellTypePython, "print('hello')", execution.CellExecutionStream{
+		OnStart: func(cell domain.NotebookCell) error {
+			started = cell.Running && cell.Type == execution.CellTypePython
+			return nil
+		},
+		OnChunk: func(_ string, chunk domain.ExecChunk) error {
+			chunks = append(chunks, chunk)
+			return nil
+		},
+	})
+	if err != nil || !streamed.Success || !started || len(chunks) != 1 {
+		t.Fatalf("ExecuteCellStream cell=%#v started=%v chunks=%#v err=%v", streamed, started, chunks, err)
+	}
+	cells, err = store.ListCells(ctx, session.Summary.ID)
+	if err != nil || len(cells) != 2 {
+		t.Fatalf("streamed cells=%#v err=%v", cells, err)
+	}
+
+	if _, err := executor.ExecuteCellStream(ctx, session, execution.CellTypeShell, "echo hello", execution.CellExecutionStream{
+		OnStart: func(domain.NotebookCell) error {
+			return errors.New("start callback failed")
+		},
+	}); err == nil {
+		t.Fatalf("ExecuteCellStream start callback returned nil error")
+	}
+	if _, err := executor.ExecuteCellStream(ctx, session, execution.CellTypeShell, "echo hello", execution.CellExecutionStream{
+		OnChunk: func(string, domain.ExecChunk) error {
+			return errors.New("chunk callback failed")
+		},
+	}); err == nil {
+		t.Fatalf("ExecuteCellStream chunk callback returned nil error")
+	}
+
+	failingExecutor := NewCellExecutor(config, store, fakeRuntimeProvider{runtime: fakeCellRuntime{result: domain.ExecResult{
+		Stderr:   "boom",
+		Output:   "boom",
+		ExitCode: 9,
+		Success:  false,
+	}}}, nil)
+	failedCell, err := failingExecutor.ExecuteCell(ctx, session, execution.CellTypeShell, "exit 9")
+	if err != nil || failedCell.Success || failedCell.ExitCode != 9 {
+		t.Fatalf("failed ExecuteCell cell=%#v err=%v", failedCell, err)
+	}
+	events, err = store.ListEvents(ctx, session.Summary.ID)
+	if err != nil || events[len(events)-1].Type != "kernel.cell.failed" {
+		t.Fatalf("failed events=%#v err=%v", events, err)
 	}
 }

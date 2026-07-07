@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -185,6 +186,107 @@ func TestDockerBuildContextExcludesDockerignoreDirectory(t *testing.T) {
 	}
 }
 
+func TestDockerBackendBuildImageCoversBuildContextOptionsAndEvents(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "docker"), 0o700); err != nil {
+		t.Fatalf("create docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docker", "Customfile"), []byte("FROM scratch\n"), 0o600); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".dockerignore"), []byte("ignored.txt\n!keep.txt\n"), 0o600); err != nil {
+		t.Fatalf("write .dockerignore: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ignored.txt"), []byte("ignored\n"), 0o600); err != nil {
+		t.Fatalf("write ignored file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("keep\n"), 0o600); err != nil {
+		t.Fatalf("write kept file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.txt"), []byte("app\n"), 0o600); err != nil {
+		t.Fatalf("write app file: %v", err)
+	}
+
+	fakeDocker := &fakeDockerBuildClient{}
+	backend := NewDockerBackend(
+		WithDockerClientFactory(func() (DockerClient, error) { return fakeDocker, nil }),
+		WithDockerClock(func() time.Time { return time.Unix(456, 0).UTC() }),
+	)
+	sink := &recordingBuildSink{}
+	result, err := backend.BuildImage(context.Background(), BuildRequest{
+		ContextDir: dir,
+		Dockerfile: filepath.Join(dir, "docker", "Customfile"),
+		Tags:       []string{" agent:test ", "", "agent:test", "agent:extra"},
+		BuildArgs:  map[string]string{" A ": "one", "": "ignored"},
+		Target:     "runtime",
+		Platform:   &agentcomposev2.ImagePlatform{Os: "linux", Architecture: "amd64"},
+		NoCache:    true,
+		Pull:       true,
+	}, sink)
+	if err != nil {
+		t.Fatalf("BuildImage returned error: %v", err)
+	}
+	if result.ImageRef != "agent:test" || result.ResolvedRef == "" || result.Image.GetImageId() != "sha256:built" {
+		t.Fatalf("BuildImage result = %#v", result)
+	}
+	if fakeDocker.options.Dockerfile != "docker/Customfile" || fakeDocker.options.Target != "runtime" || fakeDocker.options.Platform != "linux/amd64" || !fakeDocker.options.NoCache || !fakeDocker.options.PullParent {
+		t.Fatalf("build options = %#v", fakeDocker.options)
+	}
+	if len(fakeDocker.options.Tags) != 2 || fakeDocker.options.Tags[0] != "agent:test" || fakeDocker.options.Tags[1] != "agent:extra" {
+		t.Fatalf("build tags = %#v", fakeDocker.options.Tags)
+	}
+	if fakeDocker.options.BuildArgs["A"] == nil || *fakeDocker.options.BuildArgs["A"] != "one" {
+		t.Fatalf("build args = %#v", fakeDocker.options.BuildArgs)
+	}
+	if fakeDocker.contextEntries["ignored.txt"] != nil {
+		t.Fatalf("ignored.txt should not be in build context: %#v", fakeDocker.contextEntries)
+	}
+	for _, name := range []string{"docker/Customfile", ".dockerignore", "app.txt", "keep.txt"} {
+		if fakeDocker.contextEntries[name] == nil {
+			t.Fatalf("build context missing %s: %#v", name, fakeDocker.contextEntries)
+		}
+	}
+	if len(sink.events) != 3 {
+		t.Fatalf("build events = %#v, want start/progress/succeeded", sink.events)
+	}
+	if sink.events[0].GetStatus() != agentcomposev2.ImageOperationStatus_IMAGE_OPERATION_STATUS_RUNNING ||
+		sink.events[1].GetMessage() != "step one" ||
+		sink.events[2].GetStatus() != agentcomposev2.ImageOperationStatus_IMAGE_OPERATION_STATUS_SUCCEEDED {
+		t.Fatalf("build events = %#v", sink.events)
+	}
+}
+
+func TestDockerBackendBuildImageValidationAndProgressErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o600); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if _, err := normalizeBuildRequest(BuildRequest{ContextDir: dir, Tags: []string{" "}}); err == nil || !strings.Contains(err.Error(), "at least one tag") {
+		t.Fatalf("normalizeBuildRequest empty tags error = %v", err)
+	}
+	filePath := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(filePath, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write file context: %v", err)
+	}
+	if _, err := normalizeBuildRequest(BuildRequest{ContextDir: filePath, Tags: []string{"agent:test"}}); err == nil || !strings.Contains(err.Error(), "context_dir must be a directory") {
+		t.Fatalf("normalizeBuildRequest file context error = %v", err)
+	}
+	parentDockerfile := filepath.Join(filepath.Dir(dir), "Dockerfile.outside")
+	if err := os.WriteFile(parentDockerfile, []byte("FROM scratch\n"), 0o600); err != nil {
+		t.Fatalf("write outside Dockerfile: %v", err)
+	}
+	if _, err := normalizeBuildRequest(BuildRequest{ContextDir: dir, Dockerfile: parentDockerfile, Tags: []string{"agent:test"}}); err == nil || !strings.Contains(err.Error(), "dockerfile must be inside") {
+		t.Fatalf("normalizeBuildRequest outside Dockerfile error = %v", err)
+	}
+
+	backend := NewDockerBackend(WithDockerClientFactory(func() (DockerClient, error) {
+		return &fakeDockerBuildClient{buildBody: `{"errorDetail":{"message":"compile failed"}}` + "\n"}, nil
+	}))
+	if _, err := backend.BuildImage(context.Background(), BuildRequest{ContextDir: dir, Tags: []string{"agent:test"}}, nil); err == nil || !strings.Contains(err.Error(), "compile failed") {
+		t.Fatalf("BuildImage progress error = %v", err)
+	}
+}
+
 func readTarBuildContext(t *testing.T, contextDir, dockerfile string, excludes []string) map[string]*tar.Header {
 	t.Helper()
 	reader, err := tarBuildContext(contextDir, dockerfile, excludes)
@@ -261,4 +363,73 @@ func (fakeDockerClient) DaemonHost() string {
 
 func (fakeDockerClient) Close() error {
 	return nil
+}
+
+type fakeDockerBuildClient struct {
+	options        buildtypes.ImageBuildOptions
+	contextEntries map[string]*tar.Header
+	buildBody      string
+}
+
+func (fakeDockerBuildClient) ImageList(context.Context, typesimage.ListOptions) ([]typesimage.Summary, error) {
+	return nil, nil
+}
+
+func (fakeDockerBuildClient) ImagePull(context.Context, string, typesimage.PullOptions) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (c *fakeDockerBuildClient) ImageBuild(_ context.Context, reader io.Reader, options buildtypes.ImageBuildOptions) (buildtypes.ImageBuildResponse, error) {
+	c.options = options
+	entries, err := readTarEntriesForFake(reader)
+	if err != nil {
+		return buildtypes.ImageBuildResponse{}, err
+	}
+	c.contextEntries = entries
+	body := c.buildBody
+	if body == "" {
+		body = `{"stream":"step one"}` + "\n" + `{"aux":{"ID":"sha256:built"}}` + "\n"
+	}
+	return buildtypes.ImageBuildResponse{Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+
+func (fakeDockerBuildClient) ImageInspect(context.Context, string, ...client.ImageInspectOption) (typesimage.InspectResponse, error) {
+	return typesimage.InspectResponse{ID: "sha256:built", RepoTags: []string{"agent:test"}, RepoDigests: []string{"agent@sha256:built"}, Os: "linux", Architecture: "amd64", Size: 50}, nil
+}
+
+func (fakeDockerBuildClient) ImageRemove(context.Context, string, typesimage.RemoveOptions) ([]typesimage.DeleteResponse, error) {
+	return nil, nil
+}
+
+func (fakeDockerBuildClient) DaemonHost() string {
+	return "unix:///docker.sock"
+}
+
+func (fakeDockerBuildClient) Close() error {
+	return nil
+}
+
+type recordingBuildSink struct {
+	events []*agentcomposev2.BuildImageEvent
+}
+
+func (s *recordingBuildSink) Send(event *agentcomposev2.BuildImageEvent) error {
+	s.events = append(s.events, event)
+	return nil
+}
+
+func readTarEntriesForFake(reader io.Reader) (map[string]*tar.Header, error) {
+	tarReader := tar.NewReader(reader)
+	entries := map[string]*tar.Header{}
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			return entries, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read build context tar: %w", err)
+		}
+		copied := *header
+		entries[header.Name] = &copied
+	}
 }

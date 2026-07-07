@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"agent-compose/pkg/capabilities"
+	"agent-compose/pkg/capability"
 	"agent-compose/pkg/compose"
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
@@ -19,6 +21,7 @@ import (
 	"agent-compose/pkg/images"
 	"agent-compose/pkg/loaders"
 	domain "agent-compose/pkg/model"
+	"agent-compose/pkg/sessions"
 	"agent-compose/pkg/storage/sessionstore"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 )
@@ -184,6 +187,25 @@ func TestRunsPreparationWorkspaceAndStatusWorkflows(t *testing.T) {
 	}
 	if _, err := projectRunGitWorkspaceConfig(run, &compose.WorkspaceSpec{Provider: "git"}); err == nil {
 		t.Fatalf("expected git workspace url error")
+	}
+	if workspace, err := controller.prepareProjectRunWorkspace(ctx, run, store.project, nil, nil); err != nil || workspace != nil {
+		t.Fatalf("nil workspace = %#v/%v", workspace, err)
+	}
+	if _, err := controller.prepareProjectRunWorkspace(ctx, run, store.project, &compose.WorkspaceSpec{}, nil); err == nil || !strings.Contains(err.Error(), "provider is required") {
+		t.Fatalf("missing provider err=%v", err)
+	}
+	if _, err := controller.prepareProjectRunWorkspace(ctx, run, store.project, &compose.WorkspaceSpec{Provider: "s3"}, nil); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("unsupported provider err=%v", err)
+	}
+	localWorkspace, err := controller.prepareProjectRunWorkspace(ctx, run, store.project, &compose.WorkspaceSpec{Provider: "git", URL: "https://example.test/project.git", Path: "."}, &compose.WorkspaceSpec{Provider: "local", Path: "."})
+	if err != nil || localWorkspace == nil || localWorkspace.Type != "file" {
+		t.Fatalf("agent local workspace = %#v/%v", localWorkspace, err)
+	}
+	if _, err := (&Controller{}).materializeLocalProjectRunWorkspace(run, store.project, &compose.WorkspaceSpec{Provider: "local", Path: "."}); err == nil {
+		t.Fatalf("materialize without config returned nil error")
+	}
+	if _, err := controller.materializeLocalProjectRunWorkspace(run, store.project, &compose.WorkspaceSpec{Provider: "local", Path: "missing"}); err == nil {
+		t.Fatalf("materialize missing local path returned nil error")
 	}
 	if snapshot := toSessionWorkspaceSnapshot(domain.WorkspaceConfig{ID: "workspace", Name: "Workspace", Type: "file", ConfigJSON: "{}"}); snapshot.ID != "workspace" {
 		t.Fatalf("snapshot = %#v", snapshot)
@@ -552,6 +574,110 @@ func TestRunsControllerRunProjectAgentCommandNonZeroExitPreservesOutput(t *testi
 	}
 }
 
+func TestRunsControllerExecuteProjectRunCommandEdgeBranches(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	config := &appconfig.Config{
+		DataRoot:       root,
+		SessionRoot:    filepath.Join(root, "sessions"),
+		RuntimeDriver:  "boxlite",
+		DefaultImage:   "guest:latest",
+		GuestStateRoot: "/guest/state",
+	}
+	store, err := sessionstore.NewWithConfig(config)
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	session, err := store.CreateSession(ctx, "command session", "", "boxlite", "guest:latest", "", domain.SessionTypeManual, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+	session.Summary.VMStatus = domain.VMStatusRunning
+	run := domain.ProjectRunRecord{RunID: "run-edge", ProjectID: "project-1", AgentName: "worker"}
+	req := RunAgentRequest{Env: []*agentcomposev2.EnvVarSpec{{Name: "REQUEST_ENV", Value: "yes"}}}
+
+	transition, err := (&Controller{config: config}).executeProjectRunCommand(ctx, run, session, req, "echo edge", nil)
+	if err == nil || transition.ExitCode != 1 || !strings.Contains(transition.Error, "dependencies are required") {
+		t.Fatalf("nil deps transition=%#v err=%v", transition, err)
+	}
+
+	controller := &Controller{config: config, store: store, runtime: func(*domain.Session) (Runtime, error) {
+		return &fakeControllerRuntime{}, nil
+	}}
+	transition, err = controller.executeProjectRunCommand(ctx, run, session, req, "echo edge", &StreamSink{
+		SendStarted: func(domain.ProjectRunRecord, time.Time) error {
+			return errors.New("start send failed")
+		},
+	})
+	if err == nil || transition.ExitCode != 1 || !strings.Contains(transition.Error, "start send failed") {
+		t.Fatalf("send started transition=%#v err=%v", transition, err)
+	}
+
+	missingVMSession := *session
+	missingVMSession.Summary.ID = "missing-vm"
+	missingVMSession.Summary.WorkspacePath = filepath.Join(root, "missing-vm", "workspace")
+	transition, err = controller.executeProjectRunCommand(ctx, run, &missingVMSession, req, "echo edge", nil)
+	if err == nil || transition.ExitCode != 1 || !strings.Contains(transition.Error, "no such file") {
+		t.Fatalf("missing vm transition=%#v err=%v", transition, err)
+	}
+	if err := store.SaveVMState(session.Summary.ID, domain.VMState{Driver: "boxlite", BoxID: "box-1"}); err != nil {
+		t.Fatalf("SaveVMState returned error: %v", err)
+	}
+
+	controller.runtime = func(*domain.Session) (Runtime, error) {
+		return nil, errors.New("runtime unavailable")
+	}
+	transition, err = controller.executeProjectRunCommand(ctx, run, session, req, "echo edge", nil)
+	if err == nil || transition.ExitCode != 1 || !strings.Contains(transition.Error, "runtime unavailable") {
+		t.Fatalf("runtime provider transition=%#v err=%v", transition, err)
+	}
+
+	run.RunID = "run-mkdir"
+	blockingPath := projectRunCommandArtifactsDir(run, session)
+	if err := os.MkdirAll(filepath.Dir(blockingPath), 0o755); err != nil {
+		t.Fatalf("mkdir blocking parent: %v", err)
+	}
+	if err := os.WriteFile(blockingPath, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write blocking file: %v", err)
+	}
+	controller.runtime = func(*domain.Session) (Runtime, error) {
+		return &fakeControllerRuntime{}, nil
+	}
+	transition, err = controller.executeProjectRunCommand(ctx, run, session, req, "echo edge", nil)
+	if err == nil || transition.ExitCode != 1 || !strings.Contains(transition.Error, "not a directory") {
+		t.Fatalf("mkdir transition=%#v err=%v", transition, err)
+	}
+
+	run.RunID = "run-send"
+	transition, err = controller.executeProjectRunCommand(ctx, run, session, req, "echo edge", &StreamSink{
+		SendChunk: func(string, domain.ExecChunk, time.Time) error {
+			return errors.New("chunk send failed")
+		},
+	})
+	if err == nil || transition.ExitCode != 1 || !strings.Contains(transition.Error, "chunk send failed") {
+		t.Fatalf("send chunk transition=%#v err=%v", transition, err)
+	}
+
+	run.RunID = "run-exec-err"
+	controller.runtime = func(*domain.Session) (Runtime, error) {
+		return &fakeControllerRuntime{execErr: errors.New("exec failed")}, nil
+	}
+	transition, err = controller.executeProjectRunCommand(ctx, run, session, req, "echo edge", nil)
+	if err == nil || transition.ExitCode == 0 || !strings.Contains(transition.Error, "exec failed") {
+		t.Fatalf("exec error transition=%#v err=%v", transition, err)
+	}
+
+	run.RunID = "run-parse"
+	rawResult := domain.ExecResult{Stdout: "plain output", Output: "plain output", ExitCode: 0, Success: true}
+	controller.runtime = func(*domain.Session) (Runtime, error) {
+		return &fakeControllerRuntime{rawResult: &rawResult}, nil
+	}
+	transition, err = controller.executeProjectRunCommand(ctx, run, session, req, "echo edge", nil)
+	if err == nil || transition.ExitCode != 1 || !strings.Contains(transition.Error, "no result payload") {
+		t.Fatalf("parse transition=%#v err=%v", transition, err)
+	}
+}
+
 func TestIntegrationRunsControllerRunProjectAgentCommandWorkflow(t *testing.T) {
 	TestRunsControllerRunProjectAgentCommandWorkflow(t)
 }
@@ -866,6 +992,78 @@ func TestRunsControllerRunProjectAgentManualTriggerMissingDoesNotCreateRun(t *te
 	}
 }
 
+func TestManualTriggerCaptureHostUnavailableMethodsAndEnvSpecs(t *testing.T) {
+	ctx := context.Background()
+	host := &manualTriggerCaptureHost{}
+
+	if err := host.Log(ctx, "ignored", map[string]any{"ok": true}); err != nil {
+		t.Fatalf("Log returned error: %v", err)
+	}
+	if _, err := host.PublishEvent(ctx, "runtime.topic", `{}`); err == nil || !strings.Contains(err.Error(), "scheduler.event.publish") {
+		t.Fatalf("PublishEvent error = %v", err)
+	}
+	if _, err := host.Command(ctx, domain.LoaderCommandRequest{}); err == nil || !strings.Contains(err.Error(), "scheduler.command") {
+		t.Fatalf("Command error = %v", err)
+	}
+	if _, err := host.LLM(ctx, "prompt", domain.LoaderLLMRequest{}); err == nil || !strings.Contains(err.Error(), "scheduler.llm") {
+		t.Fatalf("LLM error = %v", err)
+	}
+	if value, ok, err := host.StateGet(ctx, "cursor"); err != nil || ok || value != "" {
+		t.Fatalf("StateGet value=%q ok=%v err=%v", value, ok, err)
+	}
+	if err := host.StateSet(ctx, "cursor", `{}`); err != nil {
+		t.Fatalf("StateSet returned error: %v", err)
+	}
+	if err := host.StateDelete(ctx, "cursor"); err != nil {
+		t.Fatalf("StateDelete returned error: %v", err)
+	}
+	if _, err := host.CallSessionRPC(ctx, "GetSession", `{}`); err == nil || !strings.Contains(err.Error(), "scheduler.session") {
+		t.Fatalf("CallSessionRPC error = %v", err)
+	}
+
+	specs := envVarSpecsFromSessionEnv([]domain.SessionEnvVar{
+		{Name: " A ", Value: "1", Secret: true},
+		{Name: " ", Value: "ignored"},
+		{Name: "B", Value: "2"},
+	})
+	if len(specs) != 2 || specs[0].Name != "A" || specs[0].Value != "1" || !specs[0].Secret || specs[1].Name != "B" {
+		t.Fatalf("env specs = %#v", specs)
+	}
+}
+
+func TestRunsControllerApplyJupyterOptionsToSession(t *testing.T) {
+	fixture := newControllerRunFixture(t)
+	fixture.config.JupyterGuestPort = 8888
+	session, err := fixture.store.CreateSession(fixture.ctx, "jupyter session", "", "boxlite", "guest:latest", "", domain.SessionTypeManual, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+	before, err := fixture.store.GetProxyState(session.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetProxyState before returned error: %v", err)
+	}
+	if err := fixture.controller.applyJupyterOptionsToSession(session.Summary.ID, sessionstore.CreateSessionOptions{}); err != nil {
+		t.Fatalf("apply empty options returned error: %v", err)
+	}
+	unchanged, err := fixture.store.GetProxyState(session.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetProxyState unchanged returned error: %v", err)
+	}
+	if unchanged != before {
+		t.Fatalf("empty options changed proxy state before=%#v after=%#v", before, unchanged)
+	}
+	if err := fixture.controller.applyJupyterOptionsToSession(session.Summary.ID, sessionstore.CreateSessionOptions{JupyterExpose: true, JupyterGuestPort: 9999}); err != nil {
+		t.Fatalf("apply jupyter options returned error: %v", err)
+	}
+	enabled, err := fixture.store.GetProxyState(session.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetProxyState enabled returned error: %v", err)
+	}
+	if !enabled.Enabled || !enabled.Exposed || enabled.GuestPort != 9999 || enabled.HostPort == 0 || strings.TrimSpace(enabled.Token) == "" || enabled.JupyterURL != enabled.ProxyPath {
+		t.Fatalf("enabled proxy state = %#v", enabled)
+	}
+}
+
 func TestRunsProjectRunLogAppendChunk(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state", "runs", "run-1", "output.txt")
 	if err := appendProjectRunLogChunk(path, domain.ExecChunk{Text: "stdout\n"}); err != nil {
@@ -976,6 +1174,42 @@ func TestRunsControllerHelperEdgeWorkflows(t *testing.T) {
 	if err != nil || failedRun.Status != domain.ProjectRunStatusFailed {
 		t.Fatalf("failed terminal run=%#v err=%v", failedRun, err)
 	}
+
+	session.Summary.Tags = []domain.SessionTag{
+		{Name: capabilities.CapsetTagName, Value: "dev"},
+		{Name: capabilities.CapsetTagName, Value: "missing"},
+	}
+	provider := fakeCapabilityProvider{
+		guides: map[string][]byte{"dev": []byte("Dev guide")},
+		errs:   map[string]error{"missing": errors.New("missing guide")},
+		target: "cap-proxy.internal:9000",
+	}
+	guideStore := &fakeGuideSessionStore{}
+	streams := sessions.NewStreamBrokerForTest()
+	ch, unsubscribe := streams.Subscribe(session.Summary.ID)
+	defer unsubscribe()
+	writeCapabilityGuide(context.Background(), provider, guideStore, streams, session, capabilities.SessionCapsets(session))
+	guidePath := capabilities.SessionGuidePath(session)
+	data, err := os.ReadFile(guidePath)
+	if err != nil {
+		t.Fatalf("read capability guide: %v", err)
+	}
+	if !strings.Contains(string(data), "Dev guide") || !strings.Contains(string(data), "cap-proxy.internal:9000") {
+		t.Fatalf("capability guide content = %q", data)
+	}
+	if len(guideStore.events) != 1 || guideStore.events[0].Type != "capability.guide.warning" || !strings.Contains(guideStore.events[0].Message, "missing") {
+		t.Fatalf("guide warning events = %#v", guideStore.events)
+	}
+	select {
+	case event := <-ch:
+		if event.EventType != sessions.WatchEventTypeEventAdded || event.Event.Type != "capability.guide.warning" {
+			t.Fatalf("stream event = %#v", event)
+		}
+	default:
+		t.Fatalf("missing guide warning stream event")
+	}
+	recordCapabilityGuideWarning(context.Background(), nil, streams, session.Summary.ID, "ignored")
+	recordCapabilityGuideWarning(context.Background(), guideStore, streams, " ", "ignored")
 }
 
 func TestIntegrationRunsControllerHelperEdgeWorkflows(t *testing.T) {
@@ -1228,25 +1462,32 @@ func (e *fakeControllerExecutor) ExecuteAgentRequest(_ context.Context, _ *domai
 }
 
 type fakeControllerRuntime struct {
-	spec   domain.ExecSpec
-	result domain.RuntimeCommandResult
+	spec      domain.ExecSpec
+	result    domain.RuntimeCommandResult
+	rawResult *domain.ExecResult
+	execErr   error
 }
 
 func (r *fakeControllerRuntime) ExecStream(_ context.Context, _ *domain.Session, _ domain.VMState, spec domain.ExecSpec, writer domain.ExecStreamWriter) (domain.ExecResult, error) {
 	r.spec = spec
+	if r.rawResult != nil {
+		return *r.rawResult, r.execErr
+	}
 	result := r.result
 	if result.Stdout == "" && result.Stderr == "" && result.Output == "" && result.ExitCode == 0 && !result.Success {
 		result = domain.RuntimeCommandResult{Stdout: "command output\n", Output: "command output\n", ExitCode: 0, Success: true}
 	}
-	if result.Stdout != "" {
+	if result.Stdout != "" && writer != nil {
 		writer(domain.ExecChunk{Text: result.Stdout})
 	}
-	if result.Stderr != "" {
+	if result.Stderr != "" && writer != nil {
 		writer(domain.ExecChunk{Text: result.Stderr, Stream: domain.StdioStderr})
 	}
 	payload := fakeRuntimeCommandPayload(result)
-	writer(domain.ExecChunk{Text: payload})
-	return domain.ExecResult{Stdout: result.Stdout + payload, Stderr: result.Stderr, Output: result.Output + payload, ExitCode: result.ExitCode, Success: result.Success}, nil
+	if writer != nil {
+		writer(domain.ExecChunk{Text: payload})
+	}
+	return domain.ExecResult{Stdout: result.Stdout + payload, Stderr: result.Stderr, Output: result.Output + payload, ExitCode: result.ExitCode, Success: result.Success}, r.execErr
 }
 
 func fakeRuntimeCommandPayload(result domain.RuntimeCommandResult) string {
@@ -1287,4 +1528,77 @@ type fakeControllerDashboard struct {
 
 func (d *fakeControllerDashboard) Notify(reason string) {
 	d.reasons = append(d.reasons, reason)
+}
+
+type fakeCapabilityProvider struct {
+	guides map[string][]byte
+	errs   map[string]error
+	target string
+}
+
+func (p fakeCapabilityProvider) Status(context.Context) capability.Status {
+	return capability.Status{Configured: true, OK: true, Status: "ok"}
+}
+
+func (p fakeCapabilityProvider) ListCapsets(context.Context) ([]capability.Capset, error) {
+	return []capability.Capset{}, nil
+}
+
+func (p fakeCapabilityProvider) Catalog(context.Context, string) (capability.Catalog, error) {
+	return capability.Catalog{}, nil
+}
+
+func (p fakeCapabilityProvider) CapabilityGuide(_ context.Context, capsetID string) ([]byte, error) {
+	if err := p.errs[capsetID]; err != nil {
+		return nil, err
+	}
+	if guide := p.guides[capsetID]; guide != nil {
+		return guide, nil
+	}
+	return nil, errors.New("not found")
+}
+
+func (p fakeCapabilityProvider) ProxyTarget() string {
+	return p.target
+}
+
+type fakeGuideSessionStore struct {
+	events []domain.SessionEvent
+}
+
+func (s *fakeGuideSessionStore) CreateSessionWithOptions(context.Context, string, string, string, string, string, string, *sessionstore.SessionWorkspace, []sessionstore.SessionEnvVar, []sessionstore.SessionTag, sessionstore.CreateSessionOptions) (*sessionstore.Session, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *fakeGuideSessionStore) GetSession(context.Context, string) (*sessionstore.Session, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *fakeGuideSessionStore) UpdateSession(context.Context, *sessionstore.Session) error {
+	return errors.New("not implemented")
+}
+
+func (s *fakeGuideSessionStore) RemoveSession(context.Context, string) error {
+	return errors.New("not implemented")
+}
+
+func (s *fakeGuideSessionStore) AddEvent(_ context.Context, _ string, event sessionstore.SessionEvent) error {
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *fakeGuideSessionStore) GetVMState(string) (sessionstore.VMState, error) {
+	return sessionstore.VMState{}, errors.New("not implemented")
+}
+
+func (s *fakeGuideSessionStore) GetProxyState(string) (sessionstore.ProxyState, error) {
+	return sessionstore.ProxyState{}, errors.New("not implemented")
+}
+
+func (s *fakeGuideSessionStore) SaveProxyState(string, sessionstore.ProxyState) error {
+	return errors.New("not implemented")
+}
+
+func (s *fakeGuideSessionStore) AllocateHostPortForJupyter() (int, error) {
+	return 0, errors.New("not implemented")
 }

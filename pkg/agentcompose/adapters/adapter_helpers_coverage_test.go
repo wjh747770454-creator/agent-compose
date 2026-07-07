@@ -87,6 +87,91 @@ func TestAdapterHelperCoverage(t *testing.T) {
 			t.Fatalf("ForSession nil error = %v", err)
 		}
 	})
+
+	t.Run("driver runtime adapter exec and stats", func(t *testing.T) {
+		driverRuntime := &fakeDriverAdapterRuntime{
+			execResult: driverpkg.ExecResult{Stdout: "out", Output: "out", ExitCode: 0, Success: true},
+			stats: driverpkg.SandboxStats{
+				SandboxID:  "session-1",
+				Driver:     driverpkg.RuntimeDriverDocker,
+				CPUPercent: driverpkg.MetricValue{Value: float64PtrForAdapter(12), Unit: driverpkg.MetricUnitPercent, Status: driverpkg.MetricStatusOK},
+			},
+		}
+		adapter := driverRuntimeAdapter{runtime: driverRuntime}
+		session := &domain.Session{Summary: domain.SessionSummary{ID: "session-1", WorkspacePath: "/tmp/workspace"}}
+		result, err := adapter.Exec(context.Background(), session, domain.VMState{BoxID: "sandbox-1"}, domain.ExecSpec{Command: "echo"})
+		if err != nil || result.Stdout != "out" || driverRuntime.execSpec.Command != "echo" {
+			t.Fatalf("Exec result=%#v spec=%#v err=%v", result, driverRuntime.execSpec, err)
+		}
+		var chunks []domain.ExecChunk
+		streamed, err := adapter.ExecStream(context.Background(), session, domain.VMState{}, domain.ExecSpec{Command: "stream"}, func(chunk domain.ExecChunk) {
+			chunks = append(chunks, chunk)
+		})
+		if err != nil || streamed.Output != "out" || len(chunks) != 1 || domain.NormalizeStdioStream(chunks[0].Stream) != domain.StdioStderr {
+			t.Fatalf("ExecStream result=%#v chunks=%#v err=%v", streamed, chunks, err)
+		}
+		stats, err := adapter.Stats(context.Background(), session, domain.VMState{})
+		if err != nil || stats.SandboxID != "session-1" || stats.CPUPercent.Value == nil || *stats.CPUPercent.Value != 12 {
+			t.Fatalf("Stats = %#v err=%v", stats, err)
+		}
+		unsupported := driverRuntimeAdapter{runtime: fakeDriverNoStatsRuntime{}}
+		if _, err := unsupported.Stats(context.Background(), session, domain.VMState{}); err == nil {
+			t.Fatalf("unsupported Stats returned nil error")
+		}
+	})
+}
+
+type fakeDriverAdapterRuntime struct {
+	execResult driverpkg.ExecResult
+	execSpec   driverpkg.ExecSpec
+	stats      driverpkg.SandboxStats
+}
+
+func (r *fakeDriverAdapterRuntime) EnsureSession(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ProxyState) (driverpkg.SessionVMInfo, error) {
+	return driverpkg.SessionVMInfo{}, nil
+}
+
+func (r *fakeDriverAdapterRuntime) StopSession(context.Context, *driverpkg.Session, driverpkg.VMState) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeDriverAdapterRuntime) Exec(_ context.Context, _ *driverpkg.Session, _ driverpkg.VMState, spec driverpkg.ExecSpec) (driverpkg.ExecResult, error) {
+	r.execSpec = spec
+	return r.execResult, nil
+}
+
+func (r *fakeDriverAdapterRuntime) ExecStream(_ context.Context, _ *driverpkg.Session, _ driverpkg.VMState, spec driverpkg.ExecSpec, stream driverpkg.ExecStreamWriter) (driverpkg.ExecResult, error) {
+	r.execSpec = spec
+	if stream != nil {
+		stream(driverpkg.ExecChunk{Text: "err", Stream: driverpkg.StdioStderr})
+	}
+	return r.execResult, nil
+}
+
+func (r *fakeDriverAdapterRuntime) Stats(context.Context, *driverpkg.Session, driverpkg.VMState) (driverpkg.SandboxStats, error) {
+	return r.stats, nil
+}
+
+type fakeDriverNoStatsRuntime struct{}
+
+func (fakeDriverNoStatsRuntime) EnsureSession(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ProxyState) (driverpkg.SessionVMInfo, error) {
+	return driverpkg.SessionVMInfo{}, nil
+}
+
+func (fakeDriverNoStatsRuntime) StopSession(context.Context, *driverpkg.Session, driverpkg.VMState) (bool, error) {
+	return false, nil
+}
+
+func (fakeDriverNoStatsRuntime) Exec(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ExecSpec) (driverpkg.ExecResult, error) {
+	return driverpkg.ExecResult{}, nil
+}
+
+func (fakeDriverNoStatsRuntime) ExecStream(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ExecSpec, driverpkg.ExecStreamWriter) (driverpkg.ExecResult, error) {
+	return driverpkg.ExecResult{}, nil
+}
+
+func float64PtrForAdapter(value float64) *float64 {
+	return &value
 }
 
 func TestCapabilitySessionResolverCoverage(t *testing.T) {

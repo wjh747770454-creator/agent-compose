@@ -83,6 +83,15 @@ func testConfigStoreProjectCRUDCoverageWorkflows(t *testing.T) {
 	if err := store.initSchema(ctx); err != nil {
 		t.Fatalf("initSchema returned error: %v", err)
 	}
+	if _, err := store.UpsertProject(ctx, domain.ProjectRecord{}); err == nil {
+		t.Fatalf("UpsertProject empty project returned nil error")
+	}
+	if _, _, err := store.SaveProjectRevision(ctx, domain.ProjectRevisionRecord{ProjectID: "missing-project", SpecHash: "hash", SpecJSON: `{"ok":true}`}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("SaveProjectRevision missing project err=%v, want not found", err)
+	}
+	if _, _, err := store.SaveProjectRevision(ctx, domain.ProjectRevisionRecord{ProjectID: "missing-project", SpecHash: "hash", SpecJSON: `{bad json`}); err == nil {
+		t.Fatalf("SaveProjectRevision invalid JSON returned nil error")
+	}
 	project, err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "project-1", Name: "Project", SourcePath: "/tmp/project", SourceJSON: `{"kind":"local"}`, SpecHash: "hash-0"})
 	if err != nil {
 		t.Fatalf("UpsertProject returned error: %v", err)
@@ -118,8 +127,26 @@ func testConfigStoreProjectCRUDCoverageWorkflows(t *testing.T) {
 	if result, err := store.ListProjects(ctx, domain.ProjectListOptions{Query: "updated", Limit: 10}); err != nil || result.TotalCount != 1 {
 		t.Fatalf("ListProjects result=%#v err=%v", result, err)
 	}
+	if _, err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "project-2", Name: "Other Project", SourcePath: "/tmp/other", SourceJSON: `{"kind":"local"}`}); err != nil {
+		t.Fatalf("UpsertProject second project returned error: %v", err)
+	}
+	if result, err := store.ListProjects(ctx, domain.ProjectListOptions{Limit: 1, Offset: -5}); err != nil || result.TotalCount != 2 || len(result.Projects) != 1 || !result.HasMore || result.NextOffset != 1 {
+		t.Fatalf("ListProjects paged result=%#v err=%v", result, err)
+	}
+	if result, err := store.ListProjects(ctx, domain.ProjectListOptions{Query: "not-present", Limit: 500, Offset: 5}); err != nil || result.TotalCount != 0 || len(result.Projects) != 0 || result.NextOffset != 0 {
+		t.Fatalf("ListProjects empty result=%#v err=%v", result, err)
+	}
+	if _, err := store.GetProject(ctx, "missing-project"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetProject missing err=%v, want not found", err)
+	}
+	if _, err := store.GetProjectRevision(ctx, project.ID, 999); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetProjectRevision missing err=%v, want not found", err)
+	}
 	if got, found, err := store.GetProjectIfExists(ctx, project.ID, false); err != nil || !found || got.ID != project.ID {
 		t.Fatalf("GetProjectIfExists got=%#v found=%v err=%v", got, found, err)
+	}
+	if _, found, err := store.GetProjectIfExists(ctx, "missing-project", false); err != nil || found {
+		t.Fatalf("GetProjectIfExists missing found=%v err=%v", found, err)
 	}
 
 	agent, err := store.UpsertProjectAgent(ctx, domain.ProjectAgentRecord{
@@ -135,6 +162,9 @@ func testConfigStoreProjectCRUDCoverageWorkflows(t *testing.T) {
 	}
 	if got, err := store.GetProjectAgent(ctx, project.ID, "worker"); err != nil || got.ManagedAgentID != "managed-agent-1" {
 		t.Fatalf("GetProjectAgent got=%#v err=%v", got, err)
+	}
+	if _, err := store.GetProjectAgent(ctx, project.ID, "missing-agent"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetProjectAgent missing err=%v, want not found", err)
 	}
 	if agents, err := store.ListProjectAgents(ctx, project.ID); err != nil || len(agents) != 1 {
 		t.Fatalf("ListProjectAgents agents=%#v err=%v", agents, err)
@@ -152,8 +182,17 @@ func testConfigStoreProjectCRUDCoverageWorkflows(t *testing.T) {
 	if scheduler, err = store.SetProjectSchedulerEnabled(ctx, project.ID, scheduler.SchedulerID, false); err != nil || scheduler.Enabled {
 		t.Fatalf("SetProjectSchedulerEnabled scheduler=%#v err=%v", scheduler, err)
 	}
+	if _, err := store.SetProjectSchedulerEnabled(ctx, "", scheduler.SchedulerID, true); err == nil {
+		t.Fatalf("SetProjectSchedulerEnabled empty project returned nil error")
+	}
+	if _, err := store.SetProjectSchedulerEnabled(ctx, project.ID, "missing-scheduler", true); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("SetProjectSchedulerEnabled missing err=%v, want not found", err)
+	}
 	if got, err := store.GetProjectScheduler(ctx, project.ID, scheduler.SchedulerID); err != nil || got.SchedulerID != scheduler.SchedulerID {
 		t.Fatalf("GetProjectScheduler got=%#v err=%v", got, err)
+	}
+	if _, err := store.GetProjectScheduler(ctx, project.ID, "missing-scheduler"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetProjectScheduler missing err=%v, want not found", err)
 	}
 	if schedulers, err := store.ListProjectSchedulers(ctx, project.ID); err != nil || len(schedulers) != 1 {
 		t.Fatalf("ListProjectSchedulers schedulers=%#v err=%v", schedulers, err)
@@ -179,11 +218,20 @@ func testConfigStoreProjectCRUDCoverageWorkflows(t *testing.T) {
 	if run, err = store.UpdateProjectRun(ctx, run); err != nil || run.SessionID != "session-1" {
 		t.Fatalf("UpdateProjectRun run=%#v err=%v", run, err)
 	}
+	if _, err := store.UpdateProjectRun(ctx, domain.ProjectRunRecord{RunID: "missing-run", ProjectID: project.ID, ResultJSON: "{}"}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("UpdateProjectRun missing err=%v, want not found", err)
+	}
 	if got, err := store.GetProjectRun(ctx, run.RunID); err != nil || got.RunID != run.RunID {
 		t.Fatalf("GetProjectRun got=%#v err=%v", got, err)
 	}
+	if _, err := store.GetProjectRun(ctx, "missing-run"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetProjectRun missing err=%v, want not found", err)
+	}
 	if runs, err := store.ListProjectRuns(ctx, project.ID, 10); err != nil || len(runs) != 1 {
 		t.Fatalf("ListProjectRuns runs=%#v err=%v", runs, err)
+	}
+	if runs, err := store.ListProjectRunsByOptions(ctx, domain.ProjectRunListOptions{Limit: 500, Offset: -1}); err != nil || len(runs) != 1 {
+		t.Fatalf("ListProjectRunsByOptions unfiltered runs=%#v err=%v", runs, err)
 	}
 	if runs, err := store.ListProjectRunsByOptions(ctx, domain.ProjectRunListOptions{ProjectID: project.ID, AgentName: "worker", SessionID: "session-1", SchedulerID: scheduler.SchedulerID, Status: domain.ProjectRunStatusRunning, Source: domain.ProjectRunSourceAPI, Limit: 10}); err != nil || len(runs) != 1 {
 		t.Fatalf("ListProjectRunsByOptions runs=%#v err=%v", runs, err)
@@ -194,9 +242,18 @@ func testConfigStoreProjectCRUDCoverageWorkflows(t *testing.T) {
 	if runs, err := store.ListProjectRunsForSession(ctx, "session-1"); err != nil || len(runs) != 1 {
 		t.Fatalf("ListProjectRunsForSession runs=%#v err=%v", runs, err)
 	}
+	if _, err := store.MarkProjectRemoved(ctx, ""); err == nil {
+		t.Fatalf("MarkProjectRemoved empty project returned nil error")
+	}
+	if _, err := store.MarkProjectRemoved(ctx, "missing-project"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("MarkProjectRemoved missing err=%v, want not found", err)
+	}
 	removed, err := store.MarkProjectRemoved(ctx, project.ID)
 	if err != nil || removed.RemovedAt.IsZero() {
 		t.Fatalf("MarkProjectRemoved removed=%#v err=%v", removed, err)
+	}
+	if removedAgain, err := store.MarkProjectRemoved(ctx, project.ID); err != nil || removedAgain.RemovedAt.IsZero() {
+		t.Fatalf("MarkProjectRemoved already removed=%#v err=%v", removedAgain, err)
 	}
 	if _, err := store.GetProject(ctx, project.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("GetProject after remove err=%v, want not found", err)
@@ -254,6 +311,17 @@ func testConfigStoreTopicEventCoverageWorkflows(t *testing.T) {
 	if err != nil || duplicate.ID != event.ID {
 		t.Fatalf("idempotent CreateEvent duplicate=%#v err=%v", duplicate, err)
 	}
+	if _, err := store.CreateEvent(ctx, domain.TopicEventRecord{
+		ID:             "event-conflict",
+		Topic:          event.Topic,
+		Source:         domain.TopicEventSourceWebhook,
+		CorrelationID:  "corr-1",
+		IdempotencyKey: event.IdempotencyKey,
+		PayloadJSON:    `{"branch":"other"}`,
+		DispatchStatus: domain.TopicEventDispatchPending,
+	}); err == nil {
+		t.Fatalf("CreateEvent idempotency conflict returned nil error")
+	}
 	child, err := store.CreateEvent(ctx, domain.TopicEventRecord{
 		ID:             "event-child",
 		Topic:          event.Topic,
@@ -269,8 +337,17 @@ func testConfigStoreTopicEventCoverageWorkflows(t *testing.T) {
 	if got, err := store.GetEvent(ctx, event.ID); err != nil || got.ID != event.ID {
 		t.Fatalf("GetEvent got=%#v err=%v", got, err)
 	}
+	if _, err := store.GetEvent(ctx, ""); err == nil {
+		t.Fatalf("GetEvent empty id returned nil error")
+	}
+	if _, err := store.GetEvent(ctx, "missing"); err == nil {
+		t.Fatalf("GetEvent missing id returned nil error")
+	}
 	if got, found, err := store.FindEventByIdempotencyKey(ctx, event.Topic, event.IdempotencyKey); err != nil || !found || got.ID != event.ID {
 		t.Fatalf("FindEventByIdempotencyKey got=%#v found=%v err=%v", got, found, err)
+	}
+	if got, found, err := store.FindEventByIdempotencyKey(ctx, "", event.IdempotencyKey); err != nil || found || got.ID != "" {
+		t.Fatalf("FindEventByIdempotencyKey empty topic got=%#v found=%v err=%v", got, found, err)
 	}
 	if pending, err := store.ListPendingEvents(ctx, 10); err != nil || len(pending) != 2 {
 		t.Fatalf("ListPendingEvents pending=%#v err=%v", pending, err)
@@ -278,16 +355,43 @@ func testConfigStoreTopicEventCoverageWorkflows(t *testing.T) {
 	if events, err := store.ListEvents(ctx, domain.TopicEventFilter{Topic: event.Topic, CorrelationID: "corr-1", Limit: 10}); err != nil || len(events) != 2 {
 		t.Fatalf("ListEvents events=%#v err=%v", events, err)
 	}
+	if events, err := store.ListEvents(ctx, domain.TopicEventFilter{Topic: event.Topic, AfterSequence: event.Sequence, DispatchStatus: domain.TopicEventDispatchPending, Limit: 1000}); err != nil || len(events) != 1 {
+		t.Fatalf("ListEvents filtered events=%#v err=%v", events, err)
+	}
+	if _, err := store.ListEvents(ctx, domain.TopicEventFilter{}); err == nil {
+		t.Fatalf("ListEvents empty filter returned nil error")
+	}
+	if _, err := store.ListEvents(ctx, domain.TopicEventFilter{Topic: "bad topic"}); err == nil {
+		t.Fatalf("ListEvents invalid topic returned nil error")
+	}
 	if err := store.UpdateEventPayload(ctx, event.ID, `{"branch":"dev"}`); err != nil {
 		t.Fatalf("UpdateEventPayload returned error: %v", err)
+	}
+	if err := store.UpdateEventPayload(ctx, "", `{}`); err == nil {
+		t.Fatalf("UpdateEventPayload empty id returned nil error")
+	}
+	if err := store.UpdateEventPayload(ctx, event.ID, " "); err == nil {
+		t.Fatalf("UpdateEventPayload empty payload returned nil error")
+	}
+	if err := store.UpdateEventPayload(ctx, "missing", `{}`); err == nil {
+		t.Fatalf("UpdateEventPayload missing event returned nil error")
 	}
 	dispatchable, err := store.ListDispatchableEvents(ctx, now, 10)
 	if err != nil || len(dispatchable) != 2 {
 		t.Fatalf("ListDispatchableEvents events=%#v err=%v", dispatchable, err)
 	}
+	if _, err := store.ClaimEvent(ctx, "", "claim", now, now.Add(time.Minute)); err == nil {
+		t.Fatalf("ClaimEvent empty id returned nil error")
+	}
 	claimed, err := store.ClaimEvent(ctx, event.ID, "claim-1", now, now.Add(time.Minute))
 	if err != nil || !claimed {
 		t.Fatalf("ClaimEvent claimed=%v err=%v", claimed, err)
+	}
+	if claimed, err := store.ClaimEvent(ctx, event.ID, "claim-ignored", now, now.Add(time.Minute)); err != nil || claimed {
+		t.Fatalf("ClaimEvent active claim claimed=%v err=%v", claimed, err)
+	}
+	if err := store.ReleaseEventClaim(ctx, "", "claim", domain.TopicEventDispatchRetrying, "", time.Time{}); err == nil {
+		t.Fatalf("ReleaseEventClaim empty id returned nil error")
 	}
 	if err := store.ReleaseEventClaim(ctx, event.ID, "claim-1", domain.TopicEventDispatchRetrying, "retry", now.Add(time.Millisecond)); err != nil {
 		t.Fatalf("ReleaseEventClaim returned error: %v", err)
@@ -299,12 +403,24 @@ func testConfigStoreTopicEventCoverageWorkflows(t *testing.T) {
 	if err := store.MarkEventPublished(ctx, event.ID, "claim-2", now); err != nil {
 		t.Fatalf("MarkEventPublished returned error: %v", err)
 	}
+	if err := store.MarkEventPublished(ctx, "missing", "claim-missing", time.Time{}); err == nil {
+		t.Fatalf("MarkEventPublished missing event returned nil error")
+	}
+	if err := store.MarkEventPublished(ctx, event.ID, "wrong-claim", time.Time{}); err != nil {
+		t.Fatalf("MarkEventPublished stale claim returned error: %v", err)
+	}
 	claimed, err = store.ClaimEvent(ctx, child.ID, "claim-child", now, now.Add(time.Minute))
 	if err != nil || !claimed {
 		t.Fatalf("ClaimEvent child claimed=%v err=%v", claimed, err)
 	}
+	if err := store.MarkEventNoSubscriber(ctx, "", "claim-child", time.Time{}); err == nil {
+		t.Fatalf("MarkEventNoSubscriber empty id returned nil error")
+	}
 	if err := store.MarkEventNoSubscriber(ctx, child.ID, "claim-child", now); err != nil {
 		t.Fatalf("MarkEventNoSubscriber returned error: %v", err)
+	}
+	if err := store.MarkEventNoSubscriber(ctx, "missing", "claim-missing", time.Time{}); err == nil {
+		t.Fatalf("MarkEventNoSubscriber missing event returned nil error")
 	}
 	if ids, err := store.ListDescendantEventIDs(ctx, event.ID, 10); err != nil || len(ids) != 2 {
 		t.Fatalf("ListDescendantEventIDs ids=%#v err=%v", ids, err)
@@ -313,11 +429,17 @@ func testConfigStoreTopicEventCoverageWorkflows(t *testing.T) {
 	if err := store.UpsertEventDelivery(ctx, domain.EventDelivery{EventID: event.ID, LoaderID: "loader-1", TriggerID: "trigger-1", RunID: "run-1", Status: domain.EventDeliveryStatusRunSucceeded}); err != nil {
 		t.Fatalf("UpsertEventDelivery returned error: %v", err)
 	}
+	if err := store.UpsertEventDelivery(ctx, domain.EventDelivery{}); err == nil {
+		t.Fatalf("UpsertEventDelivery empty delivery returned nil error")
+	}
 	if deliveries, err := store.ListEventDeliveries(ctx, []string{"", event.ID, event.ID}); err != nil || len(deliveries) != 1 {
 		t.Fatalf("ListEventDeliveries deliveries=%#v err=%v", deliveries, err)
 	}
 	if err := store.AddEventSessionLink(ctx, domain.EventSessionLink{EventID: event.ID, SessionID: "session-1", Relation: "created", LoaderID: "loader-1", RunID: "run-1", TriggerID: "trigger-1", LoaderEventID: "loader-event-1"}); err != nil {
 		t.Fatalf("AddEventSessionLink returned error: %v", err)
+	}
+	if err := store.AddEventSessionLink(ctx, domain.EventSessionLink{}); err == nil {
+		t.Fatalf("AddEventSessionLink empty link returned nil error")
 	}
 	if links, err := store.ListEventSessionLinks(ctx, []string{event.ID}); err != nil || len(links) != 1 {
 		t.Fatalf("ListEventSessionLinks links=%#v err=%v", links, err)
@@ -478,11 +600,20 @@ func testConfigStoreCRUDCoverageWorkflows(t *testing.T) {
 	if err := store.SetLoaderTriggerEnabled(ctx, loader.Summary.ID, "interval", false); err != nil {
 		t.Fatalf("SetLoaderTriggerEnabled returned error: %v", err)
 	}
+	if err := store.SetLoaderTriggerEnabled(ctx, loader.Summary.ID, "interval", true); err != nil {
+		t.Fatalf("SetLoaderTriggerEnabled true returned error: %v", err)
+	}
+	if err := store.SetLoaderTriggerEnabled(ctx, loader.Summary.ID, "missing", true); err == nil {
+		t.Fatalf("SetLoaderTriggerEnabled missing trigger returned nil error")
+	}
 	if err := store.MarkLoaderTriggerFired(ctx, loader.Summary.ID, "interval", time.Now().UTC(), time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatalf("MarkLoaderTriggerFired returned error: %v", err)
 	}
 	if err := store.UpdateLoaderLastError(ctx, loader.Summary.ID, "last error"); err != nil {
 		t.Fatalf("UpdateLoaderLastError returned error: %v", err)
+	}
+	if err := store.UpdateLoaderLastError(ctx, "", "last error"); err == nil {
+		t.Fatalf("UpdateLoaderLastError empty id returned nil error")
 	}
 	loader.Summary.Description = "updated"
 	if _, err := store.UpdateLoader(ctx, loader); err != nil {
@@ -515,14 +646,28 @@ func testConfigStoreCRUDCoverageWorkflows(t *testing.T) {
 	if err := store.UpdateLoaderRun(ctx, run); err != nil {
 		t.Fatalf("UpdateLoaderRun returned error: %v", err)
 	}
+	missingRun := run
+	missingRun.ID = "missing"
+	if err := store.UpdateLoaderRun(ctx, missingRun); err == nil {
+		t.Fatalf("UpdateLoaderRun missing run returned nil error")
+	}
 	if _, err := store.GetLoaderRun(ctx, loader.Summary.ID, run.ID); err != nil {
 		t.Fatalf("GetLoaderRun returned error: %v", err)
+	}
+	if _, err := store.GetLoaderRun(ctx, loader.Summary.ID, "missing"); err == nil {
+		t.Fatalf("GetLoaderRun missing run returned nil error")
 	}
 	if runs, err := store.ListLoaderRuns(ctx, loader.Summary.ID, 10); err != nil || len(runs) != 1 {
 		t.Fatalf("ListLoaderRuns runs=%#v err=%v", runs, err)
 	}
+	if runs, err := store.ListLoaderRuns(ctx, loader.Summary.ID, 0); err != nil || len(runs) != 1 {
+		t.Fatalf("ListLoaderRuns default limit runs=%#v err=%v", runs, err)
+	}
 	if runs, err := store.ListRecentLoaderRuns(ctx, 10); err != nil || len(runs) != 1 {
 		t.Fatalf("ListRecentLoaderRuns runs=%#v err=%v", runs, err)
+	}
+	if runs, err := store.ListRecentLoaderRuns(ctx, 0); err != nil || len(runs) != 1 {
+		t.Fatalf("ListRecentLoaderRuns default limit runs=%#v err=%v", runs, err)
 	}
 	if err := store.AddLoaderEvent(ctx, domain.LoaderEvent{ID: "event-1", LoaderID: loader.Summary.ID, RunID: run.ID, Type: "loader.test", Level: "info", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("AddLoaderEvent returned error: %v", err)
@@ -539,11 +684,23 @@ func testConfigStoreCRUDCoverageWorkflows(t *testing.T) {
 	if err := store.DeleteLoaderState(ctx, loader.Summary.ID, "key"); err != nil {
 		t.Fatalf("DeleteLoaderState returned error: %v", err)
 	}
+	if value, found, err := store.GetLoaderState(ctx, loader.Summary.ID, "key"); err != nil || found || value != "" {
+		t.Fatalf("GetLoaderState deleted value=%q found=%v err=%v", value, found, err)
+	}
+	if err := store.SetLoaderState(ctx, "", "key", `{}`); err == nil {
+		t.Fatalf("SetLoaderState empty loader returned nil error")
+	}
 	if err := store.UpsertLoaderBinding(ctx, domain.LoaderBinding{LoaderID: loader.Summary.ID, SessionID: "session-1"}); err != nil {
 		t.Fatalf("UpsertLoaderBinding returned error: %v", err)
 	}
 	if binding, found, err := store.GetLoaderBinding(ctx, loader.Summary.ID); err != nil || !found || binding.SessionID != "session-1" {
 		t.Fatalf("GetLoaderBinding binding=%#v found=%v err=%v", binding, found, err)
+	}
+	if binding, found, err := store.GetLoaderBinding(ctx, "missing"); err != nil || found || binding.LoaderID != "" {
+		t.Fatalf("GetLoaderBinding missing binding=%#v found=%v err=%v", binding, found, err)
+	}
+	if err := store.UpsertLoaderBinding(ctx, domain.LoaderBinding{}); err == nil {
+		t.Fatalf("UpsertLoaderBinding empty binding returned nil error")
 	}
 	if disabled, err := store.DisableLoadersByDefaultAgent(ctx, agent.ID); err != nil || disabled < 1 {
 		t.Fatalf("DisableLoadersByDefaultAgent disabled=%d err=%v", disabled, err)
@@ -964,4 +1121,50 @@ func newMemoryDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
+}
+
+func TestConfigStoreExportedSchemaHelpers(t *testing.T) {
+	ctx := context.Background()
+	db := newMemoryDB(t)
+	if _, err := db.ExecContext(ctx, `CREATE TABLE helper_columns (name TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create helper table: %v", err)
+	}
+	if err := EnsureColumn(ctx, db, "helper_columns", "value", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		t.Fatalf("EnsureColumn add returned error: %v", err)
+	}
+	if err := EnsureColumn(ctx, db, "helper_columns", "value", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		t.Fatalf("EnsureColumn existing returned error: %v", err)
+	}
+	types, err := TableColumnTypes(ctx, db, "helper_columns")
+	if err != nil {
+		t.Fatalf("TableColumnTypes returned error: %v", err)
+	}
+	if types["value"] != "TEXT" {
+		t.Fatalf("column types = %#v", types)
+	}
+
+	store := FromDB(db)
+	if err := store.InitCoreSchema(ctx); err != nil {
+		t.Fatalf("InitCoreSchema returned error: %v", err)
+	}
+	if _, err := store.ReplaceGlobalEnv(ctx, []domain.SessionEnvVar{{Name: "A", Value: "1", Secret: true}}); err != nil {
+		t.Fatalf("ReplaceGlobalEnv returned error: %v", err)
+	}
+	if _, err := store.CreateWorkspaceConfig(ctx, domain.WorkspaceConfig{ID: "workspace-1", Name: "Workspace", Type: "file", ConfigJSON: `{}`}); err != nil {
+		t.Fatalf("CreateWorkspaceConfig returned error: %v", err)
+	}
+	if err := store.RebuildGlobalEnvTable(ctx); err != nil {
+		t.Fatalf("RebuildGlobalEnvTable returned error: %v", err)
+	}
+	if err := store.RebuildWorkspaceConfigTable(ctx); err != nil {
+		t.Fatalf("RebuildWorkspaceConfigTable returned error: %v", err)
+	}
+	env, err := store.ListGlobalEnv(ctx)
+	if err != nil || len(env) != 1 || env[0].Name != "A" || !env[0].Secret {
+		t.Fatalf("global env after rebuild = %#v err=%v", env, err)
+	}
+	workspace, err := store.GetWorkspaceConfig(ctx, "workspace-1")
+	if err != nil || workspace.Name != "Workspace" {
+		t.Fatalf("workspace after rebuild = %#v err=%v", workspace, err)
+	}
 }

@@ -123,8 +123,21 @@ func TestNormalizeHelpers(t *testing.T) {
 	if got, ok := DomainType(DomainSessionEphemeralState); !ok || got != CacheTypeSession {
 		t.Fatalf("DomainType = %q, %v", got, ok)
 	}
-	if got, ok := TypeDomain(CacheTypeOCI); !ok || got != DomainOCIImageStore {
-		t.Fatalf("TypeDomain = %q, %v", got, ok)
+	for _, tc := range []struct {
+		cacheType CacheType
+		domain    Domain
+	}{
+		{CacheTypeOCI, DomainOCIImageStore},
+		{CacheTypeMaterialized, DomainMaterializedImageCache},
+		{CacheTypeRuntime, DomainRuntimeDerivedCache},
+		{CacheTypeSession, DomainSessionEphemeralState},
+	} {
+		if got, ok := TypeDomain(tc.cacheType); !ok || got != tc.domain {
+			t.Fatalf("TypeDomain(%q) = %q, %v", tc.cacheType, got, ok)
+		}
+	}
+	if got, ok := TypeDomain(CacheType("bad")); ok || got != "" {
+		t.Fatalf("TypeDomain bad = %q, %v", got, ok)
 	}
 }
 

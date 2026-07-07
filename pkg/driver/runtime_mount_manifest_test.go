@@ -513,3 +513,43 @@ func TestLoadRuntimeMountManifestValidatesContent(t *testing.T) {
 		t.Fatalf("loadRuntimeMountManifest accepted relative host path")
 	}
 }
+
+func TestRuntimeMountManifestExportedWrappers(t *testing.T) {
+	root := t.TempDir()
+	session := testRuntimeMountSession(root)
+	config := testRuntimeMountConfig()
+
+	dockerManifest, err := PrepareRuntimeMountManifest(config, session, RuntimeDriverDocker)
+	if err != nil {
+		t.Fatalf("PrepareRuntimeMountManifest returned error: %v", err)
+	}
+	if dockerManifest.Driver != RuntimeDriverDocker {
+		t.Fatalf("docker manifest driver = %q", dockerManifest.Driver)
+	}
+	loaded, err := LoadRuntimeMountManifest(session, RuntimeDriverDocker)
+	if err != nil {
+		t.Fatalf("LoadRuntimeMountManifest returned error: %v", err)
+	}
+	if len(loaded.Mounts) != len(dockerManifest.Mounts) {
+		t.Fatalf("loaded mount count = %d, want %d", len(loaded.Mounts), len(dockerManifest.Mounts))
+	}
+
+	boxliteManifest, err := PrepareRuntimeMountManifest(config, session, RuntimeDriverBoxlite)
+	if err != nil {
+		t.Fatalf("PrepareRuntimeMountManifest boxlite returned error: %v", err)
+	}
+	directoryManifest, err := LoadDirectoryRuntimeMountManifest(session, RuntimeDriverBoxlite)
+	if err != nil {
+		t.Fatalf("LoadDirectoryRuntimeMountManifest returned error: %v", err)
+	}
+	if boxliteManifest.Driver != RuntimeDriverBoxlite || len(directoryManifest.Mounts) != 1 {
+		t.Fatalf("boxlite manifest=%#v directory=%#v", boxliteManifest, directoryManifest)
+	}
+	built, err := BuildRuntimeMountManifest(config, session, RuntimeDriverBoxlite)
+	if err != nil {
+		t.Fatalf("BuildRuntimeMountManifest returned error: %v", err)
+	}
+	if built.Driver != RuntimeDriverBoxlite || len(built.Mounts) != 1 {
+		t.Fatalf("built manifest = %#v", built)
+	}
+}

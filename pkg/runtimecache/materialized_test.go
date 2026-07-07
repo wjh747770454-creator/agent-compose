@@ -156,6 +156,27 @@ func TestMaterializedScannerEmptyRoot(t *testing.T) {
 	}
 }
 
+func TestMaterializedWarningItemBuildsUnknownProtectedItem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "oci")
+	item := warningItem(path, KindMaterializedOCILayout, "stat failed")
+
+	if item.Domain != DomainMaterializedImageCache || item.Driver != DriverAll || item.Kind != KindMaterializedOCILayout {
+		t.Fatalf("warning item identity = %#v", item)
+	}
+	if item.Path != path || item.CacheID == "" {
+		t.Fatalf("warning item path/id = %#v", item)
+	}
+	if item.Status != StatusUnknown || item.Removable {
+		t.Fatalf("warning item protection = %#v", item)
+	}
+	if len(item.Warnings) != 1 || item.Warnings[0] != "stat failed" {
+		t.Fatalf("warning item warnings = %#v", item.Warnings)
+	}
+	if len(item.BlockedReasons) != 1 || !strings.Contains(item.BlockedReasons[0], "unknown") {
+		t.Fatalf("warning item blocked reasons = %#v", item.BlockedReasons)
+	}
+}
+
 func newRuntimeCacheImageCache(t *testing.T) *imagecache.Cache {
 	t.Helper()
 	cache, err := imagecache.New(imagecache.Config{Root: filepath.Join(t.TempDir(), "images")})

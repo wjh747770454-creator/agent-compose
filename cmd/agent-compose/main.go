@@ -605,6 +605,69 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	}
 	rmCmd.Flags().BoolVar(&removeSandboxOptions.Force, "force", false, "Force remove running sandboxes")
 
+	sandboxPSOptions := composePSOptions{}
+	sandboxLSCmd := &cobra.Command{
+		Use:   "ls",
+		Short: "List project sandboxes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runComposePSCommand(cmd, options, sandboxPSOptions)
+		},
+	}
+	sandboxLSCmd.Flags().BoolVarP(&sandboxPSOptions.All, "all", "a", false, "Show all recognizable sandboxes")
+	sandboxLSCmd.Flags().StringVar(&sandboxPSOptions.Status, "status", "", "Filter sandboxes by status, comma-separated")
+	sandboxLSCmd.Flags().BoolVar(&sandboxPSOptions.Verbose, "verbose", false, "Show more sandbox details")
+
+	sandboxStopCmd := &cobra.Command{
+		Use:   "stop <sandbox> [<sandbox N>]",
+		Short: "Stop one or more sandboxes",
+		Args:  sandboxActionArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runComposeSandboxActionCommand(cmd, options, "stop", "stopped", args)
+		},
+	}
+
+	sandboxResumeCmd := &cobra.Command{
+		Use:   "resume <sandbox> [<sandbox N>]",
+		Short: "Resume one or more sandboxes",
+		Args:  sandboxActionArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runComposeSandboxActionCommand(cmd, options, "resume", "resumed", args)
+		},
+	}
+
+	sandboxRemoveOptions := composeSandboxRemoveOptions{}
+	sandboxRMCmd := &cobra.Command{
+		Use:   "rm <sandbox> [<sandbox N>]",
+		Short: "Remove one or more sandboxes",
+		Args:  sandboxActionArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runComposeSandboxRemoveCommand(cmd, options, sandboxRemoveOptions, args)
+		},
+	}
+	sandboxRMCmd.Flags().BoolVar(&sandboxRemoveOptions.Force, "force", false, "Force remove running sandboxes")
+
+	sandboxPruneOptions := composeSandboxPruneOptions{}
+	sandboxPruneCmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Prune stopped or failed sandboxes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runComposeSandboxPruneCommand(cmd, options, sandboxPruneOptions)
+		},
+	}
+	addSandboxPruneFlags(sandboxPruneCmd, &sandboxPruneOptions)
+
+	sandboxCmd := &cobra.Command{
+		Use:   "sandbox",
+		Short: "Manage project sandboxes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	sandboxCmd.AddCommand(sandboxLSCmd, sandboxStopCmd, sandboxResumeCmd, sandboxRMCmd, sandboxPruneCmd)
+
 	execOptions := composeExecOptions{}
 	execCmd := &cobra.Command{
 		Use:   "exec <sandbox> [command] [args...]",
@@ -805,7 +868,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 		},
 	}
 
-	root.AddCommand(daemonCmd, versionCmd, statusCmd, configCmd, listCmd, upCmd, downCmd, runCmd, schedulerCmd, logsCmd, psCmd, statsCmd, stopCmd, resumeCmd, rmCmd, execCmd, imagesCmd, cacheCmd, imageCmd, pullCmd, buildCmd, rmiCmd, inspectCmd)
+	root.AddCommand(daemonCmd, versionCmd, statusCmd, configCmd, listCmd, upCmd, downCmd, runCmd, schedulerCmd, logsCmd, psCmd, statsCmd, sandboxCmd, stopCmd, resumeCmd, rmCmd, execCmd, imagesCmd, cacheCmd, imageCmd, pullCmd, buildCmd, rmiCmd, inspectCmd)
 	return root
 }
 
@@ -884,6 +947,14 @@ type composeSandboxActionResult struct {
 
 type composeSandboxRemoveOptions struct {
 	Force bool
+}
+
+type composeSandboxPruneOptions struct {
+	Status    string
+	Agent     string
+	Driver    string
+	OlderThan string
+	Force     bool
 }
 
 type composeImageListOptions struct {
@@ -968,6 +1039,14 @@ func addCachePruneFlags(cmd *cobra.Command, options *composeCachePruneOptions) {
 	cmd.Flags().StringVar(&options.OlderThan, "older-than", "", "Only match caches older than a duration such as 7d or 24h")
 	cmd.Flags().BoolVar(&options.IncludeReferenced, "include-referenced", false, "Allow referenced caches to be removed")
 	cmd.Flags().BoolVar(&options.Force, "force", false, "Actually remove matched caches")
+}
+
+func addSandboxPruneFlags(cmd *cobra.Command, options *composeSandboxPruneOptions) {
+	cmd.Flags().StringVar(&options.Status, "status", "", "Filter sandboxes by status, comma-separated")
+	cmd.Flags().StringVar(&options.Agent, "agent", "", "Filter sandboxes by agent name")
+	cmd.Flags().StringVar(&options.Driver, "driver", "", "Filter sandboxes by driver: docker, boxlite, or microsandbox")
+	cmd.Flags().StringVar(&options.OlderThan, "older-than", "", "Only match sandboxes older than a duration such as 7d or 24h")
+	cmd.Flags().BoolVar(&options.Force, "force", false, "Actually remove matched sandboxes")
 }
 
 func addCacheRemoveFlags(cmd *cobra.Command, options *composeCacheRemoveOptions) {
@@ -1254,6 +1333,154 @@ func runComposeSandboxRemoveCommand(cmd *cobra.Command, cli cliOptions, options 
 		}
 	}
 	return nil
+}
+
+func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options composeSandboxPruneOptions) error {
+	statusFilter, err := sandboxPruneStatusFilter(options.Status)
+	if err != nil {
+		return commandExitError{Code: exitCodeUsage, Err: err}
+	}
+	driverFilter, err := sandboxPruneDriverFilterValue(options.Driver)
+	if err != nil {
+		return commandExitError{Code: exitCodeUsage, Err: err}
+	}
+	options.Driver = driverFilter
+	var olderThanSeconds uint64
+	if strings.TrimSpace(options.OlderThan) != "" {
+		olderThanSeconds, err = parseOlderThanSeconds(options.OlderThan)
+		if err != nil {
+			return commandExitError{Code: exitCodeUsage, Err: err}
+		}
+	}
+	composePath, normalized, projectID, err := resolveComposeProject(cli)
+	if err != nil {
+		return err
+	}
+	clients, err := newCLIServiceClients(cli)
+	if err != nil {
+		return err
+	}
+	project, err := clients.project.GetProject(cmd.Context(), connect.NewRequest(&agentcomposev2.GetProjectRequest{
+		Project: &agentcomposev2.ProjectRef{ProjectId: projectID},
+	}))
+	if err != nil {
+		return commandExitErrorForComposeProject(fmt.Errorf("get project %s: %w", normalized.Name, err), "sandbox prune", normalized.Name, composePath)
+	}
+	psOutput, err := composePSOutputFromProject(cmd.Context(), clients, project.Msg.GetProject(), composePSOptions{All: true})
+	if err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("build sandbox prune candidates for project %s: %w", normalized.Name, err))
+	}
+	output := composeSandboxPruneDryRunOutput(psOutput.Sandboxes, statusFilter, options, olderThanSeconds)
+	if options.Force {
+		output.DryRun = false
+		for _, sandbox := range output.Matched {
+			if err := removeSandbox(cmd.Context(), clients.sandbox, sandbox.Sandbox, false); err != nil {
+				output.Skipped = append(output.Skipped, composeSandboxPruneSkipped{
+					Sandbox:   sandbox.Sandbox,
+					Agent:     sandbox.Agent,
+					Status:    sandbox.Status,
+					Driver:    sandbox.Driver,
+					UpdatedAt: firstNonEmptyString(sandbox.UpdatedAt, sandbox.CreatedAt),
+					Reason:    fmt.Sprintf("remove failed: %s", err),
+				})
+				continue
+			}
+			output.Removed = append(output.Removed, sandbox.Sandbox)
+		}
+	}
+	if err := writeSandboxPruneOutput(cmd.OutOrStdout(), cli.JSON, output); err != nil {
+		return err
+	}
+	if len(output.Skipped) > 0 {
+		return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("sandbox prune skipped %d sandbox(es)", len(output.Skipped))}
+	}
+	return nil
+}
+
+func composeSandboxPruneDryRunOutput(sandboxes []composePSSandboxOutput, statusFilter map[string]bool, options composeSandboxPruneOptions, olderThanSeconds uint64) composeSandboxPruneOutput {
+	output := composeSandboxPruneOutput{
+		DryRun:  true,
+		Matched: []composePSSandboxOutput{},
+		Removed: []string{},
+		Skipped: []composeSandboxPruneSkipped{},
+	}
+	agentFilter := strings.ToLower(strings.TrimSpace(options.Agent))
+	driverFilter := strings.ToLower(strings.TrimSpace(options.Driver))
+	var cutoff time.Time
+	if olderThanSeconds > 0 {
+		cutoff = time.Now().UTC().Add(-time.Duration(olderThanSeconds) * time.Second)
+	}
+	for _, sandbox := range sandboxes {
+		status := strings.ToLower(strings.TrimSpace(sandbox.Status))
+		if !statusFilter[status] {
+			continue
+		}
+		if agentFilter != "" && strings.ToLower(strings.TrimSpace(sandbox.Agent)) != agentFilter {
+			continue
+		}
+		if driverFilter != "" && strings.ToLower(strings.TrimSpace(sandbox.Driver)) != driverFilter {
+			continue
+		}
+		if !cutoff.IsZero() {
+			timestamp, _, err := sandboxPruneTimestamp(sandbox)
+			if err != nil {
+				output.Warnings = append(output.Warnings, fmt.Sprintf("sandbox %s skipped: %s", sandbox.Sandbox, err))
+				continue
+			}
+			if timestamp.After(cutoff) {
+				continue
+			}
+		}
+		output.Matched = append(output.Matched, sandbox)
+	}
+	return output
+}
+
+func sandboxPruneStatusFilter(value string) (map[string]bool, error) {
+	result := map[string]bool{}
+	for _, item := range strings.Split(value, ",") {
+		status := strings.ToLower(strings.TrimSpace(item))
+		if status == "" {
+			continue
+		}
+		if status == "running" || status == "pending" {
+			return nil, fmt.Errorf("sandbox prune cannot target %s sandboxes; use `agent-compose sandbox rm --force <sandbox>` for running sandboxes", status)
+		}
+		result[status] = true
+	}
+	if len(result) == 0 {
+		result["stopped"] = true
+		result["failed"] = true
+	}
+	return result, nil
+}
+
+func sandboxPruneDriverFilterValue(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return "", nil
+	case "docker", "boxlite", "microsandbox":
+		return strings.ToLower(strings.TrimSpace(value)), nil
+	default:
+		return "", fmt.Errorf("invalid --driver %q: expected docker, boxlite, or microsandbox", value)
+	}
+}
+
+func sandboxPruneTimestamp(sandbox composePSSandboxOutput) (time.Time, string, error) {
+	source := "updated_at"
+	value := strings.TrimSpace(sandbox.UpdatedAt)
+	if value == "" {
+		source = "created_at"
+		value = strings.TrimSpace(sandbox.CreatedAt)
+	}
+	if value == "" {
+		return time.Time{}, source, fmt.Errorf("missing updated_at and created_at")
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, source, fmt.Errorf("invalid %s %q", source, value)
+	}
+	return parsed.UTC(), source, nil
 }
 
 func removeSandbox(ctx context.Context, client agentcomposev2connect.SandboxServiceClient, sandboxID string, force bool) error {
@@ -3181,6 +3408,23 @@ type composePSSandboxOutput struct {
 	Workspace string `json:"workspace,omitempty"`
 }
 
+type composeSandboxPruneOutput struct {
+	DryRun   bool                         `json:"dry_run"`
+	Matched  []composePSSandboxOutput     `json:"matched"`
+	Removed  []string                     `json:"removed"`
+	Skipped  []composeSandboxPruneSkipped `json:"skipped"`
+	Warnings []string                     `json:"warnings,omitempty"`
+}
+
+type composeSandboxPruneSkipped struct {
+	Sandbox   string `json:"sandbox"`
+	Agent     string `json:"agent,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Driver    string `json:"driver,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	Reason    string `json:"reason"`
+}
+
 type composeStatsOutput struct {
 	Sandbox          string              `json:"sandbox"`
 	Driver           string              `json:"driver"`
@@ -4524,6 +4768,97 @@ func writeCacheOperationOutput(out io.Writer, asJSON bool, output composeCacheOp
 	return writeStringListSection(out, "Warnings", output.Warnings)
 }
 
+func writeSandboxPruneOutput(out io.Writer, asJSON bool, output composeSandboxPruneOutput) error {
+	if asJSON {
+		data, err := json.MarshalIndent(output, "", "  ")
+		if err != nil {
+			return err
+		}
+		return writeCommandOutput(out, append(data, '\n'))
+	}
+	if output.DryRun {
+		if _, err := fmt.Fprintf(out, "Dry-run: %d matched, %d skipped, %d would be removed.\n", len(output.Matched), len(output.Skipped), len(output.Matched)); err != nil {
+			return err
+		}
+		if len(output.Matched) > 0 {
+			if _, err := fmt.Fprintln(out, "Use --force to remove matched sandboxes."); err != nil {
+				return err
+			}
+		}
+	} else {
+		if _, err := fmt.Fprintf(out, "Removed %d sandbox(es); %d matched, %d skipped.\n", len(output.Removed), len(output.Matched), len(output.Skipped)); err != nil {
+			return err
+		}
+	}
+	if len(output.Removed) > 0 {
+		if err := writeStringListSection(out, "Removed", output.Removed); err != nil {
+			return err
+		}
+	}
+	if len(output.Matched) > 0 {
+		if _, err := fmt.Fprintln(out, "Matched:"); err != nil {
+			return err
+		}
+		reason := "matched"
+		if output.DryRun {
+			reason = "would remove"
+		}
+		if err := writeSandboxPruneMatchedTable(out, output.Matched, reason); err != nil {
+			return err
+		}
+	}
+	if len(output.Skipped) > 0 {
+		if _, err := fmt.Fprintln(out, "Skipped:"); err != nil {
+			return err
+		}
+		if err := writeSandboxPruneSkippedTable(out, output.Skipped); err != nil {
+			return err
+		}
+	}
+	return writeStringListSection(out, "Warnings", output.Warnings)
+}
+
+func writeSandboxPruneMatchedTable(out io.Writer, sandboxes []composePSSandboxOutput, reason string) error {
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, "SANDBOX\tAGENT\tSTATUS\tDRIVER\tUPDATED\tREASON"); err != nil {
+		return err
+	}
+	for _, sandbox := range sandboxes {
+		updated := firstNonEmptyString(sandbox.UpdatedAt, sandbox.CreatedAt)
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			firstNonEmptyString(sandbox.Sandbox, "-"),
+			firstNonEmptyString(sandbox.Agent, "-"),
+			firstNonEmptyString(sandbox.Status, "-"),
+			firstNonEmptyString(sandbox.Driver, "-"),
+			firstNonEmptyString(updated, "-"),
+			reason,
+		); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
+func writeSandboxPruneSkippedTable(out io.Writer, skipped []composeSandboxPruneSkipped) error {
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, "SANDBOX\tAGENT\tSTATUS\tDRIVER\tUPDATED\tREASON"); err != nil {
+		return err
+	}
+	for _, item := range skipped {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			firstNonEmptyString(item.Sandbox, "-"),
+			firstNonEmptyString(item.Agent, "-"),
+			firstNonEmptyString(item.Status, "-"),
+			firstNonEmptyString(item.Driver, "-"),
+			firstNonEmptyString(item.UpdatedAt, "-"),
+			firstNonEmptyString(item.Reason, "-"),
+		); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
 func writeCacheOperationTable(out io.Writer, caches []composeCacheOutput) error {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(tw, "CACHE ID\tDRIVER\tTYPE\tSTATUS\tREMOVABLE\tREASON"); err != nil {
@@ -4968,7 +5303,7 @@ func cacheFilterFromPruneOptions(options composeCachePruneOptions) (*agentcompos
 		base.Status = status
 	}
 	if strings.TrimSpace(options.OlderThan) != "" {
-		seconds, err := parseCacheOlderThanSeconds(options.OlderThan)
+		seconds, err := parseOlderThanSeconds(options.OlderThan)
 		if err != nil {
 			return nil, err
 		}
@@ -5004,7 +5339,7 @@ func cachePruneShortcutStatus(options composeCachePruneOptions) (agentcomposev2.
 	return status, nil
 }
 
-func parseCacheOlderThanSeconds(value string) (uint64, error) {
+func parseOlderThanSeconds(value string) (uint64, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return 0, nil

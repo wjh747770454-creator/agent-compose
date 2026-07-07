@@ -138,6 +138,38 @@ func testModelBranchCoverageWorkflows(t *testing.T) {
 	if domain.DefaultLoaderName(now) == "" || !strings.Contains(domain.DefaultLoaderScript(), "scheduler.interval") || domain.LoaderSourceSHA("script") == "" || domain.LoaderTriggerStableID("kind", "topic", 1, "cb", 0) == "" {
 		t.Fatalf("loader default/hash helpers returned empty values")
 	}
+	if err := domain.ValidateTopicEventName("runtime.topic-1"); err != nil {
+		t.Fatalf("ValidateTopicEventName returned error: %v", err)
+	}
+	for _, topic := range []string{" ", strings.Repeat("a", 129), "bad topic"} {
+		if err := domain.ValidateTopicEventName(topic); err == nil {
+			t.Fatalf("ValidateTopicEventName(%q) returned nil error", topic)
+		}
+	}
+	for _, source := range []string{domain.TopicEventSourceWebhook, " LOADER ", domain.TopicEventSourceSystem} {
+		if domain.NormalizeTopicEventSource(source) == "" {
+			t.Fatalf("NormalizeTopicEventSource(%q) returned empty", source)
+		}
+	}
+	if domain.NormalizeTopicEventSource("bad") != "" {
+		t.Fatalf("NormalizeTopicEventSource bad returned non-empty")
+	}
+	for _, status := range []string{"", domain.TopicEventDispatchPending, domain.TopicEventDispatchPublishing, domain.TopicEventDispatchPublishedToBus, domain.TopicEventDispatchNoSubscriber, domain.TopicEventDispatchRetrying, domain.TopicEventDispatchDeadLetter} {
+		if domain.NormalizeTopicEventDispatchStatus(status) == "" {
+			t.Fatalf("NormalizeTopicEventDispatchStatus(%q) returned empty", status)
+		}
+	}
+	if domain.NormalizeTopicEventDispatchStatus("bad") != "" {
+		t.Fatalf("NormalizeTopicEventDispatchStatus bad returned non-empty")
+	}
+	for _, status := range []string{domain.EventDeliveryStatusMatched, domain.EventDeliveryStatusRunStarted, domain.EventDeliveryStatusRunSucceeded, domain.EventDeliveryStatusRunFailed, domain.EventDeliveryStatusSkipped} {
+		if domain.NormalizeEventDeliveryStatus(status) != status {
+			t.Fatalf("NormalizeEventDeliveryStatus(%q) changed", status)
+		}
+	}
+	if domain.NormalizeEventDeliveryStatus("bad") != "" || !strings.HasPrefix(domain.TopicEventPayloadSHA256(`{"ok":true}`), "sha256:") {
+		t.Fatalf("topic event status/hash helpers returned unexpected values")
+	}
 
 	normalizedEnv := domain.NormalizeEnvItems([]domain.SessionEnvVar{{Name: " B ", Value: "2"}, {Name: "A", Value: "1"}, {Name: "B", Value: "3"}, {Name: " ", Value: "skip"}})
 	if len(normalizedEnv) != 2 || normalizedEnv[0].Name != "A" || normalizedEnv[1].Value != "3" {

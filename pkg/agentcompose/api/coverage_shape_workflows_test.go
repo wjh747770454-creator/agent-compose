@@ -14,6 +14,7 @@ import (
 	"agent-compose/pkg/capability"
 	"agent-compose/pkg/compose"
 	appconfig "agent-compose/pkg/config"
+	"agent-compose/pkg/dashboard"
 	"agent-compose/pkg/execution"
 	"agent-compose/pkg/imagecache"
 	"agent-compose/pkg/images"
@@ -206,6 +207,16 @@ func TestAPIMappingCoverageWorkflows(t *testing.T) {
 		Network:   &compose.NetworkSpec{Mode: "host"},
 		Agents: []compose.NormalizedAgentSpec{{
 			Name: "worker", Provider: "codex", Model: "gpt", SystemPrompt: "system", Image: "guest:latest", CapsetIDs: []string{"dev"},
+			Build: &compose.NormalizedBuildSpec{
+				Context:    "docker",
+				Dockerfile: "Dockerfile.agent",
+				Target:     "runtime",
+				Args:       map[string]string{"A": "1"},
+				Platforms:  []string{"linux/amd64"},
+				Tags:       []string{"worker:latest"},
+				NoCache:    true,
+				Pull:       true,
+			},
 			Driver:    &compose.NormalizedDriverSpec{Name: compose.DriverDocker, Docker: &compose.DockerDriverSpec{Host: "unix:///docker.sock"}},
 			Env:       map[string]compose.EnvVarSpec{"TOKEN": {Value: "secret", Secret: true}},
 			Workspace: &compose.WorkspaceSpec{Provider: "file", Path: "work"},
@@ -222,9 +233,26 @@ func TestAPIMappingCoverageWorkflows(t *testing.T) {
 	if specProto.GetAgents()[0].GetDriver().GetDocker().GetHost() != "unix:///docker.sock" || specProto.GetAgents()[0].GetScheduler().GetTriggers()[3].GetEvent().GetTopic() != "runtime.test" {
 		t.Fatalf("ProjectSpecToProto = %#v", specProto)
 	}
+	if specProto.GetAgents()[0].GetBuild().GetArgs()["A"] != "1" || !specProto.GetAgents()[0].GetBuild().GetNoCache() || !specProto.GetAgents()[0].GetBuild().GetPull() {
+		t.Fatalf("build proto = %#v", specProto.GetAgents()[0].GetBuild())
+	}
 	shape, issues := ProjectSpecYAMLShape(specProto)
 	if len(issues) != 0 || shape["name"] != "Project" {
 		t.Fatalf("ProjectSpecYAMLShape shape=%#v issues=%#v", shape, issues)
+	}
+	if ProjectSpecToProto(nil) != nil || BuildSpecToProto(nil) != nil || JupyterSpecToProto(nil) != nil || WorkspaceSpecToProto(nil) != nil || NetworkSpecToProto(nil) != nil || DriverSpecToProto(nil) != nil || SchedulerSpecToProto(nil) != nil {
+		t.Fatalf("nil proto mapper returned non-nil")
+	}
+	if build := BuildYAMLShape(specProto.GetAgents()[0].GetBuild()); build["context"] != "docker" || build["dockerfile"] != "Dockerfile.agent" || build["target"] != "runtime" || build["no_cache"] != true || build["pull"] != true {
+		t.Fatalf("BuildYAMLShape = %#v", build)
+	}
+	if BuildYAMLShape(nil) != nil || cloneProjectStringMap(nil) != nil {
+		t.Fatalf("empty build helpers returned non-nil")
+	}
+	clonedArgs := cloneProjectStringMap(map[string]string{"A": "1"})
+	clonedArgs["A"] = "changed"
+	if specProto.GetAgents()[0].GetBuild().GetArgs()["A"] != "1" {
+		t.Fatalf("cloneProjectStringMap did not clone args")
 	}
 	if _, issues := EnvVarYAMLMap("env", []*agentcomposev2.EnvVarSpec{{Name: "A"}, {Name: " A "}}); len(issues) != 1 {
 		t.Fatalf("expected duplicate env issue")
@@ -238,8 +266,23 @@ func TestAPIMappingCoverageWorkflows(t *testing.T) {
 	if _, issues := DriverYAMLShape("driver", &agentcomposev2.DriverSpec{Name: "bad"}); len(issues) != 1 {
 		t.Fatalf("expected unsupported driver issue")
 	}
+	if driver, issues := DriverYAMLShape("driver", &agentcomposev2.DriverSpec{Name: "boxlite"}); len(issues) != 0 || driver["boxlite"] == nil {
+		t.Fatalf("named empty boxlite driver=%#v issues=%#v", driver, issues)
+	}
+	if driver, issues := DriverYAMLShape("driver", &agentcomposev2.DriverSpec{Boxlite: &agentcomposev2.BoxliteDriverSpec{Kernel: "vmlinux", Rootfs: "rootfs.ext4"}, Microsandbox: &agentcomposev2.MicrosandboxDriverSpec{Profile: "dev"}}); len(issues) != 0 || len(driver) != 2 {
+		t.Fatalf("multi driver=%#v issues=%#v", driver, issues)
+	}
+	if network := NetworkYAMLShape(nil); network != nil {
+		t.Fatalf("NetworkYAMLShape nil = %#v", network)
+	}
 	if sourcePath := ProjectServiceSourcePath(&agentcomposev2.ProjectSource{ProjectDir: "/repo"}); sourcePath != filepath.Join("/repo", "agent-compose.yml") {
 		t.Fatalf("ProjectServiceSourcePath = %q", sourcePath)
+	}
+	if sourcePath := ProjectServiceSourcePath(&agentcomposev2.ProjectSource{ComposePath: "/repo/custom.yml", ProjectDir: "/repo"}); sourcePath != "/repo/custom.yml" {
+		t.Fatalf("ProjectServiceSourcePath compose path = %q", sourcePath)
+	}
+	if sourcePath := ProjectServiceSourcePath(nil); sourcePath != "" {
+		t.Fatalf("ProjectServiceSourcePath nil = %q", sourcePath)
 	}
 	if issue := IssueFromComposeError(&compose.ValidationError{Path: "agents.worker", Message: "bad"}); issue.GetPath() != "agents.worker" {
 		t.Fatalf("validation issue = %#v", issue)
@@ -249,6 +292,52 @@ func TestAPIMappingCoverageWorkflows(t *testing.T) {
 	}
 	if issue := ProjectValidationIssue("", "generic"); issue.GetPath() != "spec" {
 		t.Fatalf("default validation issue = %#v", issue)
+	}
+}
+
+func TestAPIHandlerDelegateAndDashboardWorkflows(t *testing.T) {
+	ctx := context.Background()
+	sessionDelegate := &fakeSessionDelegate{}
+	sessionHandler := NewSessionHandler(sessionDelegate, nil, nil)
+	created, err := sessionHandler.CreateSession(ctx, connect.NewRequest(&agentcomposev1.CreateSessionRequest{Title: "created"}))
+	if err != nil || created.Msg.GetSession().GetSummary().GetTitle() != "created" {
+		t.Fatalf("CreateSession response=%#v err=%v", created, err)
+	}
+	if _, err := sessionHandler.ResumeSession(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: "session-1"})); err != nil {
+		t.Fatalf("ResumeSession returned error: %v", err)
+	}
+	if _, err := sessionHandler.StopSession(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: "session-1"})); err != nil {
+		t.Fatalf("StopSession returned error: %v", err)
+	}
+	if _, err := sessionHandler.GetSessionProxy(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: "session-1"})); err != nil {
+		t.Fatalf("GetSessionProxy returned error: %v", err)
+	}
+	if len(sessionDelegate.stopCalls) != 1 || sessionDelegate.stopCalls[0] != "session-1" {
+		t.Fatalf("stop calls = %#v", sessionDelegate.stopCalls)
+	}
+
+	runDelegate := &fakeRunDelegate{}
+	runHandler := NewRunHandler(runDelegate, nil)
+	runResp, err := runHandler.RunAgent(ctx, connect.NewRequest(&agentcomposev2.RunAgentRequest{ProjectId: "project-1", AgentName: "worker"}))
+	if err != nil || runResp.Msg.GetRun().GetSummary().GetRunId() != "run-1" {
+		t.Fatalf("RunAgent response=%#v err=%v", runResp, err)
+	}
+	startResp, err := runHandler.StartRun(ctx, connect.NewRequest(&agentcomposev2.StartRunRequest{Run: &agentcomposev2.RunAgentRequest{ProjectId: "project-1", AgentName: "worker"}}))
+	if err != nil || !startResp.Msg.GetStarted() {
+		t.Fatalf("StartRun response=%#v err=%v", startResp, err)
+	}
+	if _, err := NewRunHandler(nil, nil).StartRun(ctx, connect.NewRequest(&agentcomposev2.StartRunRequest{})); connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Fatalf("nil StartRun error = %v", err)
+	}
+
+	dashboardCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	aggregator := dashboard.NewAggregator(fakeDashboardSessionStore{}, fakeDashboardRunStore{})
+	aggregator.SetClock(func() time.Time { return time.Date(2026, 7, 1, 1, 2, 3, 0, time.UTC) })
+	hub := dashboard.NewHub(dashboardCtx, aggregator, time.Millisecond)
+	dashboardResp, err := NewDashboardHandler(hub).GetDashboardOverview(ctx, connect.NewRequest(&emptypb.Empty{}))
+	if err != nil || dashboardResp.Msg.GetOverview().GetRuns().GetRunningCount() != 2 {
+		t.Fatalf("dashboard response=%#v err=%v", dashboardResp, err)
 	}
 }
 
@@ -283,11 +372,23 @@ func TestAPILightweightHandlersCoverageWorkflows(t *testing.T) {
 	if resp, err := configHandler.UpdateWorkspaceConfig(ctx, connect.NewRequest(&agentcomposev1.UpdateWorkspaceConfigRequest{WorkspaceId: fileWorkspaceID, Name: "Repo", Type: "git", ConfigJson: `{"repo_url":"https://example.test/repo.git"}`})); err != nil || resp.Msg.GetWorkspace().GetType() != "git" {
 		t.Fatalf("update workspace to git resp=%v err=%v", resp, err)
 	}
+	if resp, err := configHandler.UpdateWorkspaceConfig(ctx, connect.NewRequest(&agentcomposev1.UpdateWorkspaceConfigRequest{WorkspaceId: fileWorkspaceID, Name: "Files Again", Type: "file"})); err != nil || resp.Msg.GetWorkspace().GetType() != "file" {
+		t.Fatalf("update workspace back to file resp=%v err=%v", resp, err)
+	}
 	if resp, err := configHandler.ListWorkspaceConfigs(ctx, connect.NewRequest(&emptypb.Empty{})); err != nil || len(resp.Msg.GetWorkspaces()) != 1 {
 		t.Fatalf("list workspaces resp=%v err=%v", resp, err)
 	}
 	if _, err := configHandler.DeleteWorkspaceConfig(ctx, connect.NewRequest(&agentcomposev1.WorkspaceConfigIDRequest{WorkspaceId: fileWorkspaceID})); err != nil {
 		t.Fatalf("delete workspace err=%v", err)
+	}
+	if _, err := configHandler.UpdateGlobalEnvConfig(ctx, connect.NewRequest(&agentcomposev1.UpdateGlobalEnvConfigRequest{EnvItems: []*agentcomposev1.SessionEnvVar{{Name: "MISSING_SECRET", Secret: true}}})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected missing secret update invalid argument, err=%v", err)
+	}
+	if _, err := configHandler.UpdateWorkspaceConfig(ctx, connect.NewRequest(&agentcomposev1.UpdateWorkspaceConfigRequest{WorkspaceId: "missing", Name: "Missing", Type: "git"})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected update missing workspace invalid argument, err=%v", err)
+	}
+	if _, err := configHandler.DeleteWorkspaceConfig(ctx, connect.NewRequest(&agentcomposev1.WorkspaceConfigIDRequest{WorkspaceId: "missing"})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected delete missing workspace invalid argument, err=%v", err)
 	}
 	if err := configHandler.checkFileWorkspaceContentCreatable("workspace-check"); err != nil {
 		t.Fatalf("checkFileWorkspaceContentCreatable err=%v", err)
@@ -328,8 +429,26 @@ func TestAPILightweightHandlersCoverageWorkflows(t *testing.T) {
 	if resp, err := agentHandler.CreateAgentSession(ctx, connect.NewRequest(&agentcomposev1.CreateAgentSessionRequest{AgentId: "agent-1", Title: "Agent Session", EnvItems: []*agentcomposev1.SessionEnvVar{{Name: "REQUEST", Value: "value"}}})); err != nil || resp.Msg.GetSession().GetSummary().GetSessionId() == "" {
 		t.Fatalf("create agent session resp=%v err=%v", resp, err)
 	}
+	if resp, err := agentHandler.SetAgentDefinitionEnabled(ctx, connect.NewRequest(&agentcomposev1.SetAgentDefinitionEnabledRequest{AgentId: "agent-1", Enabled: false})); err != nil || resp.Msg.GetAgent().GetEnabled() {
+		t.Fatalf("set agent disabled resp=%v err=%v", resp, err)
+	}
+	if _, err := agentHandler.CreateAgentSession(ctx, connect.NewRequest(&agentcomposev1.CreateAgentSessionRequest{AgentId: "agent-1"})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected disabled create session invalid argument, err=%v", err)
+	}
 	if resp, err := agentHandler.SetAgentDefinitionEnabled(ctx, connect.NewRequest(&agentcomposev1.SetAgentDefinitionEnabledRequest{AgentId: "agent-1", Enabled: true})); err != nil || !resp.Msg.GetAgent().GetEnabled() {
 		t.Fatalf("set agent enabled resp=%v err=%v", resp, err)
+	}
+	if _, err := agentHandler.UpdateAgentDefinition(ctx, connect.NewRequest(&agentcomposev1.UpdateAgentDefinitionRequest{})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected empty update agent invalid argument, err=%v", err)
+	}
+	if _, err := agentHandler.DeleteAgentDefinition(ctx, connect.NewRequest(&agentcomposev1.AgentDefinitionIDRequest{})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected empty delete agent invalid argument, err=%v", err)
+	}
+	if _, err := agentHandler.SetAgentDefinitionEnabled(ctx, connect.NewRequest(&agentcomposev1.SetAgentDefinitionEnabledRequest{})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected empty set enabled invalid argument, err=%v", err)
+	}
+	if _, err := agentHandler.CreateAgentSession(ctx, connect.NewRequest(&agentcomposev1.CreateAgentSessionRequest{})); err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected empty create session invalid argument, err=%v", err)
 	}
 	if _, err := agentHandler.DeleteAgentDefinition(ctx, connect.NewRequest(&agentcomposev1.AgentDefinitionIDRequest{AgentId: "agent-1"})); err != nil {
 		t.Fatalf("delete agent definition err=%v", err)
@@ -722,6 +841,42 @@ func (d *fakeSessionDelegate) StopSession(_ context.Context, req *connect.Reques
 
 func (d *fakeSessionDelegate) GetSessionProxy(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error) {
 	return connect.NewResponse(&agentcomposev1.SessionProxyResponse{}), nil
+}
+
+type fakeRunDelegate struct{}
+
+func (fakeRunDelegate) RunAgent(context.Context, *connect.Request[agentcomposev2.RunAgentRequest]) (*connect.Response[agentcomposev2.RunAgentResponse], error) {
+	return connect.NewResponse(&agentcomposev2.RunAgentResponse{Run: ProjectRunDetailToProto(domain.ProjectRunRecord{
+		RunID: "run-1", ProjectID: "project-1", AgentName: "worker", Status: domain.ProjectRunStatusSucceeded,
+	})}), nil
+}
+
+func (fakeRunDelegate) StartRun(context.Context, *connect.Request[agentcomposev2.StartRunRequest]) (*connect.Response[agentcomposev2.StartRunResponse], error) {
+	return connect.NewResponse(&agentcomposev2.StartRunResponse{Run: ProjectRunSummaryToProto(domain.ProjectRunRecord{
+		RunID: "run-1", ProjectID: "project-1", AgentName: "worker", Status: domain.ProjectRunStatusRunning,
+	}), Started: true}), nil
+}
+
+func (fakeRunDelegate) RunAgentStream(context.Context, *connect.Request[agentcomposev2.RunAgentRequest], *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+	return nil
+}
+
+type fakeDashboardSessionStore struct{}
+
+func (fakeDashboardSessionStore) ListSessions(context.Context, domain.SessionListOptions) (domain.SessionListResult, error) {
+	return domain.SessionListResult{Sessions: []*domain.Session{
+		{Summary: domain.SessionSummary{ID: "session-running", VMStatus: domain.VMStatusRunning}},
+		{Summary: domain.SessionSummary{ID: "session-failed", VMStatus: domain.VMStatusFailed}},
+	}}, nil
+}
+
+type fakeDashboardRunStore struct{}
+
+func (fakeDashboardRunStore) ListRecentLoaderRuns(context.Context, int) ([]domain.LoaderRunSummary, error) {
+	return []domain.LoaderRunSummary{
+		{ID: "run-running", Status: domain.VMStatusRunning},
+		{ID: "run-failed", Status: domain.VMStatusFailed},
+	}, nil
 }
 
 type fakeLoaderController struct {

@@ -196,6 +196,164 @@ func TestEventDispatcherWorkflows(t *testing.T) {
 	}
 }
 
+func TestEventDispatcherWebhookAndWrapperWorkflows(t *testing.T) {
+	ctx := context.Background()
+	loader := domain.Loader{Summary: domain.LoaderSummary{ID: "loader-1", Enabled: true}, Triggers: []domain.LoaderTrigger{{
+		ID:      "trigger-1",
+		Kind:    domain.LoaderTriggerKindEvent,
+		Topic:   "topic.webhook",
+		Enabled: true,
+	}}}
+	target := loaders.EventTarget{Loader: loader, Trigger: loader.Triggers[0]}
+
+	acked := false
+	released := false
+	dispatcher := loaders.NewEventDispatcher(loaders.EventDispatcherDependencies{})
+	dispatcher.AckNoSubscriber(domain.LoaderTopicEvent{Topic: "missing", Ack: func(context.Context) error {
+		acked = true
+		return nil
+	}})
+	dispatcher.Retry(domain.LoaderTopicEvent{Topic: "retry", Release: func() {
+		released = true
+	}}, "")
+	if !acked || !released {
+		t.Fatalf("wrapper ack/release = %v/%v", acked, released)
+	}
+
+	retryReason := ""
+	dispatcher = loaders.NewEventDispatcher(loaders.EventDispatcherDependencies{
+		RootCtx: ctx,
+		Targets: func(string) []loaders.EventTarget {
+			return []loaders.EventTarget{target}
+		},
+		ReserveSlots: func(domain.LoaderTopicEvent, int) ([]*webhooks.Reservation, bool) {
+			return nil, false
+		},
+	})
+	dispatcher.Dispatch(domain.LoaderTopicEvent{Topic: "topic.webhook", Source: domain.TopicEventSourceWebhook, CreatedAt: time.Now().UTC(), Retry: func(_ context.Context, reason string, _ time.Time) error {
+		retryReason = reason
+		return nil
+	}})
+	if retryReason != "webhook queue is full" {
+		t.Fatalf("queue full retry reason = %q", retryReason)
+	}
+
+	executed := make(chan string, 1)
+	webhookAcked := false
+	dispatcher = loaders.NewEventDispatcher(loaders.EventDispatcherDependencies{
+		RootCtx: ctx,
+		Targets: func(string) []loaders.EventTarget {
+			return []loaders.EventTarget{target}
+		},
+		ReserveSlots: func(domain.LoaderTopicEvent, int) ([]*webhooks.Reservation, bool) {
+			return webhooks.NoopReservations(1), true
+		},
+		RunTimeout: func(time.Duration) time.Duration { return time.Second },
+		Prepare: func(_ context.Context, loader domain.Loader, trigger *domain.LoaderTrigger, payloadJSON, source string, options loaders.RunOptions) (loaders.PreparedRun, error) {
+			if !options.AlreadyEntered || source != "topic.webhook" || !strings.Contains(payloadJSON, `"topic":"topic.webhook"`) {
+				t.Fatalf("Prepare source/options/payload = %q/%#v/%q", source, options, payloadJSON)
+			}
+			return loaders.PreparedRun{
+				Loader:      loader,
+				Trigger:     trigger,
+				Run:         domain.LoaderRunSummary{LoaderID: loader.Summary.ID, TriggerID: trigger.ID},
+				PayloadJSON: payloadJSON,
+			}, nil
+		},
+		Execute: func(_ context.Context, prepared loaders.PreparedRun) (domain.LoaderRunSummary, error) {
+			executed <- prepared.Loader.Summary.ID + "/" + prepared.Run.TriggerID
+			return domain.LoaderRunSummary{}, nil
+		},
+	})
+	dispatcher.Dispatch(domain.LoaderTopicEvent{Topic: "topic.webhook", Source: domain.TopicEventSourceWebhook, CreatedAt: time.Now().UTC(), Ack: func(context.Context) error {
+		webhookAcked = true
+		return nil
+	}})
+	select {
+	case got := <-executed:
+		if got != "loader-1/trigger-1" {
+			t.Fatalf("executed target = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for webhook execute")
+	}
+	if !webhookAcked {
+		t.Fatalf("webhook ack was not called")
+	}
+
+	entered := 0
+	left := make([]string, 0)
+	retryReason = ""
+	dispatcher = loaders.NewEventDispatcher(loaders.EventDispatcherDependencies{
+		RootCtx: ctx,
+		Targets: func(string) []loaders.EventTarget {
+			second := loader
+			second.Summary.ID = "loader-2"
+			return []loaders.EventTarget{target, {Loader: second, Trigger: second.Triggers[0]}}
+		},
+		ReserveSlots: func(domain.LoaderTopicEvent, int) ([]*webhooks.Reservation, bool) {
+			return webhooks.NoopReservations(2), true
+		},
+		EnterRun: func(domain.Loader) bool {
+			entered++
+			return entered == 1
+		},
+		LeaveRun: func(loaderID string) {
+			left = append(left, loaderID)
+		},
+	})
+	dispatcher.Dispatch(domain.LoaderTopicEvent{Topic: "topic.webhook", Source: domain.TopicEventSourceWebhook, CreatedAt: time.Now().UTC(), Retry: func(_ context.Context, reason string, _ time.Time) error {
+		retryReason = reason
+		return nil
+	}})
+	if retryReason != "loader is already running" || len(left) != 1 || left[0] != "loader-1" {
+		t.Fatalf("enter retry/left = %q/%#v", retryReason, left)
+	}
+
+	aborted := make(chan string, 1)
+	retryReason = ""
+	dispatcher = loaders.NewEventDispatcher(loaders.EventDispatcherDependencies{
+		RootCtx: ctx,
+		Targets: func(string) []loaders.EventTarget {
+			second := loader
+			second.Summary.ID = "loader-2"
+			return []loaders.EventTarget{target, {Loader: second, Trigger: second.Triggers[0]}}
+		},
+		ReserveSlots: func(domain.LoaderTopicEvent, int) ([]*webhooks.Reservation, bool) {
+			return webhooks.NoopReservations(2), true
+		},
+		Prepare: func(_ context.Context, loader domain.Loader, trigger *domain.LoaderTrigger, payloadJSON, _ string, _ loaders.RunOptions) (loaders.PreparedRun, error) {
+			if loader.Summary.ID == "loader-2" {
+				return loaders.PreparedRun{}, errors.New("prepare failed")
+			}
+			return loaders.PreparedRun{
+				Loader:      loader,
+				Trigger:     trigger,
+				Run:         domain.LoaderRunSummary{LoaderID: loader.Summary.ID, TriggerID: trigger.ID},
+				PayloadJSON: payloadJSON,
+			}, nil
+		},
+		Abort: func(_ context.Context, prepared loaders.PreparedRun, reason string) {
+			aborted <- prepared.Loader.Summary.ID + ":" + reason
+		},
+	})
+	dispatcher.Dispatch(domain.LoaderTopicEvent{Topic: "topic.webhook", Source: domain.TopicEventSourceWebhook, CreatedAt: time.Now().UTC(), Retry: func(_ context.Context, reason string, _ time.Time) error {
+		retryReason = reason
+		return nil
+	}})
+	select {
+	case got := <-aborted:
+		if got != "loader-1:prepare failed" {
+			t.Fatalf("abort call = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for abort")
+	}
+	if retryReason != "prepare failed" {
+		t.Fatalf("prepare retry reason = %q", retryReason)
+	}
+}
+
 func TestSchedulerCollectDueAndDispatch(t *testing.T) {
 	now := time.Date(2026, 6, 2, 9, 0, 0, 0, time.UTC)
 	store := &schedulerStoreFake{}

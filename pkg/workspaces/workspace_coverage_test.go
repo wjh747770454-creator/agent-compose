@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"os"
 	"os/exec"
@@ -72,6 +73,18 @@ func testWorkspaceFileAndPathWorkflows(t *testing.T) {
 	}
 	assertFileContent(t, filepath.Join(session.Summary.WorkspacePath, "README.md"), "updated\n")
 
+	if err := PrepareFileWorkspace(config, &domain.Session{Summary: domain.SessionSummary{ID: "missing-workspace"}}, workspace); err == nil {
+		t.Fatalf("PrepareFileWorkspace missing workspace path returned nil error")
+	}
+	if _, err := FileWorkspaceContentRoot(config, domain.WorkspaceConfig{}); err == nil {
+		t.Fatalf("FileWorkspaceContentRoot missing id returned nil error")
+	}
+	if _, err := FileWorkspaceContentRoot(config, domain.WorkspaceConfig{ID: "bad-json", ConfigJSON: `{bad json`}); err == nil {
+		t.Fatalf("FileWorkspaceContentRoot invalid JSON returned nil error")
+	}
+	if _, err := FileWorkspaceContentRoot(config, domain.WorkspaceConfig{ID: "relative-root", ConfigJSON: `{"root":"relative"}`}); err == nil {
+		t.Fatalf("FileWorkspaceContentRoot relative root returned nil error")
+	}
 	if _, err := FileWorkspaceContentRoot(config, domain.WorkspaceConfig{ID: "ws-file", Name: "File Workspace", Type: "file", ConfigJSON: encodeFileWorkspaceConfigForTest(t, t.TempDir())}); err == nil {
 		t.Fatalf("expected outside data root to be rejected")
 	}
@@ -95,10 +108,21 @@ func testWorkspaceFileAndPathWorkflows(t *testing.T) {
 	if err := EnsureRootDir(dataRoot, "nested"); err != nil {
 		t.Fatalf("EnsureRootDir returned error: %v", err)
 	}
+	file, err := dataRoot.OpenFile("not-dir", os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("create not-dir file: %v", err)
+	}
+	_ = file.Close()
+	if err := EnsureRootDir(dataRoot, "not-dir"); err == nil {
+		t.Fatalf("EnsureRootDir accepted file path")
+	}
 	for _, raw := range []string{"", ".", "/abs", "../x", "x/../../y"} {
 		if _, err := CleanRelativePath(raw, false); err == nil {
 			t.Fatalf("CleanRelativePath(%q) returned nil error", raw)
 		}
+	}
+	if got, err := CleanRelativePath("", true); err != nil || got != "" {
+		t.Fatalf("CleanRelativePath empty allowed = %q/%v", got, err)
 	}
 	if got, err := CleanRelativePath(" a/../b ", false); err != nil || got != "b" {
 		t.Fatalf("CleanRelativePath clean = %q/%v", got, err)
@@ -110,6 +134,41 @@ func testWorkspaceFileAndPathWorkflows(t *testing.T) {
 	}
 	if len(files) == 0 {
 		t.Fatalf("ListFiles returned no entries")
+	}
+	symlinkDirRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(symlinkDirRoot, "target"), 0o755); err != nil {
+		t.Fatalf("mkdir symlink dir target: %v", err)
+	}
+	if err := os.Symlink("target", filepath.Join(symlinkDirRoot, "link-dir")); err != nil {
+		t.Fatalf("create symlink dir: %v", err)
+	}
+	linkRoot, err := os.OpenRoot(symlinkDirRoot)
+	if err != nil {
+		t.Fatalf("OpenRoot symlinkDirRoot: %v", err)
+	}
+	defer func() { _ = linkRoot.Close() }()
+	if err := EnsureRootDir(linkRoot, "link-dir"); err == nil {
+		t.Fatalf("EnsureRootDir accepted symlink")
+	}
+
+	fileDataRoot := filepath.Join(t.TempDir(), "data-file")
+	if err := os.WriteFile(fileDataRoot, []byte("not dir"), 0o644); err != nil {
+		t.Fatalf("write file data root: %v", err)
+	}
+	if _, err := OpenFileWorkspaceDataRoot(&appconfig.Config{DataRoot: fileDataRoot}); err == nil {
+		t.Fatalf("OpenFileWorkspaceDataRoot accepted file")
+	}
+	symlinkParent := t.TempDir()
+	symlinkTarget := filepath.Join(symlinkParent, "target")
+	if err := os.Mkdir(symlinkTarget, 0o755); err != nil {
+		t.Fatalf("mkdir symlink target: %v", err)
+	}
+	symlinkRoot := filepath.Join(symlinkParent, "link")
+	if err := os.Symlink(symlinkTarget, symlinkRoot); err != nil {
+		t.Fatalf("symlink data root: %v", err)
+	}
+	if _, err := OpenFileWorkspaceDataRoot(&appconfig.Config{DataRoot: symlinkRoot}); err == nil {
+		t.Fatalf("OpenFileWorkspaceDataRoot accepted symlink")
 	}
 }
 
@@ -153,6 +212,9 @@ func testWorkspaceArchiveAndUploadWorkflows(t *testing.T) {
 		t.Fatalf("ExtractWorkspaceTarArchive returned error: %v", err)
 	}
 	assertFileContent(t, filepath.Join(contentRoot, "dir", "file.txt"), "from archive\n")
+	if err := ExtractWorkspaceTarArchive(errReader{}, root); err == nil || !strings.Contains(err.Error(), "read tar archive") {
+		t.Fatalf("ExtractWorkspaceTarArchive reader error = %v", err)
+	}
 
 	var badArchive bytes.Buffer
 	badTW := tar.NewWriter(&badArchive)
@@ -167,6 +229,42 @@ func testWorkspaceArchiveAndUploadWorkflows(t *testing.T) {
 	}
 	if err := ExtractWorkspaceTarArchive(&badArchive, root); err == nil {
 		t.Fatalf("ExtractWorkspaceTarArchive accepted escaping path")
+	}
+	for _, tc := range []struct {
+		name   string
+		header tar.Header
+	}{
+		{name: "absolute", header: tar.Header{Name: "/abs.txt", Typeflag: tar.TypeReg, Mode: 0o644}},
+		{name: "symlink", header: tar.Header{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "dir/file.txt"}},
+		{name: "fifo", header: tar.Header{Name: "pipe", Typeflag: tar.TypeFifo}},
+	} {
+		var archive bytes.Buffer
+		writer := tar.NewWriter(&archive)
+		if err := writer.WriteHeader(&tc.header); err != nil {
+			t.Fatalf("WriteHeader %s: %v", tc.name, err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close %s archive: %v", tc.name, err)
+		}
+		if err := ExtractWorkspaceTarArchive(&archive, root); err == nil {
+			t.Fatalf("ExtractWorkspaceTarArchive accepted %s entry", tc.name)
+		}
+	}
+
+	srcRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcRoot, "plain.txt"), []byte("plain\n"), 0o644); err != nil {
+		t.Fatalf("write plain source: %v", err)
+	}
+	if err := os.Symlink("plain.txt", filepath.Join(srcRoot, "plain-link")); err != nil {
+		t.Fatalf("symlink plain source: %v", err)
+	}
+	src, err := os.OpenRoot(srcRoot)
+	if err != nil {
+		t.Fatalf("OpenRoot srcRoot: %v", err)
+	}
+	defer func() { _ = src.Close() }()
+	if err := CopyRootDirectoryContents(src, t.TempDir()); err == nil {
+		t.Fatalf("CopyRootDirectoryContents accepted symlink")
 	}
 
 	header := multipartFileHeader(t, "upload.txt", "uploaded\n")
@@ -452,4 +550,10 @@ func multipartArchiveHeader(t *testing.T, filename string) *multipart.FileHeader
 		t.Fatalf("close archive tar: %v", err)
 	}
 	return multipartFileHeader(t, filename, archive.String())
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) {
+	return 0, errors.New("read failed")
 }

@@ -81,6 +81,18 @@ func TestStoreCreateSessionWithJupyterOptions(t *testing.T) {
 	}
 }
 
+func TestStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
+	testStoreLegacyWrappersAndMissingStateWorkflows(t)
+}
+
+func TestIntegrationStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
+	testStoreLegacyWrappersAndMissingStateWorkflows(t)
+}
+
+func TestE2EStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
+	testStoreLegacyWrappersAndMissingStateWorkflows(t)
+}
+
 func TestIntegrationStoreCreateAndRemoveWorkflows(t *testing.T) {
 	TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t)
 	TestStoreCreateSessionWithJupyterOptions(t)
@@ -91,6 +103,149 @@ func TestIntegrationStoreCreateAndRemoveWorkflows(t *testing.T) {
 
 func TestE2EStoreCreateAndRemoveWorkflows(t *testing.T) {
 	TestIntegrationStoreCreateAndRemoveWorkflows(t)
+}
+
+func testStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	store := newCoverageStore(t)
+	sessionID := "legacy-session"
+	sessionDir := store.SessionDir(sessionID)
+	for _, dir := range []string{
+		filepath.Join(sessionDir, "state"),
+		filepath.Join(sessionDir, "vm"),
+		filepath.Join(sessionDir, "proxy"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s returned error: %v", dir, err)
+		}
+	}
+	if got, want := store.VMStatePath(sessionID), filepath.Join(sessionDir, "vm", "runtime.json"); got != want {
+		t.Fatalf("VMStatePath = %q, want %q", got, want)
+	}
+	if got, want := store.LegacyVMStatePath(sessionID), filepath.Join(sessionDir, "vm", "boxlite.json"); got != want {
+		t.Fatalf("LegacyVMStatePath = %q, want %q", got, want)
+	}
+	if got, want := store.ProxyStatePath(sessionID), filepath.Join(sessionDir, "proxy", "jupyter.json"); got != want {
+		t.Fatalf("ProxyStatePath = %q, want %q", got, want)
+	}
+	if port, err := store.AllocateHostPortForJupyter(); err != nil || port == 0 {
+		t.Fatalf("AllocateHostPortForJupyter port=%d err=%v", port, err)
+	}
+
+	fileRoot := filepath.Join(t.TempDir(), "session-root-file")
+	if err := os.WriteFile(fileRoot, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("write file session root: %v", err)
+	}
+	if _, err := NewWithConfig(&appconfig.Config{SessionRoot: fileRoot}); err == nil {
+		t.Fatalf("NewWithConfig file session root returned nil error")
+	}
+
+	fromConfigStore := FromConfig(store.config)
+	baseTime := time.Now().UTC().Add(-time.Hour).Round(0)
+	session := &Session{Summary: SessionSummary{
+		ID:        sessionID,
+		Title:     "Legacy",
+		Driver:    driverpkg.RuntimeDriverBoxlite,
+		CreatedAt: baseTime,
+		UpdatedAt: baseTime,
+	}}
+	if err := fromConfigStore.SaveSession(session); err != nil {
+		t.Fatalf("SaveSession returned error: %v", err)
+	}
+	loaded, err := fromConfigStore.LoadSession(sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession returned error: %v", err)
+	}
+	if loaded.Summary.ID != sessionID || loaded.Summary.Driver != driverpkg.RuntimeDriverBoxlite {
+		t.Fatalf("LoadSession loaded %#v", loaded.Summary)
+	}
+	if err := fromConfigStore.SaveSession(&Session{Summary: SessionSummary{ID: "missing-dir"}}); err == nil {
+		t.Fatalf("SaveSession missing dir returned nil error")
+	}
+	if err := fromConfigStore.SaveCells("missing-dir", nil); err == nil {
+		t.Fatalf("SaveCells missing dir returned nil error")
+	}
+	if err := fromConfigStore.SaveEvents("missing-dir", nil); err == nil {
+		t.Fatalf("SaveEvents missing dir returned nil error")
+	}
+
+	initialCells := []NotebookCell{
+		{ID: "run-existing", Type: CellTypeAgent, Source: "already migrated", CreatedAt: baseTime.Add(2 * time.Minute)},
+		{ID: "shell-later", Type: execution.CellTypeShell, Source: "echo later", CreatedAt: baseTime.Add(3 * time.Minute)},
+	}
+	if err := fromConfigStore.SaveCells(sessionID, initialCells); err != nil {
+		t.Fatalf("SaveCells returned error: %v", err)
+	}
+	legacyRuns := []AgentRun{
+		{
+			ID:             "run-new",
+			Agent:          "codex",
+			Message:        "legacy prompt",
+			Output:         "legacy output",
+			ExitCode:       7,
+			Success:        false,
+			CreatedAt:      baseTime.Add(time.Minute),
+			AgentSessionID: "legacy-agent-session",
+			StopReason:     "stopped",
+		},
+		{ID: "run-existing", Agent: "codex", Message: "duplicate", CreatedAt: baseTime.Add(4 * time.Minute)},
+	}
+	legacyData, err := json.Marshal(legacyRuns)
+	if err != nil {
+		t.Fatalf("Marshal legacy runs returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "state", "agent_runs.json"), legacyData, 0o644); err != nil {
+		t.Fatalf("write legacy agent runs returned error: %v", err)
+	}
+	cells, err := fromConfigStore.ListCells(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListCells legacy merge returned error: %v", err)
+	}
+	if len(cells) != 3 || cells[0].ID != "run-new" || cells[1].ID != "run-existing" || cells[2].ID != "shell-later" {
+		t.Fatalf("legacy merged cells = %#v", cells)
+	}
+	if cells[0].Type != CellTypeAgent || cells[0].Source != "legacy prompt" || cells[0].Output != "legacy output" || cells[0].ExitCode != 7 || cells[0].AgentSessionID != "legacy-agent-session" || cells[0].StopReason != "stopped" {
+		t.Fatalf("legacy run cell = %#v", cells[0])
+	}
+
+	events := []SessionEvent{{ID: "event-wrapper", Type: "session.wrapper", Level: "info", Message: "wrapper", CreatedAt: baseTime}}
+	if err := fromConfigStore.SaveEvents(sessionID, events); err != nil {
+		t.Fatalf("SaveEvents returned error: %v", err)
+	}
+	loadedEvents, err := fromConfigStore.ListEvents(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListEvents wrapper returned error: %v", err)
+	}
+	if len(loadedEvents) != 1 || loadedEvents[0].ID != "event-wrapper" {
+		t.Fatalf("loaded events = %#v", loadedEvents)
+	}
+
+	missingStateID := "missing-state"
+	if err := os.MkdirAll(filepath.Join(store.SessionDir(missingStateID), "state"), 0o755); err != nil {
+		t.Fatalf("MkdirAll missing state returned error: %v", err)
+	}
+	if cells, err := fromConfigStore.ListCells(ctx, missingStateID); err != nil || len(cells) != 0 {
+		t.Fatalf("ListCells missing file cells=%#v err=%v", cells, err)
+	}
+	if events, err := fromConfigStore.ListEvents(ctx, missingStateID); err != nil || len(events) != 0 {
+		t.Fatalf("ListEvents missing file events=%#v err=%v", events, err)
+	}
+	if err := os.WriteFile(filepath.Join(store.SessionDir(missingStateID), "state", "agent_runs.json"), nil, 0o644); err != nil {
+		t.Fatalf("write empty agent runs returned error: %v", err)
+	}
+	if runs, err := fromConfigStore.loadAgentRuns(missingStateID); err != nil || len(runs) != 0 {
+		t.Fatalf("loadAgentRuns empty runs=%#v err=%v", runs, err)
+	}
+	if err := fromConfigStore.SaveCells(missingStateID, nil); err != nil {
+		t.Fatalf("SaveCells missingState reset returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(store.SessionDir(missingStateID), "state", "agent_runs.json"), []byte(`{bad json`), 0o644); err != nil {
+		t.Fatalf("write corrupt agent runs returned error: %v", err)
+	}
+	if _, err := fromConfigStore.ListCells(ctx, missingStateID); err == nil {
+		t.Fatalf("ListCells corrupt legacy agent runs returned nil error")
+	}
 }
 
 func testStorePersistenceErrorAndUpdateBranches(t *testing.T) {

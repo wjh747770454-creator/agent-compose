@@ -51,6 +51,7 @@ CLI 是 agent-compose daemon 的操作入口。它负责读取本地 project 配
 | `run` | 调用 v2 `RunService` 创建 run，支持 trigger、prompt、command、detach、interactive、Jupyter 和 cleanup policy。 |
 | `logs` | 读取 run 日志，支持 agent/run/sandbox filter、tail、timestamp 和 server streaming follow。 |
 | `ps` | 以 sandbox 视图列出当前 project 的运行态，默认只显示 running sandbox。 |
+| `sandbox` | 统一管理当前 project 的 sandbox，包含 `ls`、`stop`、`resume`、`rm`、`prune`。 |
 | `stats` | 通过 v2 `SandboxService.GetSandboxStats` 获取指定 sandbox 或当前 project 所有 running sandbox 的资源统计。 |
 | `stop` | 基于 v1 `SessionService.StopSession` 停止 sandbox。 |
 | `resume` | 基于 v1 `SessionService.ResumeSession` 恢复 sandbox。 |
@@ -241,7 +242,44 @@ Docker daemon 只是可选 image backend；OCI cache 是 daemonless backend。Bo
 
 ## Sandbox lifecycle
 
-`ps`、`inspect sandbox`、`stop`、`resume`、`rm` 都以 sandbox 为对外术语。
+`ps`、`sandbox`、`stats`、`inspect sandbox`、`stop`、`resume`、`rm` 都以 sandbox 为对外术语。当前 sandbox ID 与内部 session id 兼容，但 CLI 文案和用户入口统一使用 sandbox。
+
+`sandbox` 命令组是当前推荐的 sandbox 管理命名空间：
+
+- `sandbox ls` 等价于 `ps`，支持 `--all/-a`、`--status`、`--verbose` 和 `--json`。
+- `sandbox stop <sandbox...>` 等价于顶层 `stop`。
+- `sandbox resume <sandbox...>` 等价于顶层 `resume`。
+- `sandbox rm <sandbox...>` 等价于顶层 `rm`，`--force` 仅用于显式删除 running sandbox。
+- `sandbox prune` 对当前 compose project 下的 stopped/failed sandbox 做批量清理预览，默认 dry-run，只有带 `--force` 才实际删除。
+
+顶层 `ps`、`stop`、`resume`、`rm` 继续保留兼容，不标记 deprecated。
+
+### Sandbox prune
+
+`sandbox prune` 是 CLI 编排能力，不新增后端批量 RPC。CLI 解析当前 project 后，通过 `ProjectService.GetProject`、v1 `SessionService.ListSessions`、v2 `RunService.ListRuns` 复用 `ps --all` 的聚合结果，再在本地应用过滤条件。实际删除仍逐个调用 v2 `SandboxService.RemoveSandbox`。
+
+过滤规则：
+
+- 默认匹配 `stopped,failed` 状态。
+- `--status <status>[,<status>...]` 覆盖默认状态过滤。
+- `--agent <agent>` 按 agent name 精确匹配，忽略大小写和首尾空白。
+- `--driver <docker|boxlite|microsandbox>` 按 runtime driver 精确匹配，忽略大小写和首尾空白。
+- `--older-than <duration>` 使用 sandbox `updated_at` 判断，缺失时回退到 `created_at`；duration 复用 cache prune 的解析规则，支持 `7d`、`168h` 等正时长。
+
+安全规则：
+
+- `sandbox prune` 只处理属于当前 compose project 的 sandbox，不提供 daemon 全局 prune。
+- `running` 和 `pending` 状态不能进入 prune；用户显式传 `--status running` 或 `--status pending` 时返回 usage error，并提示使用 `sandbox rm --force <sandbox>` 处理运行中 sandbox。
+- forced prune 删除时始终调用 `RemoveSandbox(force=false)`，避免批量强删运行中 sandbox。
+- 时间缺失或时间格式无法解析的 sandbox 不进入 matched，会写入 `warnings`。
+- `sandbox prune` 不直接删除 `SESSION_ROOT`、`DATA_ROOT` 或 runtime driver 私有目录，也不清理 runtime cache 文件；cache inventory 仍由 `cache prune` 或 `cache rm` 管理。
+
+输出规则：
+
+- `--json` 输出稳定字段：`dry_run`、`matched`、`removed`、`skipped`、`warnings`。
+- 文本 dry-run 输出 matched/skipped/would remove 数量，并在有匹配项时提示使用 `--force` 实际删除。
+- 文本 forced 输出 removed/matched/skipped 数量，并列出 removed、matched、skipped 和 warnings。
+- 单个删除失败时记录到 `skipped` 并继续处理后续 sandbox；forced prune 存在 skipped 时先输出结果，再以非零退出码结束。
 
 删除规则：
 

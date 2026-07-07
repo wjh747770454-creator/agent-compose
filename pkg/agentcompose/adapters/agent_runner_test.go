@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +18,13 @@ import (
 
 type fakeAgentDefinitionStore struct {
 	agent domain.AgentDefinition
+	err   error
 }
 
 func (s fakeAgentDefinitionStore) GetAgentDefinition(context.Context, string) (domain.AgentDefinition, error) {
+	if s.err != nil {
+		return domain.AgentDefinition{}, s.err
+	}
 	return s.agent, nil
 }
 
@@ -104,5 +109,34 @@ func TestAgentRunnerExecuteAgentRunWritesSystemPromptAndParsesResult(t *testing.
 	}
 	if len(runtime.specs) != 1 || !strings.Contains(runtime.specs[0].Args[1], "agent-compose-runtime prompt") {
 		t.Fatalf("runtime specs = %#v", runtime.specs)
+	}
+}
+
+func TestAgentRunnerResolveAgentSystemPromptBranches(t *testing.T) {
+	ctx := context.Background()
+	session := &domain.Session{Summary: domain.SessionSummary{Tags: []domain.SessionTag{
+		{Name: domain.AgentSessionTagID, Value: "agent-tagged"},
+		{Name: domain.AgentSessionTagSource, Value: domain.AgentSessionTagSourceVal},
+	}}}
+	runner := NewAgentRunner(nil, nil, nil, fakeAgentDefinitionStore{agent: domain.AgentDefinition{SystemPrompt: "  tagged prompt  "}}, nil)
+	if prompt, err := runner.ResolveAgentSystemPrompt(ctx, session, ""); err != nil || prompt != "tagged prompt" {
+		t.Fatalf("tagged prompt = %q err=%v", prompt, err)
+	}
+	runner.agents = fakeAgentDefinitionStore{err: errors.New("store unavailable")}
+	if prompt, err := runner.ResolveAgentSystemPrompt(ctx, session, "agent-tagged"); err != nil || prompt != "" {
+		t.Fatalf("store error prompt = %q err=%v", prompt, err)
+	}
+	if prompt, err := (*AgentRunner)(nil).ResolveAgentSystemPrompt(ctx, session, "agent-tagged"); err != nil || prompt != "" {
+		t.Fatalf("nil runner prompt = %q err=%v", prompt, err)
+	}
+	if prompt, err := NewAgentRunner(nil, nil, nil, nil, nil).ResolveAgentSystemPrompt(ctx, session, "agent-tagged"); err != nil || prompt != "" {
+		t.Fatalf("nil store prompt = %q err=%v", prompt, err)
+	}
+	if prompt, err := runner.ResolveAgentSystemPrompt(ctx, nil, "agent-tagged"); err != nil || prompt != "" {
+		t.Fatalf("nil session prompt = %q err=%v", prompt, err)
+	}
+	untagged := &domain.Session{Summary: domain.SessionSummary{Tags: []domain.SessionTag{{Name: domain.AgentSessionTagID, Value: "agent-tagged"}}}}
+	if prompt, err := runner.ResolveAgentSystemPrompt(ctx, untagged, ""); err != nil || prompt != "" {
+		t.Fatalf("untagged prompt = %q err=%v", prompt, err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	appconfig "agent-compose/pkg/config"
 	"agent-compose/pkg/execution"
@@ -99,6 +100,116 @@ func TestRuntimeConfigAndEnvHelperWorkflows(t *testing.T) {
 
 func TestE2ERuntimeConfigAndEnvHelperWorkflows(t *testing.T) {
 	TestRuntimeConfigAndEnvHelperWorkflows(t)
+}
+
+func TestConfigHelperEdgeBranches(t *testing.T) {
+	if got := parseStoredTime(nil); !got.IsZero() {
+		t.Fatalf("nil stored time = %v, want zero", got)
+	}
+	if got := parseStoredTime(int64(1_700_000_000)); !got.Equal(time.Unix(1_700_000_000, 0).UTC()) {
+		t.Fatalf("int64 stored time = %v", got)
+	}
+	if got := parseStoredTime(1_700_000_000); !got.Equal(time.Unix(1_700_000_000, 0).UTC()) {
+		t.Fatalf("int stored time = %v", got)
+	}
+	if got := parseStoredTime(float64(1_700_000_000_000)); !got.Equal(time.UnixMilli(1_700_000_000_000).UTC()) {
+		t.Fatalf("float stored time = %v", got)
+	}
+	if got := parseStoredTime([]byte("2026-07-01T02:03:04Z")); got.IsZero() || got.Location() != time.UTC {
+		t.Fatalf("bytes stored time = %v", got)
+	}
+	if got := parseStoredTime("2026-07-01T02:03:04.000Z"); got.IsZero() {
+		t.Fatalf("millisecond stored time = %v", got)
+	}
+	if got := parseStoredTime("not-time"); !got.IsZero() {
+		t.Fatalf("invalid stored time = %v, want zero", got)
+	}
+
+	if got := NormalizeWireAPI("chat-completion"); got != APIProtocolChatCompletions {
+		t.Fatalf("NormalizeWireAPI chat-completion = %q", got)
+	}
+	if got := NormalizeWireAPI("messages"); got != APIProtocolMessages {
+		t.Fatalf("NormalizeWireAPI messages = %q", got)
+	}
+	if got := NormalizeWireAPI("custom-api"); got != "custom_api" {
+		t.Fatalf("NormalizeWireAPI custom = %q", got)
+	}
+	if got := NormalizeAPIEndpointForProtocol("://bad", APIProtocolResponses); got != "://bad" {
+		t.Fatalf("NormalizeAPIEndpointForProtocol invalid = %q", got)
+	}
+	if got := NormalizeAPIEndpointForProtocol("https://api.example.test/openai", APIProtocolChatCompletions); got != "https://api.example.test/openai/v1/chat/completions" {
+		t.Fatalf("NormalizeAPIEndpointForProtocol openai chat = %q", got)
+	}
+	if got := NormalizeAPIEndpointForProtocol("https://api.example.test/v1", APIProtocolResponses); got != "https://api.example.test/v1/responses" {
+		t.Fatalf("NormalizeAPIEndpointForProtocol responses v1 = %q", got)
+	}
+	if got := NormalizeAPIEndpointForProtocol("https://api.example.test/custom", APIProtocolResponses); got != "https://api.example.test/custom" {
+		t.Fatalf("NormalizeAPIEndpointForProtocol custom path = %q", got)
+	}
+
+	if got := NormalizeAPIBaseURL("https://api.example.test/v1/responses/", APIProtocolResponses); got != "https://api.example.test/v1" {
+		t.Fatalf("NormalizeAPIBaseURL responses = %q", got)
+	}
+	if got := NormalizeAPIBaseURL("https://api.example.test/v1/chat/completions/", APIProtocolChatCompletions); got != "https://api.example.test/v1" {
+		t.Fatalf("NormalizeAPIBaseURL chat = %q", got)
+	}
+	if got := NormalizeAPIBaseURL("://bad", APIProtocolResponses); got != "://bad" {
+		t.Fatalf("NormalizeAPIBaseURL invalid = %q", got)
+	}
+	if got := NormalizeAnthropicAPIBaseURL("https://api.anthropic.test/v1/messages/"); got != "https://api.anthropic.test/v1" {
+		t.Fatalf("NormalizeAnthropicAPIBaseURL messages = %q", got)
+	}
+	if got := NormalizeAnthropicAPIBaseURL("https://api.anthropic.test"); got != "https://api.anthropic.test/v1" {
+		t.Fatalf("NormalizeAnthropicAPIBaseURL root = %q", got)
+	}
+	if got := NormalizeAnthropicAPIBaseURL("://bad"); got != "://bad" {
+		t.Fatalf("NormalizeAnthropicAPIBaseURL invalid = %q", got)
+	}
+
+	if got := EndpointForProvider(Provider{ProviderType: ProviderFamilyAnthropic, BaseURL: "://bad"}, APIProtocolMessages); got != "://bad/messages" {
+		t.Fatalf("EndpointForProvider anthropic invalid = %q", got)
+	}
+	if got := EndpointForProvider(Provider{ProviderType: ProviderFamilyOpenAI, BaseURL: "https://api.example.test/openai", Scope: ProviderScopeSystem}, APIProtocolResponses); got != "https://api.example.test/openai/v1/responses" {
+		t.Fatalf("EndpointForProvider configured = %q", got)
+	}
+	if got := EndpointForProvider(Provider{ProviderType: ProviderFamilyOpenAI, BaseURL: "https://api.example.test/openai", Scope: ProviderScopeEnvDefault}, APIProtocolResponses); got != "https://api.example.test/openai/v1/responses" {
+		t.Fatalf("EndpointForProvider env default = %q", got)
+	}
+
+	headers, err := ProviderForwardHeaders(Provider{
+		HeadersJSON: `{"X-Test":"1","Authorization":"bad","Content-Type":"application/json"}`,
+		APIKey:      "secret",
+		AuthHeader:  "X-Api-Key",
+	})
+	if err != nil {
+		t.Fatalf("ProviderForwardHeaders returned error: %v", err)
+	}
+	if headers.Get("X-Test") != "1" || headers.Get("Authorization") != "" || headers.Get("Content-Type") != "" || headers.Get("X-Api-Key") != "secret" {
+		t.Fatalf("headers = %#v", headers)
+	}
+	if _, err := ProviderForwardHeaders(Provider{HeadersJSON: "{broken"}); err == nil {
+		t.Fatal("ProviderForwardHeaders returned nil for invalid JSON")
+	}
+	if !ForbiddenProviderHeader(" proxy-authorization ", "Authorization") ||
+		!ForbiddenProviderHeader("Host", "Authorization") ||
+		!ForbiddenProviderHeader("", "Authorization") ||
+		ForbiddenProviderHeader("X-Allowed", "Authorization") {
+		t.Fatal("ForbiddenProviderHeader returned unexpected values")
+	}
+
+	if got := AppendAPIEndpointToBaseURL("", APIProtocolResponses); got != "" {
+		t.Fatalf("AppendAPIEndpointToBaseURL empty = %q", got)
+	}
+	if got := AppendAPIEndpointToBaseURL("://bad", APIProtocolChatCompletions); got != "://bad/v1/chat/completions" {
+		t.Fatalf("AppendAPIEndpointToBaseURL invalid chat = %q", got)
+	}
+	if got := AppendAPIEndpointToBaseURL("https://api.example.test/v1", APIProtocolChatCompletions); got != "https://api.example.test/v1/chat/completions" {
+		t.Fatalf("AppendAPIEndpointToBaseURL chat v1 = %q", got)
+	}
+	if got := AppendAPIEndpointToBaseURL("https://api.example.test/base", APIProtocolResponses); got != "https://api.example.test/base/v1/responses" {
+		t.Fatalf("AppendAPIEndpointToBaseURL base responses = %q", got)
+	}
+	joinAPIBasePath(nil, "/v1", "responses")
 }
 
 func TestClientConfigAndSelectionWorkflows(t *testing.T) {

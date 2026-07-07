@@ -138,9 +138,10 @@ The main commands are:
 - `agent-compose scheduler ls|trigger|inspect`: list, run, or inspect project scheduler triggers.
 - `agent-compose logs`: inspect project run logs.
 - `agent-compose ps`: list project agents, recent runs, and active sandboxes.
+- `agent-compose sandbox ls|stop|resume|rm|prune`: manage project sandboxes; `sandbox prune` cleans stopped/failed sandbox records and is dry-run unless `--force` is set.
 - `agent-compose down`: disable managed schedulers and stop running sandboxes.
 - `agent-compose images`, `pull`, `rmi`, `image inspect`: manage daemon-side images.
-- `agent-compose cache ls|inspect|prune|rm`: inspect and explicitly clean daemon runtime caches. `prune` and `rm` are dry-run unless `--force` is set.
+- `agent-compose cache ls|inspect|prune|rm`: inspect and explicitly clean daemon runtime caches. `prune` and `rm` are dry-run unless `--force` is set; `sandbox prune` does not delete runtime cache files.
 
 Useful flags and environment variables:
 

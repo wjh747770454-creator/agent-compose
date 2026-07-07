@@ -84,6 +84,7 @@ tasks:
       - echo "lint all done"
 
   lint:go:
+    desc: Lint and format Go project code
     dir: '{{.TASKFILE_DIR}}'
     cmds:
       - mkdir -p {{.GOLANGCI_LINT_CACHE_DIR}} {{.GO_BUILD_CACHE_DIR}}
@@ -117,7 +118,7 @@ tasks:
   test:runtime-smoke:
     desc: Run opt-in real BoxLite/Microsandbox runtime smoke tests
     dir: '{{.TASKFILE_DIR}}'
-    deps: ['prepare:agent-compose:boxlite-dev', 'prepare:agent-compose:microsandbox-dev']
+    deps: ['prepare:boxlite-dev', 'prepare:microsandbox-dev']
     cmds:
       - |
         set -euo pipefail
@@ -139,7 +140,7 @@ tasks:
   test:boxlite-mount-repro:
     desc: Run manual BoxLite multi-directory mount repro tests
     dir: '{{.TASKFILE_DIR}}'
-    deps: ['prepare:agent-compose:boxlite-dev']
+    deps: ['prepare:boxlite-dev']
     cmds:
       - |
         set -euo pipefail
@@ -163,7 +164,7 @@ tasks:
       - npm run build
       - npm run test:packaging
 
-  prepare:agent-compose:boxlite-dev:
+  prepare:boxlite-dev:
     internal: true
     desc: Export BoxLite cgo headers/libs from Dockerfile when needed
     dir: '{{.TASKFILE_DIR}}'
@@ -177,7 +178,7 @@ tasks:
     cmds:
       - HTTP_PROXY={{.BUILD_HTTP_PROXY}} HTTPS_PROXY={{.BUILD_HTTPS_PROXY}} ALL_PROXY={{.BUILD_ALL_PROXY}} REGISTRY_MIRROR={{.BUILD_REGISTRY_MIRROR}} ./scripts/export-boxlite-dev-artifact.sh ./build/boxlite
 
-  prepare:agent-compose:microsandbox-dev:
+  prepare:microsandbox-dev:
     internal: true
     desc: Export Microsandbox runtime binaries/libs from Dockerfile when needed
     dir: '{{.TASKFILE_DIR}}'
@@ -203,36 +204,28 @@ tasks:
   build:agent-compose:boxlite:
     desc: Build the agent-compose binary with BoxLite cgo support
     dir: '{{.TASKFILE_DIR}}'
-    deps: ['prepare:agent-compose:boxlite-dev']
+    deps: ['prepare:boxlite-dev']
     cmds:
       - mkdir -p ./build/
       - CGO_ENABLED=1 GOOS=linux GOARCH={{.GOARCH}} {{.GO_TOOLCHAIN_ENV}} go build -v -x -ldflags '{{.GO_LDFLAGS}}' -tags netgo,osusergo,boxlitecgo -o ./build/agent-compose ./cmd/agent-compose/
       - GOCACHE={{.GO_BUILD_CACHE_DIR}} {{.GO_TOOLCHAIN_ENV}} go build ./proto/agentcompose/v2 ./proto/agentcompose/v2/agentcomposev2connect
 
-  docs:
-    desc: Generate/validate documentation (placeholder)
-    cmds:
-      - echo 'docs not configured'
-
-  build:image:agent-compose:
+  image:agent-compose:
+    desc: Build the agent-compose daemon image
     dir: '{{.TASKFILE_DIR}}'
-    deps: ['prepare:agent-compose:boxlite-dev', 'prepare:agent-compose:microsandbox-dev']
+    deps: ['prepare:boxlite-dev', 'prepare:microsandbox-dev']
     cmds:
       - IMAGE_NAME={{default "agent-compose:latest" .IMAGE_NAME}} DOCKERFILE=Dockerfile.agent-compose-local BUILD_CONTEXT={{.TASKFILE_DIR}} VERSION={{.VERSION}} HTTP_PROXY={{.BUILD_HTTP_PROXY}} HTTPS_PROXY={{.BUILD_HTTPS_PROXY}} ALL_PROXY={{.BUILD_ALL_PROXY}} REGISTRY_MIRROR={{.BUILD_REGISTRY_MIRROR}} GOPROXY={{.BUILD_GOPROXY}} ./build_docker.sh
 
-  image:agent-compose:
-    deps: [build:image:agent-compose]
-    cmds:
-      - echo 'build:image:agent-compose done'
-
-  playground:push-agent-compose-guest:
+  playground:up:
+    desc: Build images and start the local playground service
     dir: '{{.TASKFILE_DIR}}/playground'
-    deps: ['image:agent-compose-guest']
-    cmds:
-      - docker image inspect agent-compose-guest:latest >/dev/null
-
-  playground:agent-compose:
-    dir: '{{.TASKFILE_DIR}}/playground'
-    deps: ['playground:push-agent-compose-guest', 'image:agent-compose']
+    deps: ['image:agent-compose-guest', 'image:agent-compose']
     cmds:
       - docker compose up -d agent-compose
+
+  playground:down:
+    desc: Stop the local playground service
+    dir: '{{.TASKFILE_DIR}}/playground'
+    cmds:
+      - docker compose down

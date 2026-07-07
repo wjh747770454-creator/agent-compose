@@ -55,6 +55,29 @@ func TestNormalizeReferenceParsesDigestReference(t *testing.T) {
 	}
 }
 
+func TestNormalizeReferenceWrapperAndInvalidInput(t *testing.T) {
+	cache, err := New(Config{Root: t.TempDir(), DefaultRegistry: "registry.example"})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	info, err := cache.NormalizeReference("team/app")
+	if err != nil || info.NormalizedRef != "registry.example/team/app:latest" {
+		t.Fatalf("cache NormalizeReference info=%#v err=%v", info, err)
+	}
+	if _, err := NormalizeReference(" ", ""); !IsKind(err, ErrorKindInvalidReference) {
+		t.Fatalf("NormalizeReference blank err=%v", err)
+	}
+	if _, err := ParseReference(" "); !IsKind(err, ErrorKindInvalidReference) {
+		t.Fatalf("ParseReference blank err=%v", err)
+	}
+	if got := appendUnique([]string{"a"}, " ", "a", "b"); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("appendUnique = %#v", got)
+	}
+	if got := appendUnique(nil, " ", ""); got != nil {
+		t.Fatalf("appendUnique empty = %#v", got)
+	}
+}
+
 func TestNewImageMetadataCompletesFieldsAndPreservesRequestedRef(t *testing.T) {
 	createdAt := time.Date(2026, 6, 11, 3, 4, 5, 0, time.UTC)
 	pulledAt := createdAt.Add(time.Minute)
