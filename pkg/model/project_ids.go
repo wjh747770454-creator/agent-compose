@@ -1,10 +1,11 @@
 package model
 
 import (
-	"agent-compose/pkg/identity"
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"agent-compose/pkg/identity"
 )
 
 func StableProjectID(name, sourcePath string) (string, error) {

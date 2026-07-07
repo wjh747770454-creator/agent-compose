@@ -83,28 +83,30 @@ func TestE2EAPIHandlerRuntimeWorkflows(t *testing.T) {
 }
 
 func TestRemoveSandboxRemoveRaceRemainsInternal(t *testing.T) {
+	sandboxID := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	store := &apiSandboxStore{
-		session:   &domain.Session{Summary: domain.SessionSummary{ID: "sandbox-1", VMStatus: domain.VMStatusStopped}},
+		session:   &domain.Session{Summary: domain.SessionSummary{ID: sandboxID, VMStatus: domain.VMStatusStopped}},
 		removeErr: os.ErrNotExist,
 	}
 	handler := NewSandboxHandler(&fakeSessionDelegate{}, store, nil)
-	_, err := handler.RemoveSandbox(context.Background(), connect.NewRequest(&agentcomposev2.RemoveSandboxRequest{SandboxId: "sandbox-1"}))
+	_, err := handler.RemoveSandbox(context.Background(), connect.NewRequest(&agentcomposev2.RemoveSandboxRequest{SandboxId: sandboxID}))
 	if connect.CodeOf(err) != connect.CodeInternal {
 		t.Fatalf("RemoveSandbox error code = %v, want %v; err=%v", connect.CodeOf(err), connect.CodeInternal, err)
 	}
 }
 
 func TestGetSandboxStatsReturnsRuntimeMetrics(t *testing.T) {
+	sandboxID := "sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	value := 42.5
 	store := &apiSandboxStore{
-		session: &domain.Session{Summary: domain.SessionSummary{ID: "sandbox-1", Driver: "docker", VMStatus: domain.VMStatusRunning}},
+		session: &domain.Session{Summary: domain.SessionSummary{ID: sandboxID, Driver: "docker", VMStatus: domain.VMStatusRunning}},
 		vmState: domain.VMState{
 			Driver: "docker",
 			BoxID:  "box-1",
 		},
 	}
 	runtime := &apiStatsRuntime{stats: domain.SandboxStats{
-		SandboxID:        "sandbox-1",
+		SandboxID:        sandboxID,
 		Driver:           "docker",
 		SampledAt:        time.Date(2026, 7, 4, 8, 0, 0, 0, time.UTC),
 		CPUPercent:       domain.MetricValue{Value: &value, Unit: "percent", Status: domain.MetricStatusOK},
@@ -113,7 +115,7 @@ func TestGetSandboxStatsReturnsRuntimeMetrics(t *testing.T) {
 	handler := NewSandboxHandler(&fakeSessionDelegate{}, store, nil, func(*domain.Session) (SandboxStatsRuntime, error) {
 		return runtime, nil
 	})
-	resp, err := handler.GetSandboxStats(context.Background(), connect.NewRequest(&agentcomposev2.GetSandboxStatsRequest{SandboxId: "sandbox-1"}))
+	resp, err := handler.GetSandboxStats(context.Background(), connect.NewRequest(&agentcomposev2.GetSandboxStatsRequest{SandboxId: sandboxID}))
 	if err != nil {
 		t.Fatalf("GetSandboxStats returned error: %v", err)
 	}
@@ -123,30 +125,32 @@ func TestGetSandboxStatsReturnsRuntimeMetrics(t *testing.T) {
 	if resp.Msg.GetStats().GetMemoryUsageBytes().GetStatus() != agentcomposev2.MetricStatus_METRIC_STATUS_UNKNOWN {
 		t.Fatalf("memory metric = %#v", resp.Msg.GetStats().GetMemoryUsageBytes())
 	}
-	if runtime.sessionID != "sandbox-1" || runtime.vmState.BoxID != "box-1" {
+	if runtime.sessionID != sandboxID || runtime.vmState.BoxID != "box-1" {
 		t.Fatalf("runtime call session/vm = %q/%#v", runtime.sessionID, runtime.vmState)
 	}
 }
 
 func TestGetSandboxStatsRejectsStoppedSandbox(t *testing.T) {
+	sandboxID := "sha256:3333333333333333333333333333333333333333333333333333333333333333"
 	store := &apiSandboxStore{
-		session: &domain.Session{Summary: domain.SessionSummary{ID: "sandbox-1", VMStatus: domain.VMStatusStopped}},
+		session: &domain.Session{Summary: domain.SessionSummary{ID: sandboxID, VMStatus: domain.VMStatusStopped}},
 	}
 	handler := NewSandboxHandler(&fakeSessionDelegate{}, store, nil, func(*domain.Session) (SandboxStatsRuntime, error) {
 		return &apiStatsRuntime{}, nil
 	})
-	_, err := handler.GetSandboxStats(context.Background(), connect.NewRequest(&agentcomposev2.GetSandboxStatsRequest{SandboxId: "sandbox-1"}))
+	_, err := handler.GetSandboxStats(context.Background(), connect.NewRequest(&agentcomposev2.GetSandboxStatsRequest{SandboxId: sandboxID}))
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("GetSandboxStats stopped code = %v, err=%v", connect.CodeOf(err), err)
 	}
 }
 
 func TestGetSandboxStatsUnsupportedRuntimeIsUnimplemented(t *testing.T) {
+	sandboxID := "sha256:4444444444444444444444444444444444444444444444444444444444444444"
 	store := &apiSandboxStore{
-		session: &domain.Session{Summary: domain.SessionSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}},
+		session: &domain.Session{Summary: domain.SessionSummary{ID: sandboxID, VMStatus: domain.VMStatusRunning}},
 	}
 	handler := NewSandboxHandler(&fakeSessionDelegate{}, store, nil)
-	_, err := handler.GetSandboxStats(context.Background(), connect.NewRequest(&agentcomposev2.GetSandboxStatsRequest{SandboxId: "sandbox-1"}))
+	_, err := handler.GetSandboxStats(context.Background(), connect.NewRequest(&agentcomposev2.GetSandboxStatsRequest{SandboxId: sandboxID}))
 	if connect.CodeOf(err) != connect.CodeUnimplemented {
 		t.Fatalf("GetSandboxStats unsupported code = %v, err=%v", connect.CodeOf(err), err)
 	}

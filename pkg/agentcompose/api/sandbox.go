@@ -10,6 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-compose/pkg/identity"
 	domain "agent-compose/pkg/model"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
@@ -144,6 +145,9 @@ func (h *SandboxHandler) GetSandboxStats(ctx context.Context, req *connect.Reque
 func validateSandboxID(sandboxID string) error {
 	if sandboxID == "" {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("sandbox id is required"))
+	}
+	if !identity.IsID(sandboxID) {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid sandbox id %q", sandboxID))
 	}
 	if sandboxID == "." || sandboxID == ".." || filepath.Base(sandboxID) != sandboxID {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid sandbox id %q", sandboxID))

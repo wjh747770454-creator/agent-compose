@@ -14,6 +14,7 @@ import (
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	"agent-compose/pkg/execution"
+	"agent-compose/pkg/identity"
 	domain "agent-compose/pkg/model"
 )
 
@@ -47,6 +48,15 @@ func TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t *testing.T) {
 	session, err := store.CreateSession(ctx, "Prefixed Proxy", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
+	}
+	if !identity.IsID(session.Summary.ID) {
+		t.Fatalf("session id = %q, want sha256 identity", session.Summary.ID)
+	}
+	if session.Summary.ShortID != identity.ShortID(session.Summary.ID) || len(session.Summary.ShortID) != 12 {
+		t.Fatalf("session short id = %q for id %q", session.Summary.ShortID, session.Summary.ID)
+	}
+	if session.Summary.RuntimeRef != "agent-compose-"+session.Summary.ShortID {
+		t.Fatalf("runtime ref = %q, want short-id ref", session.Summary.RuntimeRef)
 	}
 	wantProxyPath := "/agent-compose/session/" + session.Summary.ID + "/lab"
 	if session.Summary.ProxyPath != wantProxyPath {

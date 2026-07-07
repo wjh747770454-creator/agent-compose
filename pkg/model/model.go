@@ -102,6 +102,7 @@ func MergeEnvItems(globalItems, sessionItems []SessionEnvVar) []SessionEnvVar {
 
 type SessionSummary struct {
 	ID            string       `json:"id"`
+	ShortID       string       `json:"short_id,omitempty"`
 	Title         string       `json:"title"`
 	TriggerSource string       `json:"trigger_source,omitempty"`
 	Driver        string       `json:"driver"`

@@ -3152,6 +3152,7 @@ type RunAgentRequest struct {
 	Command          string                  `protobuf:"bytes,12,opt,name=command,proto3" json:"command,omitempty"`
 	Jupyter          *RunJupyterSpec         `protobuf:"bytes,13,opt,name=jupyter,proto3" json:"jupyter,omitempty"`
 	Driver           string                  `protobuf:"bytes,14,opt,name=driver,proto3" json:"driver,omitempty"`
+	SandboxId        string                  `protobuf:"bytes,15,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -3280,6 +3281,13 @@ func (x *RunAgentRequest) GetJupyter() *RunJupyterSpec {
 func (x *RunAgentRequest) GetDriver() string {
 	if x != nil {
 		return x.Driver
+	}
+	return ""
+}
+
+func (x *RunAgentRequest) GetSandboxId() string {
+	if x != nil {
+		return x.SandboxId
 	}
 	return ""
 }
@@ -3620,6 +3628,7 @@ type ListRunsRequest struct {
 	StartedTo     string                 `protobuf:"bytes,8,opt,name=started_to,json=startedTo,proto3" json:"started_to,omitempty"`
 	Offset        uint32                 `protobuf:"varint,9,opt,name=offset,proto3" json:"offset,omitempty"`
 	Limit         uint32                 `protobuf:"varint,10,opt,name=limit,proto3" json:"limit,omitempty"`
+	SandboxId     string                 `protobuf:"bytes,11,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3722,6 +3731,13 @@ func (x *ListRunsRequest) GetLimit() uint32 {
 		return x.Limit
 	}
 	return 0
+}
+
+func (x *ListRunsRequest) GetSandboxId() string {
+	if x != nil {
+		return x.SandboxId
+	}
+	return ""
 }
 
 type ListRunsResponse struct {
@@ -4445,6 +4461,9 @@ type RunSummary struct {
 	CreatedAt       string                 `protobuf:"bytes,17,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt       string                 `protobuf:"bytes,18,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	Warnings        []string               `protobuf:"bytes,19,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	SandboxId       string                 `protobuf:"bytes,20,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	RunShortId      string                 `protobuf:"bytes,21,opt,name=run_short_id,json=runShortId,proto3" json:"run_short_id,omitempty"`
+	SandboxShortId  string                 `protobuf:"bytes,22,opt,name=sandbox_short_id,json=sandboxShortId,proto3" json:"sandbox_short_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -4610,6 +4629,27 @@ func (x *RunSummary) GetWarnings() []string {
 		return x.Warnings
 	}
 	return nil
+}
+
+func (x *RunSummary) GetSandboxId() string {
+	if x != nil {
+		return x.SandboxId
+	}
+	return ""
+}
+
+func (x *RunSummary) GetRunShortId() string {
+	if x != nil {
+		return x.RunShortId
+	}
+	return ""
+}
+
+func (x *RunSummary) GetSandboxShortId() string {
+	if x != nil {
+		return x.SandboxShortId
+	}
+	return ""
 }
 
 type RunDetail struct {
@@ -7768,7 +7808,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x10DockerDriverSpec\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\"2\n" +
 	"\x16MicrosandboxDriverSpec\x12\x18\n" +
-	"\aprofile\x18\x01 \x01(\tR\aprofile\"\xc3\x04\n" +
+	"\aprofile\x18\x01 \x01(\tR\aprofile\"\xe2\x04\n" +
 	"\x0fRunAgentRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
@@ -7788,7 +7828,9 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x11client_request_id\x18\v \x01(\tR\x0fclientRequestId\x12\x18\n" +
 	"\acommand\x18\f \x01(\tR\acommand\x129\n" +
 	"\ajupyter\x18\r \x01(\v2\x1f.agentcompose.v2.RunJupyterSpecR\ajupyter\x12\x16\n" +
-	"\x06driver\x18\x0e \x01(\tR\x06driver\"\\\n" +
+	"\x06driver\x18\x0e \x01(\tR\x06driver\x12\x1d\n" +
+	"\n" +
+	"sandbox_id\x18\x0f \x01(\tR\tsandboxId\"\\\n" +
 	"\x10RunAgentResponse\x12,\n" +
 	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\x12\x1a\n" +
 	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"\xf0\x02\n" +
@@ -7817,7 +7859,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\n" +
 	"project_id\x18\x02 \x01(\tR\tprojectId\">\n" +
 	"\x0eGetRunResponse\x12,\n" +
-	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\"\xe9\x02\n" +
+	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\"\x88\x03\n" +
 	"\x0fListRunsRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
@@ -7833,7 +7875,9 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"started_to\x18\b \x01(\tR\tstartedTo\x12\x16\n" +
 	"\x06offset\x18\t \x01(\rR\x06offset\x12\x14\n" +
 	"\x05limit\x18\n" +
-	" \x01(\rR\x05limit\"C\n" +
+	" \x01(\rR\x05limit\x12\x1d\n" +
+	"\n" +
+	"sandbox_id\x18\v \x01(\tR\tsandboxId\"C\n" +
 	"\x10ListRunsResponse\x12/\n" +
 	"\x04runs\x18\x01 \x03(\v2\x1b.agentcompose.v2.RunSummaryR\x04runs\"\xa6\x01\n" +
 	"\x14FollowRunLogsRequest\x12\x1d\n" +
@@ -7894,7 +7938,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x10block_read_bytes\x18\n" +
 	" \x01(\v2\x1c.agentcompose.v2.MetricValueR\x0eblockReadBytes\x12H\n" +
 	"\x11block_write_bytes\x18\v \x01(\v2\x1c.agentcompose.v2.MetricValueR\x0fblockWriteBytes\x12C\n" +
-	"\x0euptime_seconds\x18\f \x01(\v2\x1c.agentcompose.v2.MetricValueR\ruptimeSeconds\"\x83\x05\n" +
+	"\x0euptime_seconds\x18\f \x01(\v2\x1c.agentcompose.v2.MetricValueR\ruptimeSeconds\"\xee\x05\n" +
 	"\n" +
 	"RunSummary\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1d\n" +
@@ -7924,7 +7968,12 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"created_at\x18\x11 \x01(\tR\tcreatedAt\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\x12 \x01(\tR\tupdatedAt\x12\x1a\n" +
-	"\bwarnings\x18\x13 \x03(\tR\bwarnings\"\xcb\x02\n" +
+	"\bwarnings\x18\x13 \x03(\tR\bwarnings\x12\x1d\n" +
+	"\n" +
+	"sandbox_id\x18\x14 \x01(\tR\tsandboxId\x12 \n" +
+	"\frun_short_id\x18\x15 \x01(\tR\n" +
+	"runShortId\x12(\n" +
+	"\x10sandbox_short_id\x18\x16 \x01(\tR\x0esandboxShortId\"\xcb\x02\n" +
 	"\tRunDetail\x125\n" +
 	"\asummary\x18\x01 \x01(\v2\x1b.agentcompose.v2.RunSummaryR\asummary\x12\x16\n" +
 	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x16\n" +

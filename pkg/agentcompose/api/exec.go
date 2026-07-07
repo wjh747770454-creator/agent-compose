@@ -271,16 +271,19 @@ func (h *ExecHandler) resolveExecTargetSession(ctx context.Context, req *agentco
 }
 
 func (h *ExecHandler) sessionForProjectRun(ctx context.Context, run domain.ProjectRunRecord) (*domain.Session, error) {
-	sessionID := strings.TrimSpace(run.SessionID)
+	sessionID := strings.TrimSpace(run.SandboxID)
 	if sessionID == "" {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("run %s has no session", run.RunID))
+		sessionID = strings.TrimSpace(run.SessionID)
+	}
+	if sessionID == "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("run %s has no sandbox", run.RunID))
 	}
 	session, err := h.store.GetSession(ctx, sessionID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("session %s for run %s not found: %w", sessionID, run.RunID, err))
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("sandbox %s for run %s not found: %w", sessionID, run.RunID, err))
 	}
 	if session.Summary.VMStatus != domain.VMStatusRunning {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("session %s for run %s is not running", sessionID, run.RunID))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sandbox %s for run %s is not running", sessionID, run.RunID))
 	}
 	return session, nil
 }

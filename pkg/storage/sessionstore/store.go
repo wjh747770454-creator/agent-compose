@@ -19,6 +19,7 @@ import (
 	appconfig "agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	"agent-compose/pkg/execution"
+	"agent-compose/pkg/identity"
 	domain "agent-compose/pkg/model"
 
 	"github.com/google/uuid"
@@ -90,7 +91,8 @@ func (s *Store) CreateSession(ctx context.Context, title, baseWorkspace, driver,
 
 func (s *Store) CreateSessionWithOptions(_ context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SessionWorkspace, envItems []SessionEnvVar, tags []SessionTag, options CreateSessionOptions) (*Session, error) {
 	now := time.Now().UTC()
-	id := uuid.NewString()
+	id := identity.NewRandomID(identity.ResourceSandbox)
+	shortID := identity.ShortID(id)
 	sessionDir := s.sessionDir(id)
 	workspaceDir := filepath.Join(sessionDir, "workspace")
 	proxyPath := strings.TrimRight(s.config.JupyterProxyBasePath, "/") + "/" + id + "/lab"
@@ -119,12 +121,13 @@ func (s *Store) CreateSessionWithOptions(_ context.Context, title, baseWorkspace
 	session := &Session{
 		Summary: SessionSummary{
 			ID:            id,
+			ShortID:       shortID,
 			Title:         strings.TrimSpace(title),
 			TriggerSource: domain.NormalizeSessionTriggerSource(triggerSource, tags),
 			Driver:        driver,
 			VMStatus:      VMStatusPending,
 			GuestImage:    guestImage,
-			RuntimeRef:    "agent-compose-" + id,
+			RuntimeRef:    "agent-compose-" + shortID,
 			WorkspacePath: workspaceDir,
 			ProxyPath:     proxyPath,
 			CreatedAt:     now,
@@ -446,6 +449,9 @@ func (s *Store) loadSession(id string) (*Session, error) {
 		return nil, fmt.Errorf("decode session metadata %s: %w", id, err)
 	}
 	session.Summary.TriggerSource = domain.NormalizeSessionTriggerSource(session.Summary.TriggerSource, session.Summary.Tags)
+	if strings.TrimSpace(session.Summary.ShortID) == "" {
+		session.Summary.ShortID = identity.ShortID(session.Summary.ID)
+	}
 	driver, err := driverpkg.ResolveSessionRuntimeDriver(session.Summary.Driver, s.config.RuntimeDriver)
 	if err != nil {
 		return nil, fmt.Errorf("session metadata %s has invalid driver: %w", id, err)

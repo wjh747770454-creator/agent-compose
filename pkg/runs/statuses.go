@@ -30,7 +30,10 @@ func ListProjectSessionStatuses(ctx context.Context, runStore ProjectSessionRunS
 	items := make([]domain.ProjectSessionStatus, 0, len(runs))
 	seenSessions := make(map[string]struct{}, len(runs))
 	for _, run := range runs {
-		sessionID := strings.TrimSpace(run.SessionID)
+		sessionID := strings.TrimSpace(run.SandboxID)
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(run.SessionID)
+		}
 		if sessionID == "" {
 			continue
 		}

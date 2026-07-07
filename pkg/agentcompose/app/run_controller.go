@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -138,12 +139,22 @@ func runAgentRequestFromProto(msg *agentcomposev2.RunAgentRequest) runs.RunAgent
 		TriggerID:        msg.GetTriggerId(),
 		ClientRequestID:  msg.GetClientRequestId(),
 		Env:              msg.GetEnv(),
-		SessionID:        msg.GetSessionId(),
+		SandboxID:        msg.GetSandboxId(),
+		SessionID:        firstNonEmpty(msg.GetSandboxId(), msg.GetSessionId()),
 		Driver:           msg.GetDriver(),
 		OutputSchemaJSON: msg.GetOutputSchemaJson(),
 		CleanupPolicy:    msg.GetCleanupPolicy(),
 		Jupyter:          msg.GetJupyter(),
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func runConnectError(err error) error {

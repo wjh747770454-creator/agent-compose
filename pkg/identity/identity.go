@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -14,6 +15,8 @@ const (
 	shortIDLength = 12
 )
 
+const Prefix = idPrefix
+
 type ResourceKind string
 
 const (
@@ -23,6 +26,8 @@ const (
 	ResourceTrigger   ResourceKind = "trigger"
 	ResourceLoader    ResourceKind = "loader"
 	ResourceRun       ResourceKind = "run"
+	ResourceSandbox   ResourceKind = "sandbox"
+	ResourceCache     ResourceKind = "cache"
 	ResourceWorkspace ResourceKind = "workspace"
 )
 
@@ -51,12 +56,31 @@ func ShortID(id string) string {
 	return id[len(idPrefix) : len(idPrefix)+shortIDLength]
 }
 
+func Hash(id string) (string, error) {
+	id = strings.TrimSpace(strings.ToLower(id))
+	if strings.HasPrefix(id, idPrefix) {
+		id = strings.TrimPrefix(id, idPrefix)
+	}
+	if len(id) != hashHexLength || !isLowerHex(id) {
+		return "", fmt.Errorf("invalid sha256 identity")
+	}
+	return id, nil
+}
+
 func IsID(id string) bool {
 	id = strings.TrimSpace(id)
 	if len(id) != len(idPrefix)+hashHexLength || !strings.HasPrefix(id, idPrefix) {
 		return false
 	}
 	return isLowerHex(id[len(idPrefix):])
+}
+
+func IsIDPrefix(id string) bool {
+	id = strings.TrimSpace(strings.ToLower(id))
+	if strings.HasPrefix(id, idPrefix) {
+		id = strings.TrimPrefix(id, idPrefix)
+	}
+	return len(id) >= shortIDLength && len(id) <= hashHexLength && isLowerHex(id)
 }
 
 func IsShortID(id string) bool {

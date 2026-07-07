@@ -88,11 +88,12 @@ func ScanProjectRun(scan func(dest ...any) error) (domain.ProjectRunRecord, erro
 	var updatedAtRaw any
 	if err := scan(
 		&item.RunID, &item.ProjectID, &item.ProjectName, &item.ProjectRevision, &item.AgentName, &item.ManagedAgentID, &item.Source, &item.SchedulerID, &item.TriggerID, &item.Status,
-		&item.SessionID, &item.ExitCode, &item.Error, &item.Prompt, &item.Output, &item.ResultJSON, &item.LogsPath, &item.ArtifactsDir, &item.CleanupError, &item.Driver, &item.ImageRef,
+		&item.SandboxID, &item.ExitCode, &item.Error, &item.Prompt, &item.Output, &item.ResultJSON, &item.LogsPath, &item.ArtifactsDir, &item.CleanupError, &item.Driver, &item.ImageRef,
 		&startedAtRaw, &completedAtRaw, &item.DurationMs, &createdAtRaw, &updatedAtRaw,
 	); err != nil {
 		return domain.ProjectRunRecord{}, fmt.Errorf("scan project run: %w", err)
 	}
+	item.SessionID = item.SandboxID
 	item.StartedAt = parseStoredUnixTimeAuto(AsInt64Time(startedAtRaw))
 	item.CompletedAt = parseStoredUnixTimeAuto(AsInt64Time(completedAtRaw))
 	item.CreatedAt = parseStoredTime(createdAtRaw)
@@ -176,6 +177,6 @@ func ParseInt64String(value string) (int64, bool) {
 
 func SelectProjectRunSQL() string {
 	return `SELECT run_id, project_id, project_name, project_revision, agent_name, managed_agent_id, source, scheduler_id, trigger_id, status,
-		session_id, exit_code, error, prompt, output, result_json, logs_path, artifacts_dir, cleanup_error, driver, image_ref,
+		sandbox_id, exit_code, error, prompt, output, result_json, logs_path, artifacts_dir, cleanup_error, driver, image_ref,
 		started_at, completed_at, duration_ms, created_at, updated_at FROM project_run`
 }

@@ -404,11 +404,11 @@ func (s *projectStore) CreateProjectRun(ctx context.Context, run ProjectRunRecor
 	run.UpdatedAt = now
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO project_run(
 		run_id, project_id, project_name, project_revision, agent_name, managed_agent_id, source, scheduler_id, trigger_id, status,
-		session_id, exit_code, error, prompt, output, result_json, logs_path, artifacts_dir, cleanup_error, driver, image_ref,
+		sandbox_id, exit_code, error, prompt, output, result_json, logs_path, artifacts_dir, cleanup_error, driver, image_ref,
 		started_at, completed_at, duration_ms, created_at, updated_at
 	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.RunID, run.ProjectID, run.ProjectName, run.ProjectRevision, run.AgentName, run.ManagedAgentID, run.Source, run.SchedulerID, run.TriggerID, run.Status,
-		run.SessionID, run.ExitCode, run.Error, run.Prompt, run.Output, run.ResultJSON, run.LogsPath, run.ArtifactsDir, run.CleanupError, run.Driver, run.ImageRef,
+		run.SandboxID, run.ExitCode, run.Error, run.Prompt, run.Output, run.ResultJSON, run.LogsPath, run.ArtifactsDir, run.CleanupError, run.Driver, run.ImageRef,
 		domain.NonZeroTimeUnixMilli(run.StartedAt), domain.NonZeroTimeUnixMilli(run.CompletedAt), run.DurationMs, run.CreatedAt.Unix(), run.UpdatedAt.Unix()); err != nil {
 		return ProjectRunRecord{}, fmt.Errorf("insert project run %s: %w", run.RunID, err)
 	}
@@ -423,11 +423,11 @@ func (s *projectStore) UpdateProjectRun(ctx context.Context, run ProjectRunRecor
 	now := time.Now().UTC()
 	result, err := s.db.ExecContext(ctx, `UPDATE project_run SET
 		project_id = ?, project_name = ?, project_revision = ?, agent_name = ?, managed_agent_id = ?, source = ?, scheduler_id = ?, trigger_id = ?, status = ?,
-		session_id = ?, exit_code = ?, error = ?, prompt = ?, output = ?, result_json = ?, logs_path = ?, artifacts_dir = ?, cleanup_error = ?, driver = ?, image_ref = ?,
+		sandbox_id = ?, exit_code = ?, error = ?, prompt = ?, output = ?, result_json = ?, logs_path = ?, artifacts_dir = ?, cleanup_error = ?, driver = ?, image_ref = ?,
 		started_at = ?, completed_at = ?, duration_ms = ?, updated_at = ?
 		WHERE run_id = ?`,
 		run.ProjectID, run.ProjectName, run.ProjectRevision, run.AgentName, run.ManagedAgentID, run.Source, run.SchedulerID, run.TriggerID, run.Status,
-		run.SessionID, run.ExitCode, run.Error, run.Prompt, run.Output, run.ResultJSON, run.LogsPath, run.ArtifactsDir, run.CleanupError, run.Driver, run.ImageRef,
+		run.SandboxID, run.ExitCode, run.Error, run.Prompt, run.Output, run.ResultJSON, run.LogsPath, run.ArtifactsDir, run.CleanupError, run.Driver, run.ImageRef,
 		domain.NonZeroTimeUnixMilli(run.StartedAt), domain.NonZeroTimeUnixMilli(run.CompletedAt), run.DurationMs, now.Unix(), run.RunID)
 	if err != nil {
 		return ProjectRunRecord{}, fmt.Errorf("update project run %s: %w", run.RunID, err)
@@ -477,9 +477,13 @@ func (s *projectStore) ListProjectRunsByOptions(ctx context.Context, options Pro
 		where = append(where, "agent_name = ?")
 		args = append(args, agentName)
 	}
-	if sessionID := strings.TrimSpace(options.SessionID); sessionID != "" {
-		where = append(where, "session_id = ?")
-		args = append(args, sessionID)
+	sandboxID := strings.TrimSpace(options.SandboxID)
+	if sandboxID == "" {
+		sandboxID = strings.TrimSpace(options.SessionID)
+	}
+	if sandboxID != "" {
+		where = append(where, "sandbox_id = ?")
+		args = append(args, sandboxID)
 	}
 	if schedulerID := strings.TrimSpace(options.SchedulerID); schedulerID != "" {
 		where = append(where, "scheduler_id = ?")

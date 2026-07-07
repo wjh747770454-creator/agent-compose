@@ -412,6 +412,7 @@ message RunAgentRequest {
   string command = 12;
   RunJupyterSpec jupyter = 13;
   string driver = 14;
+  string sandbox_id = 15;
 }
 
 message RunAgentResponse {
@@ -458,6 +459,7 @@ message ListRunsRequest {
   string started_to = 8;
   uint32 offset = 9;
   uint32 limit = 10;
+  string sandbox_id = 11;
 }
 
 message ListRunsResponse {
@@ -551,6 +553,9 @@ message RunSummary {
   string created_at = 17;
   string updated_at = 18;
   repeated string warnings = 19;
+  string sandbox_id = 20;
+  string run_short_id = 21;
+  string sandbox_short_id = 22;
 }
 
 message RunDetail {

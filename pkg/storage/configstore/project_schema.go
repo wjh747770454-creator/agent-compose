@@ -85,7 +85,7 @@ func (s *projectStore) ensureProjectSchema(ctx context.Context) error {
 			scheduler_id TEXT NOT NULL DEFAULT '',
 			trigger_id TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT 'pending',
-			session_id TEXT NOT NULL DEFAULT '',
+			sandbox_id TEXT NOT NULL DEFAULT '',
 			exit_code INTEGER NOT NULL DEFAULT 0,
 			error TEXT NOT NULL DEFAULT '',
 			prompt TEXT NOT NULL DEFAULT '',
@@ -105,7 +105,7 @@ func (s *projectStore) ensureProjectSchema(ctx context.Context) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_project_run_project_status ON project_run(project_id, status, created_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_project_run_agent ON project_run(project_id, agent_name, created_at DESC);`,
-		`CREATE INDEX IF NOT EXISTS idx_project_run_session ON project_run(session_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_project_run_sandbox ON project_run(sandbox_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_project_run_scheduler ON project_run(project_id, scheduler_id, trigger_id);`,
 	}
 	for _, stmt := range statements {

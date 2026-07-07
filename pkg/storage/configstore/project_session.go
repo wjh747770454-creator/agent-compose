@@ -10,7 +10,7 @@ import (
 )
 
 func (s *projectStore) ListProjectSessionRuns(ctx context.Context, filter domain.ProjectSessionRelationFilter) ([]ProjectRunRecord, error) {
-	query := projects.SelectProjectRunSQL() + ` WHERE session_id != ''`
+	query := projects.SelectProjectRunSQL() + ` WHERE sandbox_id != ''`
 	args := make([]any, 0, 4+len(filter.Statuses))
 	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" {
 		query += ` AND project_id = ?`
@@ -20,9 +20,13 @@ func (s *projectStore) ListProjectSessionRuns(ctx context.Context, filter domain
 		query += ` AND agent_name = ?`
 		args = append(args, agentName)
 	}
-	if sessionID := strings.TrimSpace(filter.SessionID); sessionID != "" {
-		query += ` AND session_id = ?`
-		args = append(args, sessionID)
+	sandboxID := strings.TrimSpace(filter.SandboxID)
+	if sandboxID == "" {
+		sandboxID = strings.TrimSpace(filter.SessionID)
+	}
+	if sandboxID != "" {
+		query += ` AND sandbox_id = ?`
+		args = append(args, sandboxID)
 	}
 	statuses := projects.NormalizeRunStatusFilter(filter.Statuses)
 	if len(statuses) > 0 {
@@ -66,7 +70,7 @@ func (s *projectStore) ListProjectRunsForSession(ctx context.Context, sessionID 
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	return s.ListProjectSessionRuns(ctx, domain.ProjectSessionRelationFilter{SessionID: sessionID})
+	return s.ListProjectSessionRuns(ctx, domain.ProjectSessionRelationFilter{SandboxID: sessionID})
 }
 
 func placeholders(count int) string {

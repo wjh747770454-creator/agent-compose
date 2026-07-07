@@ -1,10 +1,10 @@
 package model_test
 
 import (
-	"agent-compose/pkg/identity"
 	"path/filepath"
 	"testing"
 
+	"agent-compose/pkg/identity"
 	domain "agent-compose/pkg/model"
 )
 

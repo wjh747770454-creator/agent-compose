@@ -27,6 +27,7 @@ type StartRequest struct {
 type TransitionRequest struct {
 	RunID        string
 	Status       string
+	SandboxID    string
 	SessionID    string
 	ExitCode     int
 	Error        string
@@ -160,7 +161,7 @@ func (c *Coordinator) MarkRunning(ctx context.Context, runID, sessionID string) 
 	return c.TransitionRun(ctx, TransitionRequest{
 		RunID:     runID,
 		Status:    domain.ProjectRunStatusRunning,
-		SessionID: sessionID,
+		SandboxID: sessionID,
 	})
 }
 
@@ -227,8 +228,13 @@ func (c *Coordinator) nowUTC() time.Time {
 }
 
 func applyProjectRunTransitionFields(run *domain.ProjectRunRecord, req TransitionRequest) {
-	if value := strings.TrimSpace(req.SessionID); value != "" {
-		run.SessionID = value
+	sandboxID := strings.TrimSpace(req.SandboxID)
+	if sandboxID == "" {
+		sandboxID = strings.TrimSpace(req.SessionID)
+	}
+	if sandboxID != "" {
+		run.SandboxID = sandboxID
+		run.SessionID = sandboxID
 	}
 	if req.ExitCode != 0 {
 		run.ExitCode = req.ExitCode

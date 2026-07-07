@@ -142,6 +142,7 @@ type RunAgentRequest struct {
 	TriggerID        string
 	ClientRequestID  string
 	Env              []*agentcomposev2.EnvVarSpec
+	SandboxID        string
 	SessionID        string
 	Driver           string
 	OutputSchemaJSON string
@@ -175,6 +176,9 @@ func (c *Controller) StartProjectRun(ctx context.Context, req RunAgentRequest) (
 	commandText := strings.TrimSpace(req.Command)
 	if commandText != "" && (strings.TrimSpace(req.Prompt) != "" || strings.TrimSpace(req.TriggerID) != "") {
 		return StartedProjectRun{}, fmt.Errorf("%w: run requires only one of command, prompt, or trigger", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.SessionID) == "" {
+		req.SessionID = strings.TrimSpace(req.SandboxID)
 	}
 	if strings.TrimSpace(req.SessionID) != "" && strings.TrimSpace(req.Driver) != "" {
 		return StartedProjectRun{}, fmt.Errorf("%w: run driver cannot be combined with an existing sandbox", ErrInvalidRequest)
