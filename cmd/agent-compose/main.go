@@ -44,6 +44,7 @@ import (
 	"agent-compose/pkg/config"
 	driverpkg "agent-compose/pkg/driver"
 	"agent-compose/pkg/health"
+	"agent-compose/pkg/identity"
 	domain "agent-compose/pkg/model"
 	"agent-compose/pkg/projects"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
@@ -3591,6 +3592,7 @@ type composeCacheOperationOutput struct {
 
 type composeCacheOutput struct {
 	CacheID        string                        `json:"cache_id"`
+	ShortID        string                        `json:"short_id,omitempty"`
 	Domain         string                        `json:"domain"`
 	Type           string                        `json:"type"`
 	Driver         string                        `json:"driver"`
@@ -3654,6 +3656,7 @@ type composeImageRemoveOutput struct {
 
 type composeImageOutput struct {
 	ImageID            string            `json:"image_id"`
+	ShortID            string            `json:"short_id,omitempty"`
 	ImageRef           string            `json:"image_ref"`
 	ResolvedRef        string            `json:"resolved_ref,omitempty"`
 	RepoTags           []string          `json:"repo_tags,omitempty"`
@@ -4586,6 +4589,7 @@ func composeCacheOutputFromProto(cache *agentcomposev2.CacheItem) composeCacheOu
 	}
 	return composeCacheOutput{
 		CacheID:        cache.GetCacheId(),
+		ShortID:        identity.ShortID(cache.GetCacheId()),
 		Domain:         cacheDomainText(cache.GetDomain()),
 		Type:           cacheTypeText(cache.GetDomain()),
 		Driver:         cache.GetDriver(),
@@ -4613,6 +4617,7 @@ func composeImageOutputFromProto(image *agentcomposev2.Image) composeImageOutput
 	}
 	return composeImageOutput{
 		ImageID:            image.GetImageId(),
+		ShortID:            identity.ShortID(image.GetImageId()),
 		ImageRef:           image.GetImageRef(),
 		ResolvedRef:        image.GetResolvedRef(),
 		RepoTags:           append([]string(nil), image.GetRepoTags()...),
@@ -4668,7 +4673,7 @@ func writeCacheListText(out io.Writer, output composeCacheListOutput) error {
 	}
 	for _, cache := range output.Caches {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-			cache.CacheID,
+			firstNonEmptyString(cache.ShortID, cache.CacheID),
 			firstNonEmptyString(cache.Driver, "-"),
 			firstNonEmptyString(cache.Type, "-"),
 			firstNonEmptyString(cache.Status, "-"),

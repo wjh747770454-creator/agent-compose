@@ -31,7 +31,7 @@ func (c *Cache) MaterializeOCILayout(ctx context.Context, ref string) (Materiali
 	if !ok {
 		return MaterializationResult{}, NewError(ErrorKindNotFound, "materialize oci layout", ref, fmt.Errorf("image not found"))
 	}
-	imageID := firstNonEmpty(image.ConfigDigest, image.CacheKey, image.ManifestDigest, image.NormalizedRef)
+	imageID := firstNonEmpty(image.ConfigDigest, image.ManifestDigest, image.CacheKey)
 	if strings.TrimSpace(imageID) == "" {
 		return MaterializationResult{}, NewError(ErrorKindInvalidReference, "materialize oci layout", ref, fmt.Errorf("image has no materializable identity"))
 	}

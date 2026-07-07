@@ -73,6 +73,23 @@ func TestCacheHandlerInspectCache(t *testing.T) {
 	}
 }
 
+func TestCacheHandlerInspectCacheAllowsIDPrefix(t *testing.T) {
+	item := testRuntimeCacheItem(t, runtimecache.StatusUnknown)
+	prefix := runtimecache.ShortCacheID(item.CacheID)
+	controller := &fakeCacheController{
+		inspectResult: runtimecache.ListResult{Items: []runtimecache.Item{item}},
+	}
+	handler := NewCacheHandler(controller)
+
+	_, err := handler.InspectCache(context.Background(), connect.NewRequest(&agentcomposev2.InspectCacheRequest{CacheId: prefix}))
+	if err != nil {
+		t.Fatalf("InspectCache prefix: %v", err)
+	}
+	if controller.inspectID != prefix {
+		t.Fatalf("inspectID = %q, want prefix %q", controller.inspectID, prefix)
+	}
+}
+
 func TestCacheHandlerInspectCacheNotFound(t *testing.T) {
 	handler := NewCacheHandler(&fakeCacheController{})
 	_, err := handler.InspectCache(context.Background(), connect.NewRequest(&agentcomposev2.InspectCacheRequest{CacheId: testRuntimeCacheID(t, runtimecache.StatusOrphaned)}))

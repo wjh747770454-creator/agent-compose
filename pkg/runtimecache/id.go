@@ -1,28 +1,24 @@
 package runtimecache
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"agent-compose/pkg/identity"
 )
 
-const cacheIDHashLength = 16
-
 var (
-	ErrInvalidCacheID = errors.New("invalid runtime cache id")
-	kindSegmentRE     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	hashSegmentRE     = regexp.MustCompile(`^[a-f0-9]+$`)
+	ErrInvalidCacheID   = errors.New("invalid runtime cache id")
+	ErrAmbiguousCacheID = errors.New("ambiguous runtime cache id")
+	kindSegmentRE       = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 )
 
 type ParsedCacheID struct {
-	Domain Domain
-	Driver string
-	Kind   string
-	Hash   string
+	ID   string
+	Hash string
 }
 
 func GenerateCacheID(item Item) (string, error) {
@@ -41,36 +37,65 @@ func GenerateCacheID(item Item) (string, error) {
 	if kind == "" {
 		return "", fmt.Errorf("%w: kind is required", ErrInvalidCacheID)
 	}
-	identity := cacheIDIdentity(item)
-	if identity == "" {
+	identityValue := cacheIDIdentity(item)
+	if identityValue == "" {
 		return "", fmt.Errorf("%w: identity is required", ErrInvalidCacheID)
 	}
-	hash := cacheIDHash(domain, driver, kind, identity)
-	return strings.Join([]string{string(domain), driver, kind, hash}, ":"), nil
+	return identity.NewID(identity.ResourceKind("cache:"+kind), string(domain), driver, identityValue), nil
 }
 
 func ParseCacheID(cacheID string) (ParsedCacheID, error) {
-	parts := strings.Split(strings.TrimSpace(cacheID), ":")
-	if len(parts) != 4 {
-		return ParsedCacheID{}, fmt.Errorf("%w: expected four segments", ErrInvalidCacheID)
+	hash, err := identity.Hash(cacheID)
+	if err != nil {
+		return ParsedCacheID{}, fmt.Errorf("%w: %v", ErrInvalidCacheID, err)
 	}
-	domain, ok := NormalizeDomain(Domain(parts[0]))
-	if !ok || domain == "" {
-		return ParsedCacheID{}, fmt.Errorf("%w: unknown domain %q", ErrInvalidCacheID, parts[0])
+	return ParsedCacheID{ID: identity.Prefix + hash, Hash: hash}, nil
+}
+
+func ShortCacheID(cacheID string) string {
+	return identity.ShortID(cacheID)
+}
+
+func ValidateCacheIDReference(ref string) error {
+	ref = strings.TrimSpace(ref)
+	if _, err := ParseCacheID(ref); err == nil {
+		return nil
 	}
-	driver, ok := NormalizeDriver(parts[1])
-	if !ok || driver == "" {
-		return ParsedCacheID{}, fmt.Errorf("%w: unknown driver %q", ErrInvalidCacheID, parts[1])
+	if identity.IsIDPrefix(ref) {
+		return nil
 	}
-	kind := normalizeKind(parts[2])
-	if kind == "" {
-		return ParsedCacheID{}, fmt.Errorf("%w: invalid kind %q", ErrInvalidCacheID, parts[2])
+	return fmt.Errorf("%w: %s", ErrInvalidCacheID, ref)
+}
+
+func ResolveCacheID(items []Item, ref string) (string, error) {
+	ref = strings.TrimSpace(strings.ToLower(ref))
+	if _, err := ParseCacheID(ref); err == nil {
+		for _, item := range items {
+			if strings.EqualFold(item.CacheID, ref) {
+				return item.CacheID, nil
+			}
+		}
+		return ref, nil
 	}
-	hash := strings.ToLower(strings.TrimSpace(parts[3]))
-	if len(hash) != cacheIDHashLength || !hashSegmentRE.MatchString(hash) {
-		return ParsedCacheID{}, fmt.Errorf("%w: invalid hash %q", ErrInvalidCacheID, parts[3])
+	if !identity.IsIDPrefix(ref) {
+		return "", fmt.Errorf("%w: %s", ErrInvalidCacheID, ref)
 	}
-	return ParsedCacheID{Domain: domain, Driver: driver, Kind: kind, Hash: hash}, nil
+	prefix := strings.TrimPrefix(ref, identity.Prefix)
+	var matched string
+	for _, item := range items {
+		hash := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(item.CacheID)), identity.Prefix)
+		if !strings.HasPrefix(hash, prefix) {
+			continue
+		}
+		if matched != "" && matched != item.CacheID {
+			return "", fmt.Errorf("%w: %s", ErrAmbiguousCacheID, ref)
+		}
+		matched = item.CacheID
+	}
+	if matched == "" {
+		return "", fmt.Errorf("%w: %s", ErrCacheNotFound, ref)
+	}
+	return matched, nil
 }
 
 func cacheIDIdentity(item Item) string {
@@ -92,11 +117,6 @@ func cacheIDIdentity(item Item) string {
 		return candidate
 	}
 	return ""
-}
-
-func cacheIDHash(domain Domain, driver, kind, identity string) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{string(domain), driver, kind, identity}, "\x00")))
-	return hex.EncodeToString(sum[:])[:cacheIDHashLength]
 }
 
 func normalizeKind(kind string) string {

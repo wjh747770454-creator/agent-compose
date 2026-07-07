@@ -4,9 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+var testCacheIDRE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
 func TestGenerateCacheIDIsStableAndDistinct(t *testing.T) {
 	item := Item{
@@ -38,12 +41,18 @@ func TestGenerateCacheIDIsStableAndDistinct(t *testing.T) {
 	if other == first {
 		t.Fatalf("GenerateCacheID did not distinguish identity: %q", other)
 	}
+	if !testCacheIDRE.MatchString(first) {
+		t.Fatalf("GenerateCacheID = %q, want full sha256 id", first)
+	}
+	if got := ShortCacheID(first); got != strings.TrimPrefix(first, "sha256:")[:12] {
+		t.Fatalf("ShortCacheID = %q", got)
+	}
 
 	parsed, err := ParseCacheID(first)
 	if err != nil {
 		t.Fatalf("ParseCacheID returned error: %v", err)
 	}
-	if parsed.Domain != DomainMaterializedImageCache || parsed.Driver != DriverBoxLite || parsed.Kind != "materialized-rootfs" {
+	if parsed.ID != first || parsed.Hash != strings.TrimPrefix(first, "sha256:") {
 		t.Fatalf("ParseCacheID = %#v", parsed)
 	}
 }
@@ -73,12 +82,11 @@ func TestGenerateCacheIDRejectsIncompleteOrInvalidInput(t *testing.T) {
 func TestParseCacheIDRejectsInvalidIDs(t *testing.T) {
 	tests := []string{
 		"",
-		"oci-image-store:docker:oci-layout",
-		"bad-domain:docker:oci-layout:0123456789abcdef",
-		"oci-image-store:bad-driver:oci-layout:0123456789abcdef",
-		"oci-image-store:docker:../oci:0123456789abcdef",
-		"oci-image-store:docker:oci-layout:not-hex-value!!",
-		"../root:docker:oci-layout:0123456789abcdef",
+		"oci-image-store:docker:oci-layout:0123456789abcdef",
+		"sha256:",
+		"sha256:0123456789abcdef",
+		"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg",
+		"../root",
 	}
 
 	for _, id := range tests {
@@ -89,6 +97,61 @@ func TestParseCacheIDRejectsInvalidIDs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveCacheIDExactAndPrefix(t *testing.T) {
+	first := mustCacheIDItemForResolve(t, "/tmp/runtime-cache-test/first")
+	second := mustCacheIDItemForResolve(t, "/tmp/runtime-cache-test/second")
+	items := []Item{first, second}
+
+	resolved, err := ResolveCacheID(items, first.CacheID)
+	if err != nil {
+		t.Fatalf("ResolveCacheID exact returned error: %v", err)
+	}
+	if resolved != first.CacheID {
+		t.Fatalf("ResolveCacheID exact = %q, want %q", resolved, first.CacheID)
+	}
+
+	prefix := ShortCacheID(second.CacheID)
+	resolved, err = ResolveCacheID(items, prefix)
+	if err != nil {
+		t.Fatalf("ResolveCacheID prefix returned error: %v", err)
+	}
+	if resolved != second.CacheID {
+		t.Fatalf("ResolveCacheID prefix = %q, want %q", resolved, second.CacheID)
+	}
+}
+
+func TestResolveCacheIDRejectsInvalidMissingAndAmbiguous(t *testing.T) {
+	first := mustCacheIDItemForResolve(t, "/tmp/runtime-cache-test/first")
+	second := first
+	second.CacheID = "sha256:" + strings.TrimPrefix(first.CacheID, "sha256:")[:12] + strings.Repeat("0", 52)
+
+	if _, err := ResolveCacheID([]Item{first}, "../bad"); !errors.Is(err, ErrInvalidCacheID) {
+		t.Fatalf("invalid error = %v, want ErrInvalidCacheID", err)
+	}
+	if _, err := ResolveCacheID([]Item{first}, strings.Repeat("f", 12)); !errors.Is(err, ErrCacheNotFound) {
+		t.Fatalf("missing error = %v, want ErrCacheNotFound", err)
+	}
+	if _, err := ResolveCacheID([]Item{first, second}, ShortCacheID(first.CacheID)); !errors.Is(err, ErrAmbiguousCacheID) {
+		t.Fatalf("ambiguous error = %v, want ErrAmbiguousCacheID", err)
+	}
+}
+
+func mustCacheIDItemForResolve(t *testing.T, path string) Item {
+	t.Helper()
+	item := Item{
+		Domain: DomainRuntimeDerivedCache,
+		Driver: DriverBoxLite,
+		Kind:   "boxlite-disk-image",
+		Path:   path,
+	}
+	cacheID, err := GenerateCacheID(item)
+	if err != nil {
+		t.Fatalf("GenerateCacheID returned error: %v", err)
+	}
+	item.CacheID = cacheID
+	return item
 }
 
 func TestValidateCachePathAcceptsTargetInsideRoot(t *testing.T) {

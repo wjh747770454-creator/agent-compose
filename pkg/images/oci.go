@@ -12,7 +12,7 @@ import (
 func OCIMetadataToProtoImage(image imagecache.ImageMetadata, inspectedAt string) *agentcomposev2.Image {
 	repoTags := CleanOCIRefs(image.RepoTags)
 	repoDigests := CleanOCIRefs(image.RepoDigests)
-	imageID := FirstNonEmpty(image.ConfigDigest, image.CacheKey, image.ManifestDigest)
+	imageID := FirstNonEmpty(image.ConfigDigest, image.ManifestDigest)
 	resolvedRef := FirstNonEmpty(FirstString(repoDigests), image.ManifestDigest, image.NormalizedRef, imageID)
 	return &agentcomposev2.Image{
 		ImageId:            imageID,

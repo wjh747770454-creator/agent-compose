@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -79,7 +78,10 @@ func PruneItems(ctx context.Context, items []Item, req PruneRequest, now time.Ti
 }
 
 func RemoveItem(ctx context.Context, items []Item, req RemoveRequest, now time.Time, remove RemoveFunc) (Result, error) {
-	cacheID := strings.TrimSpace(req.CacheID)
+	cacheID, err := ResolveCacheID(items, req.CacheID)
+	if err != nil {
+		return Result{}, err
+	}
 	if _, err := ParseCacheID(cacheID); err != nil {
 		return Result{}, err
 	}

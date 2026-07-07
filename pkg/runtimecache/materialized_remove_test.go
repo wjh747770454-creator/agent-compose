@@ -125,7 +125,7 @@ func TestMaterializedRemoveOrphanedAndExpiredItems(t *testing.T) {
 func TestMaterializedRemoverRejectsMismatchedCacheID(t *testing.T) {
 	cache, image := materializedRemovalFixture(t)
 	item := requireItem(t, scanMaterializedItems(t, cache), cache.MaterializedOCILayoutPath(image.ConfigDigest))
-	item.CacheID = "materialized-image-cache:all:materialized-oci-layout:0123456789abcdef"
+	item.CacheID = "sha256:" + strings.Repeat("0", 64)
 	if err := (MaterializedRemover{Cache: cache}).Remove(context.Background(), item); err == nil {
 		t.Fatal("Remove returned nil error for mismatched cache id")
 	}
@@ -137,7 +137,7 @@ func TestValidateMaterializedRemoveItemRejectsInvalidItems(t *testing.T) {
 		Driver:  DriverAll,
 		Kind:    KindMaterializedOCILayout,
 		Path:    filepath.Join(t.TempDir(), "image", "oci"),
-		CacheID: "materialized-image-cache:all:materialized-oci-layout:0123456789abcdef",
+		CacheID: "sha256:" + strings.Repeat("0", 64),
 	}
 
 	tests := []struct {
@@ -164,7 +164,7 @@ func TestValidateMaterializedRemoveItemRejectsInvalidItems(t *testing.T) {
 			name: "malformed cache id",
 			item: Item{
 				Domain:  DomainMaterializedImageCache,
-				CacheID: "materialized-image-cache:all:materialized-oci-layout:not-a-hash",
+				CacheID: "sha256:not-a-hash",
 			},
 			wantInvalid: true,
 		},

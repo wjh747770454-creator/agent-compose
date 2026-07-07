@@ -55,7 +55,7 @@ func (h *CacheHandler) InspectCache(ctx context.Context, req *connect.Request[ag
 	if cacheID == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cache_id is required"))
 	}
-	if _, err := runtimecache.ParseCacheID(cacheID); err != nil {
+	if err := runtimecache.ValidateCacheIDReference(cacheID); err != nil {
 		return nil, ConnectErrorForRuntimeCache(err)
 	}
 	result, err := h.controller.InspectCache(ctx, cacheID)
@@ -98,7 +98,7 @@ func (h *CacheHandler) RemoveCache(ctx context.Context, req *connect.Request[age
 	if cacheID == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cache_id is required"))
 	}
-	if _, err := runtimecache.ParseCacheID(cacheID); err != nil {
+	if err := runtimecache.ValidateCacheIDReference(cacheID); err != nil {
 		return nil, ConnectErrorForRuntimeCache(err)
 	}
 	result, err := h.controller.RemoveCache(ctx, runtimecache.RemoveRequest{
@@ -303,7 +303,7 @@ func ConnectErrorForRuntimeCache(err error) error {
 	switch {
 	case errors.Is(err, runtimecache.ErrCacheNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
-	case errors.Is(err, runtimecache.ErrInvalidFilter), errors.Is(err, runtimecache.ErrInvalidCacheID):
+	case errors.Is(err, runtimecache.ErrInvalidFilter), errors.Is(err, runtimecache.ErrInvalidCacheID), errors.Is(err, runtimecache.ErrAmbiguousCacheID):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	case errors.Is(err, runtimecache.ErrUnsafePath):
 		return connect.NewError(connect.CodeFailedPrecondition, err)

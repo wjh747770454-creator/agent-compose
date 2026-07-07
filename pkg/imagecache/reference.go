@@ -77,7 +77,7 @@ func NewImageMetadata(input MetadataInput) (ImageMetadata, error) {
 		pulledAt = time.Now().UTC()
 	}
 	metadata := ImageMetadata{
-		CacheKey:        firstNonEmpty(input.ConfigDigest, input.ManifestDigest, ref.NormalizedRef),
+		CacheKey:        firstNonEmpty(input.ConfigDigest, input.ManifestDigest),
 		RequestedRef:    ref.RequestedRef,
 		NormalizedRef:   ref.NormalizedRef,
 		ManifestDigest:  input.ManifestDigest,

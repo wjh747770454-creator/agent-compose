@@ -29,14 +29,20 @@ func (c *Controller) ListCaches(ctx context.Context, req ListRequest) (ListResul
 }
 
 func (c *Controller) InspectCache(ctx context.Context, cacheID string) (ListResult, error) {
-	result, err := c.ListCaches(ctx, ListRequest{Filter: Filter{CacheID: cacheID}})
+	items, warnings, _, err := c.inventory(ctx)
 	if err != nil {
-		return result, err
+		return ListResult{}, err
 	}
-	if len(result.Items) == 0 {
-		return result, fmt.Errorf("%w: %s", ErrCacheNotFound, cacheID)
+	resolved, err := ResolveCacheID(items, cacheID)
+	if err != nil {
+		return ListResult{Warnings: warnings}, err
 	}
-	return result, nil
+	for _, item := range items {
+		if item.CacheID == resolved {
+			return ListResult{Items: []Item{item}, Warnings: warnings}, nil
+		}
+	}
+	return ListResult{Warnings: warnings}, fmt.Errorf("%w: %s", ErrCacheNotFound, cacheID)
 }
 
 func (c *Controller) PruneCaches(ctx context.Context, req PruneRequest) (Result, error) {
@@ -57,6 +63,11 @@ func (c *Controller) RemoveCache(ctx context.Context, req RemoveRequest) (Result
 	if err != nil {
 		return Result{}, err
 	}
+	resolved, err := ResolveCacheID(items, req.CacheID)
+	if err != nil {
+		return Result{Warnings: warnings}, err
+	}
+	req.CacheID = resolved
 	result, err := RemoveItem(ctx, items, req, c.now(), sourceRemoveFunc(sources))
 	if err != nil {
 		return result, err
