@@ -22,6 +22,7 @@ func ToDriverSession(session *domain.Session) *driverpkg.Session {
 			ID:            session.Summary.ID,
 			Driver:        session.Summary.Driver,
 			GuestImage:    session.Summary.GuestImage,
+			PullPolicy:    session.Summary.PullPolicy,
 			RuntimeRef:    session.Summary.RuntimeRef,
 			WorkspacePath: session.Summary.WorkspacePath,
 			CreatedAt:     session.Summary.CreatedAt,

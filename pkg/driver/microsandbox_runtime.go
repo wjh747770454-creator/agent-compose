@@ -858,7 +858,11 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sessio
 	// user tmpfs mounts are applied, so shadowing /run here is safe.
 	mounts["/run"] = microsandbox.Mount.Tmpfs(microsandbox.TmpfsOptions{SizeMiB: 256})
 	imageRef := resolveSessionGuestImage(vmState.Image, session.Summary.GuestImage, defaultGuestImageForDriver(r.config, RuntimeDriverMicrosandbox))
-	if resolvedRef, ok, err := r.resolveMicrosandboxImageRef(ctx, imageRef); err != nil {
+	imagePullTimeout := r.config.ImagePullTimeout
+	if imagePullTimeout <= 0 {
+		imagePullTimeout = defaultImagePullTimeout
+	}
+	if resolvedRef, ok, err := r.resolveMicrosandboxImageRef(ctx, imageRef, session.Summary.PullPolicy, imagePullTimeout); err != nil {
 		return nil, err
 	} else if ok {
 		imageRef = resolvedRef
@@ -874,7 +878,7 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sessio
 	env["STATE_ROOT"] = r.config.GuestStateRoot
 	env["RUNTIME_ROOT"] = r.config.GuestRuntimeRoot
 	env["JUPYTER_TOKEN"] = proxyState.Token
-	pullPolicy := microsandboxPullPolicyForImageRef(imageRef)
+	pullPolicy := microsandboxPullPolicyForImageRef(imageRef, session.Summary.PullPolicy)
 	// Disable DNS rebind protection so guests can resolve names that point at
 	// private/internal IPs (e.g. an internal container registry).
 	rebindDisabled := false
@@ -923,9 +927,12 @@ func (r *microsandboxRuntime) microsandboxBindQuotaGB() int {
 	return r.config.BoxDiskSizeGB
 }
 
-func (r *microsandboxRuntime) resolveMicrosandboxImageRef(ctx context.Context, imageRef string) (string, bool, error) {
+func (r *microsandboxRuntime) resolveMicrosandboxImageRef(ctx context.Context, imageRef, pullPolicy string, pullTimeout time.Duration) (string, bool, error) {
 	rootfs, ok, err := resolveMicrosandboxRootFS(ctx, imageRef, microsandboxImageResolverOps{
 		dockerAvailable: dockerDaemonAvailable,
+		applyDockerPullPolicy: func(ctx context.Context, imageRef string) error {
+			return applyDockerDaemonPullPolicy(ctx, imageRef, pullPolicy, pullTimeout)
+		},
 		dockerMaterialize: func(ctx context.Context, imageRef string) (microsandboxRootFSResult, bool, error) {
 			rootfs, ok, err := materializeLocalDockerImageRootfs(ctx, r.config.DataRoot, imageRef)
 			if err != nil || !ok {
@@ -934,7 +941,7 @@ func (r *microsandboxRuntime) resolveMicrosandboxImageRef(ctx context.Context, i
 			return microsandboxRootFSResult{ImageID: rootfs.ImageID, ResolvedRef: rootfs.ResolvedRef, RootFSPath: rootfs.RootfsPath}, true, nil
 		},
 		ociMaterialize: func(ctx context.Context, imageRef string) (microsandboxRootFSResult, bool, error) {
-			return materializeMicrosandboxOCIRootFS(ctx, r.config, imageRef)
+			return materializeMicrosandboxOCIRootFS(ctx, r.config, imageRef, pullPolicy)
 		},
 	})
 	if err != nil {
@@ -947,11 +954,18 @@ func (r *microsandboxRuntime) resolveMicrosandboxImageRef(ctx context.Context, i
 	return "", false, nil
 }
 
-func microsandboxPullPolicyForImageRef(imageRef string) microsandbox.PullPolicy {
+func microsandboxPullPolicyForImageRef(imageRef string, perCallPolicy string) microsandbox.PullPolicy {
 	if filepath.IsAbs(imageRef) {
 		return microsandbox.PullPolicyNever
 	}
-	return microsandbox.PullPolicyIfMissing
+	switch strings.ToLower(strings.TrimSpace(perCallPolicy)) {
+	case "always":
+		return microsandbox.PullPolicyAlways
+	case "never":
+		return microsandbox.PullPolicyNever
+	default:
+		return microsandbox.PullPolicyIfMissing
+	}
 }
 
 func (r *microsandboxRuntime) launchJupyter(ctx context.Context, sandbox *microsandbox.Sandbox, proxyState ProxyState) error {

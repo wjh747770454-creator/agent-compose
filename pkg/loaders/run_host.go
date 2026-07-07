@@ -293,6 +293,7 @@ func (h *RuntimeHost) Command(ctx context.Context, request domain.LoaderCommandR
 		Title:          request.Title,
 		Driver:         request.Driver,
 		GuestImage:     request.GuestImage,
+		PullPolicy:     request.PullPolicy,
 		WorkspaceID:    request.WorkspaceID,
 		JupyterEnabled: request.JupyterEnabled,
 		SessionEnv:     request.SessionEnv,

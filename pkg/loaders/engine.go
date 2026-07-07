@@ -998,6 +998,7 @@ func parseLoaderAgentRequest(args []*qjs.Value) (domain.LoaderAgentRequest, erro
 	request.Title = loaderStringOption(options, "title")
 	request.Driver = loaderStringOption(options, "driver")
 	request.GuestImage = loaderStringOption(options, "guestImage", "guest_image")
+	request.PullPolicy = normalizeImagePullPolicy(loaderStringOption(options, "pullPolicy", "pull_policy"))
 	request.WorkspaceID = loaderStringOption(options, "workspaceId", "workspace_id")
 	request.JupyterEnabled = loaderBoolOption(options, "jupyter")
 	request.SessionEnv, err = loaderSessionEnvOption(options)
@@ -1148,6 +1149,7 @@ func loaderCommandRequestFromOptions(options map[string]any, apiName string) (do
 		Title:          loaderStringOption(options, "title"),
 		Driver:         loaderStringOption(options, "driver"),
 		GuestImage:     loaderStringOption(options, "guestImage", "guest_image"),
+		PullPolicy:     normalizeImagePullPolicy(loaderStringOption(options, "pullPolicy", "pull_policy")),
 		WorkspaceID:    loaderStringOption(options, "workspaceId", "workspace_id"),
 		JupyterEnabled: loaderBoolOption(options, "jupyter"),
 	}
@@ -1548,4 +1550,17 @@ func loaderResultJSON(value *qjs.Value) (string, bool, error) {
 		return "", false, nil
 	}
 	return jsonValue, true, nil
+}
+
+func normalizeImagePullPolicy(policy string) string {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "always":
+		return "always"
+	case "missing":
+		return "missing"
+	case "never":
+		return "never"
+	default:
+		return ""
+	}
 }
