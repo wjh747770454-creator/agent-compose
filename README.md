@@ -322,10 +322,12 @@ Important variables include:
   explicit `agent-compose cache prune --older-than ... --force` for cache
   cleanup.
 - `BOX_DISK_SIZE_GB`: shared guest disk size for VM-type drivers (the boxlite
-  box disk and the microsandbox docker disk). Default 6 GiB.
+  box disk and the microsandbox docker disk). It also defaults the microsandbox
+  bind mount quota. Default 6 GiB.
 - `DOCKER_HOME`: Docker runtime state directory.
 - `MICROSANDBOX_HOME`, `MICROSANDBOX_MSB_PATH`, `MICROSANDBOX_LIB_PATH`,
-  `MICROSANDBOX_INSECURE_REGISTRIES`: Microsandbox settings.
+  `MICROSANDBOX_BIND_QUOTA_GB`, `MICROSANDBOX_INSECURE_REGISTRIES`:
+  Microsandbox settings.
 - `GUEST_WORKSPACE`, `GUEST_STATE_ROOT`, `GUEST_RUNTIME_ROOT`,
   `GUEST_LOG_ROOT`, `JUPYTER_GUEST_PORT`: guest paths and Jupyter port.
 - `WEBHOOK_BODY_LIMIT_BYTES`, `WORKSPACE_UPLOAD_LIMIT_BYTES`: request limits.

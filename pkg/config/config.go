@@ -64,6 +64,7 @@ type Config struct {
 	MicrosandboxLibPath        string
 	MicrosandboxDefaultImage   string
 	MicrosandboxInsecure       []string
+	MicrosandboxBindQuotaGB    int
 	DefaultImage               string
 	BoxRootfsPath              string
 	ImageRegistry              string
@@ -255,6 +256,15 @@ func NewConfig(di do.Injector) (*Config, error) {
 			boxDiskSizeGB = parsed
 		}
 	}
+	microsandboxBindQuotaGB := boxDiskSizeGB
+	if raw := os.Getenv("MICROSANDBOX_BIND_QUOTA_GB"); raw != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(raw, "%d", &parsed); err != nil || parsed <= 0 {
+			logger.Warn("failed to parse MICROSANDBOX_BIND_QUOTA_GB", "value", raw, "error", err)
+		} else {
+			microsandboxBindQuotaGB = parsed
+		}
+	}
 
 	boxCacheTTL := 7 * 24 * time.Hour
 	if raw := os.Getenv("BOX_CACHE_TTL"); raw != "" {
@@ -407,6 +417,7 @@ func NewConfig(di do.Injector) (*Config, error) {
 		MicrosandboxLibPath:        microsandboxLibPath,
 		MicrosandboxDefaultImage:   microsandboxDefaultImage,
 		MicrosandboxInsecure:       microsandboxInsecure,
+		MicrosandboxBindQuotaGB:    microsandboxBindQuotaGB,
 		DefaultImage:               defaultImage,
 		BoxRootfsPath:              boxRootfsPath,
 		ImageRegistry:              imageRegistry,

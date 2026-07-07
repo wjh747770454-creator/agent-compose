@@ -656,3 +656,60 @@ func TestBoxDiskSizeGB(t *testing.T) {
 		}
 	})
 }
+
+func TestMicrosandboxBindQuotaGB(t *testing.T) {
+	newCfg := func(t *testing.T) *Config {
+		t.Helper()
+		root := t.TempDir()
+		t.Setenv("DATA_ROOT", filepath.Join(root, "data"))
+		di := do.New()
+		do.ProvideValue(di, slog.Default())
+		cfg, err := NewConfig(di)
+		if err != nil {
+			t.Fatalf("NewConfig returned error: %v", err)
+		}
+		return cfg
+	}
+
+	t.Run("defaults to box disk size", func(t *testing.T) {
+		cfg := newCfg(t)
+		if cfg.MicrosandboxBindQuotaGB != 6 {
+			t.Fatalf("MicrosandboxBindQuotaGB = %d, want 6", cfg.MicrosandboxBindQuotaGB)
+		}
+	})
+
+	t.Run("follows BOX_DISK_SIZE_GB", func(t *testing.T) {
+		t.Setenv("BOX_DISK_SIZE_GB", "60")
+		cfg := newCfg(t)
+		if cfg.MicrosandboxBindQuotaGB != 60 {
+			t.Fatalf("MicrosandboxBindQuotaGB = %d, want 60", cfg.MicrosandboxBindQuotaGB)
+		}
+	})
+
+	t.Run("override sets the value", func(t *testing.T) {
+		t.Setenv("BOX_DISK_SIZE_GB", "60")
+		t.Setenv("MICROSANDBOX_BIND_QUOTA_GB", "96")
+		cfg := newCfg(t)
+		if cfg.MicrosandboxBindQuotaGB != 96 {
+			t.Fatalf("MicrosandboxBindQuotaGB = %d, want 96", cfg.MicrosandboxBindQuotaGB)
+		}
+	})
+
+	t.Run("invalid override keeps the inherited default", func(t *testing.T) {
+		t.Setenv("BOX_DISK_SIZE_GB", "60")
+		t.Setenv("MICROSANDBOX_BIND_QUOTA_GB", "abc")
+		cfg := newCfg(t)
+		if cfg.MicrosandboxBindQuotaGB != 60 {
+			t.Fatalf("MicrosandboxBindQuotaGB = %d, want 60", cfg.MicrosandboxBindQuotaGB)
+		}
+	})
+
+	t.Run("non-positive override keeps the inherited default", func(t *testing.T) {
+		t.Setenv("BOX_DISK_SIZE_GB", "60")
+		t.Setenv("MICROSANDBOX_BIND_QUOTA_GB", "0")
+		cfg := newCfg(t)
+		if cfg.MicrosandboxBindQuotaGB != 60 {
+			t.Fatalf("MicrosandboxBindQuotaGB = %d, want 60", cfg.MicrosandboxBindQuotaGB)
+		}
+	})
+}

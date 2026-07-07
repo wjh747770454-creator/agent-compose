@@ -825,7 +825,7 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sessio
 	}
 	mounts := make(map[string]microsandbox.MountConfig, len(manifest.Mounts)+1)
 	for _, mount := range manifest.Mounts {
-		mounts[mount.GuestPath] = microsandbox.Mount.Bind(mount.HostPath, microsandbox.MountOptions{Readonly: mount.ReadOnly})
+		mounts[mount.GuestPath] = r.microsandboxBindMount(mount.HostPath, mount.ReadOnly)
 	}
 	// Give docker its own disk-backed ext4 volume. The guest root is virtiofs,
 	// on which the kernel rejects overlayfs (docker's default storage driver)
@@ -907,6 +907,24 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sessio
 	}
 	sandboxCreated = true
 	return sandbox, nil
+}
+
+func (r *microsandboxRuntime) microsandboxBindMount(hostPath string, readonly bool) microsandbox.MountConfig {
+	mount := microsandbox.Mount.Bind(hostPath, microsandbox.MountOptions{Readonly: readonly})
+	if quotaGB := r.microsandboxBindQuotaGB(); quotaGB > 0 {
+		mount.QuotaMiB = uint32(quotaGB) * 1024
+	}
+	return mount
+}
+
+func (r *microsandboxRuntime) microsandboxBindQuotaGB() int {
+	if r.config == nil {
+		return 0
+	}
+	if r.config.MicrosandboxBindQuotaGB > 0 {
+		return r.config.MicrosandboxBindQuotaGB
+	}
+	return r.config.BoxDiskSizeGB
 }
 
 func (r *microsandboxRuntime) resolveMicrosandboxImageRef(ctx context.Context, imageRef, pullPolicy string, pullTimeout time.Duration) (string, bool, error) {

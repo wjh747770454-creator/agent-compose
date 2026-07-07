@@ -150,6 +150,42 @@ func TestMicrosandboxRemoveDockerDiskOnlyCurrentSession(t *testing.T) {
 	}
 }
 
+func TestMicrosandboxBindMountSetsConfiguredQuota(t *testing.T) {
+	runtime := &microsandboxRuntime{config: &appconfig.Config{MicrosandboxBindQuotaGB: 60}}
+
+	mount := runtime.microsandboxBindMount("/host/session", false)
+
+	if mount.QuotaMiB != 60*1024 {
+		t.Fatalf("QuotaMiB = %d, want %d", mount.QuotaMiB, 60*1024)
+	}
+	if mount.Readonly {
+		t.Fatalf("Readonly = true, want false")
+	}
+}
+
+func TestMicrosandboxBindMountPreservesReadonly(t *testing.T) {
+	runtime := &microsandboxRuntime{config: &appconfig.Config{MicrosandboxBindQuotaGB: 11}}
+
+	mount := runtime.microsandboxBindMount("/host/session", true)
+
+	if mount.QuotaMiB != 11*1024 {
+		t.Fatalf("QuotaMiB = %d, want %d", mount.QuotaMiB, 11*1024)
+	}
+	if !mount.Readonly {
+		t.Fatalf("Readonly = false, want true")
+	}
+}
+
+func TestMicrosandboxBindMountFallsBackToBoxDiskSize(t *testing.T) {
+	runtime := &microsandboxRuntime{config: &appconfig.Config{BoxDiskSizeGB: 42}}
+
+	mount := runtime.microsandboxBindMount("/host/session", false)
+
+	if mount.QuotaMiB != 42*1024 {
+		t.Fatalf("QuotaMiB = %d, want %d", mount.QuotaMiB, 42*1024)
+	}
+}
+
 func TestListMicrosandboxSessionEphemeralCaches(t *testing.T) {
 	home := t.TempDir()
 	diskPath := writeMicrosandboxFile(t, home, "docker-disks", "running.raw")
