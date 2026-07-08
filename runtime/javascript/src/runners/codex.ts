@@ -2,7 +2,7 @@ import { resolveCodexPath } from "../codex-path.js";
 import { stringEnv } from "../env.js";
 import { uniqueDirectories } from "../paths.js";
 import { readStoredSession, writeStoredSession } from "../session-state.js";
-import { extractText } from "../text.js";
+import { extractText, jsonString } from "../text.js";
 import { appendDelta, TranscriptWriter } from "../transcript.js";
 import type { AgentResult, RunnerOptions } from "../types.js";
 
@@ -13,6 +13,21 @@ interface CodexItemState {
   mcpStarted?: boolean;
   mcpResultEmitted?: boolean;
   mcpErrorEmitted?: boolean;
+  webSearchEmitted?: boolean;
+}
+
+function webSearchQuery(item: Record<string, unknown>): string {
+  if (typeof item.query === "string" && item.query.trim()) {
+    return item.query;
+  }
+  const action = item.action as Record<string, unknown> | undefined;
+  if (typeof action?.query === "string" && action.query.trim()) {
+    return action.query;
+  }
+  if (Array.isArray(action?.queries)) {
+    return action.queries.filter((entry) => typeof entry === "string" && entry.trim()).join(", ");
+  }
+  return "";
 }
 
 export class CodexRunner {
@@ -66,6 +81,9 @@ export class CodexRunner {
     const state = (this.itemState.get(item.id) || {}) as CodexItemState;
     if (!state.mcpStarted) {
       this.writer.line(`\n[mcp:${item.server}/${item.tool}]`);
+      if (item.arguments !== undefined) {
+        this.writer.line(jsonString(item.arguments));
+      }
       state.mcpStarted = true;
     }
     const error = item.error as Record<string, unknown> | undefined;
@@ -92,6 +110,22 @@ export class CodexRunner {
       : [];
     const nextText = lines.length > 0 ? `\n[todo]\n${lines.join("\n")}\n` : "";
     appendDelta(this.writer, this.itemState as Map<string, string>, item.id, nextText);
+  }
+
+  emitWebSearch(item: Record<string, unknown> & { id: string }, eventType: unknown): void {
+    const state = (this.itemState.get(item.id) || {}) as CodexItemState;
+    if (state.webSearchEmitted) {
+      return;
+    }
+    const query = webSearchQuery(item);
+    // Match Codex CLI transcript behavior: if the search completes without an
+    // exposed query, still emit the marker so the tool use remains visible.
+    if (!query && eventType !== "item.completed") {
+      return;
+    }
+    this.writer.line(`\n[web_search] ${query}`);
+    state.webSearchEmitted = true;
+    this.itemState.set(item.id, state);
   }
 
   handleEvent(event: Record<string, unknown>, result: AgentResult): void {
@@ -127,9 +161,7 @@ export class CodexRunner {
         this.emitMcp(item);
         break;
       case "web_search":
-        if (event.type === "item.started") {
-          this.writer.line(`\n[web_search] ${item.query}`);
-        }
+        this.emitWebSearch(item, event.type);
         break;
       case "todo_list":
         this.emitTodo(item);

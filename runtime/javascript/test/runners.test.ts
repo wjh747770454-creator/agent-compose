@@ -58,7 +58,15 @@ describe("CodexRunner", () => {
         }, result);
         runner.handleEvent({
           type: "item.completed",
-          item: { id: "mcp", type: "mcp_tool_call", server: "srv", tool: "lookup", status: "completed", result: { text: "mcp result" } },
+          item: {
+            id: "mcp",
+            type: "mcp_tool_call",
+            server: "srv",
+            tool: "lookup",
+            arguments: { query: "docs" },
+            status: "completed",
+            result: { text: "mcp result" },
+          },
         }, result);
         runner.handleEvent({
           type: "item.completed",
@@ -71,7 +79,8 @@ describe("CodexRunner", () => {
         runner.handleEvent({ type: "item.completed", item: { id: "err", type: "error", message: "item bad" } }, result);
         runner.handleEvent({ type: "item.completed", item: { id: "unknown", type: "new_type" } }, result);
         runner.handleEvent({ type: "item.completed" }, result);
-        runner.handleEvent({ type: "item.started", item: { id: "ws", type: "web_search", query: "docs" } }, result);
+        runner.handleEvent({ type: "item.started", item: { id: "ws", type: "web_search" } }, result);
+        runner.handleEvent({ type: "item.completed", item: { id: "ws", type: "web_search", action: { query: "docs" } } }, result);
       } finally {
         stdio.restore();
       }
@@ -83,12 +92,15 @@ describe("CodexRunner", () => {
       expect(stdio.stderr).toContain("[file_change]");
       expect(stdio.stderr).toContain("edit: a.ts");
       expect(stdio.stderr).toContain("[mcp:srv/lookup]");
+      expect(stdio.stderr).toContain("\"query\": \"docs\"");
       expect(stdio.stderr).toContain("mcp result");
+      expect(stdio.stderr).toContain("[mcp:srv/lookup]\n{\n  \"query\": \"docs\"\n}\nmcp result");
       expect(stdio.stderr).toContain("mcp failed");
       expect(stdio.stderr).toContain("[todo]");
       expect(stdio.stderr).toContain("[x] one");
       expect(stdio.stderr).toContain("item bad");
       expect(stdio.stderr).toContain("[web_search] docs");
+      expect(stdio.stderr).not.toContain("[web_search] \n");
     });
   });
 
@@ -120,6 +132,29 @@ describe("CodexRunner", () => {
       expect(stdio.stderr.match(/\[file_change\]/g)).toHaveLength(1);
       expect(stdio.stderr).toContain("[mcp:srv/tool]");
       expect(result.finalText).toBe("");
+    });
+  });
+
+  it("keeps the Codex web search marker when no query is exposed", async () => {
+    await withTempSession(async (root) => {
+      const runner = new CodexRunner(runnerOptions(root));
+      const result = {
+        provider: "codex" as const,
+        sessionId: "",
+        stopReason: "completed",
+        finalText: "",
+        transcript: "",
+        stderr: "",
+      };
+      const stdio = captureStdio();
+      try {
+        runner.handleEvent({ type: "item.started", item: { id: "ws", type: "web_search" } }, result);
+        runner.handleEvent({ type: "item.completed", item: { id: "ws", type: "web_search" } }, result);
+      } finally {
+        stdio.restore();
+      }
+
+      expect(stdio.stderr).toBe("\n[web_search] \n");
     });
   });
 
