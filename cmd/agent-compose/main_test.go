@@ -2538,12 +2538,12 @@ agents:
 		listRuns: func(ctx context.Context, req *connect.Request[agentcomposev2.ListRunsRequest]) (*connect.Response[agentcomposev2.ListRunsResponse], error) {
 			switch req.Msg.GetLimit() {
 			case 200:
-				if req.Msg.GetSessionId() != "" {
+				if req.Msg.GetSessionId() != "" || req.Msg.GetSandboxId() != "" {
 					t.Fatalf("ListRuns resolver request = %#v", req.Msg)
 				}
 			case 20:
 				sawFilteredList = true
-				if req.Msg.GetAgentName() != "reviewer" || req.Msg.GetSessionId() != sandboxID {
+				if req.Msg.GetAgentName() != "reviewer" || req.Msg.GetSandboxId() != sandboxID || req.Msg.GetSessionId() != "" {
 					t.Fatalf("ListRuns filtered request = %#v", req.Msg)
 				}
 			default:
@@ -2554,7 +2554,7 @@ agents:
 				ProjectId: req.Msg.GetProjectId(),
 				AgentName: "reviewer",
 				Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-				SessionId: sandboxID,
+				SandboxId: sandboxID,
 			}}}), nil
 		},
 		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -3535,7 +3535,7 @@ agents:
 		ProjectId: projectID,
 		AgentName: "reviewer",
 		Status:    agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
-		SessionId: sandboxID,
+		SandboxId: sandboxID,
 		UpdatedAt: "2026-06-11T00:00:01Z",
 	}
 	var stopped []string

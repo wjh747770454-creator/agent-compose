@@ -2643,9 +2643,6 @@ func normalizeComposeLogsOptions(cmd *cobra.Command, options composeLogsOptions,
 		}
 		options.AgentName = args[0]
 	}
-	if strings.TrimSpace(options.SandboxID) != "" {
-		options.SessionID = options.SandboxID
-	}
 	if options.TailLines < -1 {
 		return options, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("logs --tail must be -1 or greater")}
 	}
@@ -2667,8 +2664,8 @@ func resolveComposeLogRefs(ctx context.Context, client agentcomposev2connect.Run
 		}
 		options.RunID = runID
 	}
-	if shouldResolveComposeLogResourceRef(options.SessionID) {
-		sandboxID, err := resolveComposeSandboxIDRefFromRuns(ctx, client, projectID, options.AgentName, options.SessionID)
+	if shouldResolveComposeLogResourceRef(options.SandboxID) {
+		sandboxID, err := resolveComposeSandboxIDRefFromRuns(ctx, client, projectID, options.AgentName, options.SandboxID)
 		if err != nil {
 			return options, err
 		}
@@ -4636,7 +4633,7 @@ func listProjectRuns(ctx context.Context, client agentcomposev2connect.RunServic
 func latestRunsBySession(runs []*agentcomposev2.RunSummary) map[string]*agentcomposev2.RunSummary {
 	result := map[string]*agentcomposev2.RunSummary{}
 	for _, run := range runs {
-		sessionID := strings.TrimSpace(run.GetSessionId())
+		sessionID := runSummarySandboxID(run)
 		if sessionID == "" {
 			continue
 		}
@@ -4649,6 +4646,13 @@ func latestRunsBySession(runs []*agentcomposev2.RunSummary) map[string]*agentcom
 
 func runSortTime(run *agentcomposev2.RunSummary) string {
 	return firstNonEmptyString(run.GetUpdatedAt(), run.GetCreatedAt(), run.GetStartedAt(), run.GetCompletedAt())
+}
+
+func runSummarySandboxID(run *agentcomposev2.RunSummary) string {
+	if run == nil {
+		return ""
+	}
+	return firstNonEmptyString(strings.TrimSpace(run.GetSandboxId()), strings.TrimSpace(run.GetSessionId()))
 }
 
 func composePSSessionBelongsToProject(session *agentcomposev1.SessionSummary, project *agentcomposev2.Project, runsBySession map[string]*agentcomposev2.RunSummary) bool {
@@ -4717,7 +4721,7 @@ func firstRunningSessionOutput(ctx context.Context, clients cliServiceClients, p
 	}
 	seen := map[string]struct{}{}
 	for _, run := range resp.Msg.GetRuns() {
-		sessionID := strings.TrimSpace(run.GetSessionId())
+		sessionID := runSummarySandboxID(run)
 		if sessionID == "" {
 			continue
 		}
@@ -4976,6 +4980,7 @@ func composeRunOutputFromDetail(run *agentcomposev2.RunDetail) composeRunOutput 
 }
 
 func composeRunOutputFromSummary(run *agentcomposev2.RunSummary, projectName, logsCommand string) composeRunOutput {
+	sandboxID := runSummarySandboxID(run)
 	return composeRunOutput{
 		ID:             displayOpaqueID(run.GetRunId()),
 		ShortID:        shortOpaqueID(run.GetRunId()),
@@ -4984,8 +4989,8 @@ func composeRunOutputFromSummary(run *agentcomposev2.RunSummary, projectName, lo
 		AgentName:      run.GetAgentName(),
 		Source:         runSourceText(run.GetSource()),
 		Status:         runStatusText(run.GetStatus()),
-		SandboxID:      displayOpaqueID(run.GetSessionId()),
-		SandboxShortID: shortOpaqueID(run.GetSessionId()),
+		SandboxID:      displayOpaqueID(sandboxID),
+		SandboxShortID: shortOpaqueID(sandboxID),
 		ExitCode:       run.GetExitCode(),
 		Error:          run.GetError(),
 		StartedAt:      run.GetStartedAt(),
@@ -4998,6 +5003,7 @@ func composeRunOutputFromSummary(run *agentcomposev2.RunSummary, projectName, lo
 
 func composeRunOutputFromDetailWithOptions(run *agentcomposev2.RunDetail, options composeLogsOptions) composeRunOutput {
 	summary := run.GetSummary()
+	sandboxID := runSummarySandboxID(summary)
 	return composeRunOutput{
 		ID:             displayOpaqueID(summary.GetRunId()),
 		ShortID:        shortOpaqueID(summary.GetRunId()),
@@ -5006,8 +5012,8 @@ func composeRunOutputFromDetailWithOptions(run *agentcomposev2.RunDetail, option
 		AgentName:      summary.GetAgentName(),
 		Source:         runSourceText(summary.GetSource()),
 		Status:         runStatusText(summary.GetStatus()),
-		SandboxID:      displayOpaqueID(summary.GetSessionId()),
-		SandboxShortID: shortOpaqueID(summary.GetSessionId()),
+		SandboxID:      displayOpaqueID(sandboxID),
+		SandboxShortID: shortOpaqueID(sandboxID),
 		ExitCode:       summary.GetExitCode(),
 		Error:          summary.GetError(),
 		StartedAt:      summary.GetStartedAt(),
@@ -5876,7 +5882,7 @@ func listLogRuns(ctx context.Context, client agentcomposev2connect.RunServiceCli
 	resp, err := client.ListRuns(ctx, connect.NewRequest(&agentcomposev2.ListRunsRequest{
 		ProjectId: projectID,
 		AgentName: strings.TrimSpace(options.AgentName),
-		SessionId: strings.TrimSpace(options.SessionID),
+		SandboxId: strings.TrimSpace(options.SandboxID),
 		Limit:     20,
 	}))
 	if err != nil {
@@ -6033,7 +6039,7 @@ func resolveComposeSandboxIDRefFromRuns(ctx context.Context, client agentcompose
 	}
 	matches := map[string]struct{}{}
 	for _, run := range runs {
-		sandboxID := strings.TrimSpace(run.GetSessionId())
+		sandboxID := runSummarySandboxID(run)
 		if sandboxID == "" {
 			continue
 		}
