@@ -1491,14 +1491,14 @@ agents:
 				if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
 					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
 					RunId:     "run-command",
-					Chunk:     "command stdout\n",
+					Chunk:     "command stdout",
 				}); err != nil {
 					return err
 				}
 				if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
 					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
 					RunId:     "run-command",
-					Chunk:     "command stderr\n",
+					Chunk:     "command stderr",
 					Stream:    agentcomposev2.StdioStream_STDIO_STREAM_STDERR,
 				}); err != nil {
 					return err
@@ -3845,7 +3845,7 @@ agents:
 					ExecId:     "exec-cli",
 					SessionId:  "session-exec",
 					RunId:      "run-exec",
-					Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT, Text: "exec stdout\n"},
+					Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT, Text: "exec stdout"},
 				}); err != nil {
 					return err
 				}
@@ -3854,7 +3854,7 @@ agents:
 					ExecId:     "exec-cli",
 					SessionId:  "session-exec",
 					RunId:      "run-exec",
-					Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDERR, Text: "exec stderr\n"},
+					Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDERR, Text: "exec stderr"},
 				}); err != nil {
 					return err
 				}

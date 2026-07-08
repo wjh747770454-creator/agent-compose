@@ -2130,6 +2130,7 @@ func runComposeRunStreamAndDetail(ctx context.Context, stdout, stderr io.Writer,
 	var completed *agentcomposev2.RunSummary
 	var warnings []string
 	var runID string
+	output := newTerminalStreamOutput(stdout, stderr)
 	defer func() {
 		if ctx.Err() != nil && strings.TrimSpace(runID) != "" {
 			_, _ = client.StopRun(context.Background(), connect.NewRequest(&agentcomposev2.StopRunRequest{
@@ -2152,7 +2153,7 @@ func runComposeRunStreamAndDetail(ctx context.Context, stdout, stderr io.Writer,
 			if suppressOutput {
 				continue
 			}
-			if err := writeTranscriptOrChunk(stdout, stderr, event.GetTranscript(), event.GetChunk(), event.GetStream()); err != nil {
+			if err := output.Write(event.GetTranscript(), event.GetChunk(), event.GetStream()); err != nil {
 				return nil, nil, nil, err
 			}
 		case agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED:
@@ -2160,6 +2161,11 @@ func runComposeRunStreamAndDetail(ctx context.Context, stdout, stderr io.Writer,
 			if completed.GetRunId() != "" {
 				runID = completed.GetRunId()
 			}
+		}
+	}
+	if !suppressOutput {
+		if err := output.Finish(); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 	if err := stream.Err(); err != nil {
@@ -2313,11 +2319,7 @@ func writeRunWarnings(out io.Writer, warnings []string) error {
 }
 
 func writeTranscriptOrChunk(stdout, stderr io.Writer, transcript *agentcomposev2.TranscriptEvent, chunk string, stream agentcomposev2.StdioStream) error {
-	text := chunk
-	if transcript != nil {
-		text = transcript.GetText()
-		stream = transcript.GetStream()
-	}
+	text, stream := transcriptOrChunkText(transcript, chunk, stream)
 	if text == "" {
 		return nil
 	}
@@ -2326,6 +2328,61 @@ func writeTranscriptOrChunk(stdout, stderr io.Writer, transcript *agentcomposev2
 		target = stderr
 	}
 	_, err := io.WriteString(target, text)
+	return err
+}
+
+func transcriptOrChunkText(transcript *agentcomposev2.TranscriptEvent, chunk string, stream agentcomposev2.StdioStream) (string, agentcomposev2.StdioStream) {
+	if transcript != nil {
+		return transcript.GetText(), transcript.GetStream()
+	}
+	return chunk, stream
+}
+
+type terminalStreamOutput struct {
+	stdout terminalStreamWriter
+	stderr terminalStreamWriter
+}
+
+type terminalStreamWriter struct {
+	writer   io.Writer
+	wrote    bool
+	lastByte byte
+}
+
+func newTerminalStreamOutput(stdout, stderr io.Writer) *terminalStreamOutput {
+	return &terminalStreamOutput{
+		stdout: terminalStreamWriter{writer: stdout},
+		stderr: terminalStreamWriter{writer: stderr},
+	}
+}
+
+func (o *terminalStreamOutput) Write(transcript *agentcomposev2.TranscriptEvent, chunk string, stream agentcomposev2.StdioStream) error {
+	text, stream := transcriptOrChunkText(transcript, chunk, stream)
+	if text == "" {
+		return nil
+	}
+	target := &o.stdout
+	if stream == agentcomposev2.StdioStream_STDIO_STREAM_STDERR {
+		target = &o.stderr
+	}
+	target.wrote = true
+	target.lastByte = text[len(text)-1]
+	_, err := io.WriteString(target.writer, text)
+	return err
+}
+
+func (o *terminalStreamOutput) Finish() error {
+	if err := o.stdout.Finish(); err != nil {
+		return err
+	}
+	return o.stderr.Finish()
+}
+
+func (w *terminalStreamWriter) Finish() error {
+	if !w.wrote || w.lastByte == '\n' {
+		return nil
+	}
+	_, err := io.WriteString(w.writer, "\n")
 	return err
 }
 
@@ -2676,6 +2733,7 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 		return commandExitErrorForConnect(fmt.Errorf("exec project %s: %w", normalized.Name, err))
 	}
 	var result *agentcomposev2.ExecResult
+	output := newTerminalStreamOutput(cmd.OutOrStdout(), cmd.ErrOrStderr())
 	for stream.Receive() {
 		event := stream.Msg()
 		switch event.GetEventType() {
@@ -2683,11 +2741,16 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 			if cli.JSON {
 				continue
 			}
-			if err := writeTranscriptOrChunk(cmd.OutOrStdout(), cmd.ErrOrStderr(), event.GetTranscript(), event.GetChunk(), event.GetStream()); err != nil {
+			if err := output.Write(event.GetTranscript(), event.GetChunk(), event.GetStream()); err != nil {
 				return err
 			}
 		case agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_COMPLETED:
 			result = event.GetResult()
+		}
+	}
+	if !cli.JSON {
+		if err := output.Finish(); err != nil {
+			return err
 		}
 	}
 	if err := stream.Err(); err != nil {
