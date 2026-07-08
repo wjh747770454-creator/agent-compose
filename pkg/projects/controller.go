@@ -66,7 +66,7 @@ type LoaderValidator interface {
 type VolumeManager interface {
 	Ensure(ctx context.Context, item domain.VolumeRecord) (domain.VolumeRecord, bool, error)
 	Inspect(ctx context.Context, nameOrID string) (domain.VolumeRecord, error)
-	UpsertProjectVolume(ctx context.Context, projectID, key, volumeID string, external bool) error
+	ReplaceProjectVolumes(ctx context.Context, projectID string, links map[string]domain.ProjectVolumeLink) error
 	RemoveProjectVolumes(ctx context.Context, projectID string) error
 }
 

@@ -73,6 +73,20 @@ func (s *fakeStore) RemoveVolume(_ context.Context, key string) error {
 	if s.removeErr != nil {
 		return s.removeErr
 	}
+	if len(s.refs) > 0 {
+		return domain.ResourceError(domain.ErrReferenced, "volume", key, "referenced", nil)
+	}
+	s.removedKeys = append(s.removedKeys, key)
+	item := s.items[key]
+	delete(s.items, item.ID)
+	delete(s.items, item.Name)
+	return nil
+}
+
+func (s *fakeStore) DeleteVolume(_ context.Context, key string) error {
+	if s.removeErr != nil {
+		return s.removeErr
+	}
 	s.removedKeys = append(s.removedKeys, key)
 	item := s.items[key]
 	delete(s.items, item.ID)
@@ -405,6 +419,24 @@ func TestManagerRemoveForceSkipsConfigReferencesButNotSessionReferences(t *testi
 	if len(store.removedKeys) != 0 {
 		t.Fatalf("store removed keys after non-force remove = %#v, want none", store.removedKeys)
 	}
+	if err := manager.Remove(ctx, record.Name, true); err != nil {
+		t.Fatalf("Remove with force returned error: %v", err)
+	}
+	if len(store.removedKeys) != 1 || store.removedKeys[0] != record.ID {
+		t.Fatalf("store removed keys after force remove = %#v, want %s", store.removedKeys, record.ID)
+	}
+}
+
+func TestManagerRemoveForceBypassesStoreConfigReferenceRecheck(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		refs: []domain.VolumeReference{{ResourceType: "project_volume", ResourceID: "project-1", Name: "cache"}},
+	}
+	record, err := store.CreateVolume(ctx, domain.VolumeRecord{ID: "vol-cache", Name: "cache", Driver: domain.VolumeDriverLocal, Path: t.TempDir()})
+	if err != nil {
+		t.Fatalf("CreateVolume: %v", err)
+	}
+	manager := NewManager(store, LocalDriver{DataRoot: t.TempDir()})
 	if err := manager.Remove(ctx, record.Name, true); err != nil {
 		t.Fatalf("Remove with force returned error: %v", err)
 	}

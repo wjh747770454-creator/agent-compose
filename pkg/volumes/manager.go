@@ -21,6 +21,7 @@ type Store interface {
 	GetVolumeIfExists(context.Context, string) (domain.VolumeRecord, bool, error)
 	ListVolumes(context.Context, domain.VolumeListOptions) ([]domain.VolumeRecord, error)
 	RemoveVolume(context.Context, string) error
+	DeleteVolume(context.Context, string) error
 	FindVolumeConfigReferences(context.Context, string) ([]domain.VolumeReference, error)
 }
 
@@ -29,7 +30,7 @@ type SessionStore interface {
 }
 
 type ProjectVolumeStore interface {
-	UpsertProjectVolume(ctx context.Context, projectID, key, volumeID string, external bool) error
+	ReplaceProjectVolumes(ctx context.Context, projectID string, links map[string]domain.ProjectVolumeLink) error
 	ListProjectVolumes(ctx context.Context, projectID string) (map[string]domain.VolumeRecord, error)
 	RemoveProjectVolumes(ctx context.Context, projectID string) error
 }
@@ -142,11 +143,11 @@ func (m *Manager) List(ctx context.Context, options domain.VolumeListOptions) ([
 	return nil, fmt.Errorf("volume driver %q is not configured", options.Driver)
 }
 
-func (m *Manager) UpsertProjectVolume(ctx context.Context, projectID, key, volumeID string, external bool) error {
+func (m *Manager) ReplaceProjectVolumes(ctx context.Context, projectID string, links map[string]domain.ProjectVolumeLink) error {
 	if m == nil || m.Project == nil {
 		return fmt.Errorf("project volume store is required")
 	}
-	return m.Project.UpsertProjectVolume(ctx, projectID, key, volumeID, external)
+	return m.Project.ReplaceProjectVolumes(ctx, projectID, links)
 }
 
 func (m *Manager) RemoveProjectVolumes(ctx context.Context, projectID string) error {
@@ -178,7 +179,7 @@ func (m *Manager) Remove(ctx context.Context, nameOrID string, force bool) error
 	if err := driver.Remove(ctx, item); err != nil {
 		return err
 	}
-	if err := m.Store.RemoveVolume(ctx, item.ID); err != nil {
+	if err := m.Store.DeleteVolume(ctx, item.ID); err != nil {
 		return err
 	}
 	return nil

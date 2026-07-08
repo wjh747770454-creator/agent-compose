@@ -10,12 +10,13 @@ import (
 )
 
 func (c *Controller) ensureProjectVolumes(ctx context.Context, project domain.ProjectRecord, spec *compose.NormalizedProjectSpec) error {
-	if spec == nil || len(spec.Volumes) == 0 {
-		return nil
-	}
 	if c.volumes == nil {
 		return fmt.Errorf("volume manager is required")
 	}
+	if spec == nil || len(spec.Volumes) == 0 {
+		return c.volumes.ReplaceProjectVolumes(ctx, project.ID, nil)
+	}
+	links := make(map[string]domain.ProjectVolumeLink, len(spec.Volumes))
 	for key, volumeSpec := range spec.Volumes {
 		name := strings.TrimSpace(volumeSpec.Name)
 		if name == "" {
@@ -40,9 +41,7 @@ func (c *Controller) ensureProjectVolumes(ctx context.Context, project domain.Pr
 				return fmt.Errorf("ensure volume %s: %w", name, err)
 			}
 		}
-		if err := c.volumes.UpsertProjectVolume(ctx, project.ID, key, record.ID, volumeSpec.External); err != nil {
-			return err
-		}
+		links[key] = domain.ProjectVolumeLink{VolumeID: record.ID, External: volumeSpec.External}
 	}
-	return nil
+	return c.volumes.ReplaceProjectVolumes(ctx, project.ID, links)
 }

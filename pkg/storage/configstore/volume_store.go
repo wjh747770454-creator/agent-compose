@@ -197,6 +197,14 @@ func (s *volumeStore) RemoveVolume(ctx context.Context, nameOrID string) error {
 	if len(refs) > 0 {
 		return domain.ResourceError(domain.ErrReferenced, "volume", item.Name, fmt.Sprintf("volume %s is still referenced", item.Name), nil)
 	}
+	return s.DeleteVolume(ctx, item.ID)
+}
+
+func (s *volumeStore) DeleteVolume(ctx context.Context, nameOrID string) error {
+	item, err := s.GetVolume(ctx, nameOrID)
+	if err != nil {
+		return err
+	}
 	result, err := s.db.ExecContext(ctx, `DELETE FROM volumes WHERE id = ?`, item.ID)
 	if err != nil {
 		return fmt.Errorf("delete volume %s: %w", item.Name, err)
@@ -221,6 +229,37 @@ func (s *volumeStore) UpsertProjectVolume(ctx context.Context, projectID, key, v
 		projectID, key, volumeID, BoolToInt(external), now, now)
 	if err != nil {
 		return fmt.Errorf("upsert project volume %s/%s: %w", projectID, key, err)
+	}
+	return nil
+}
+
+func (s *volumeStore) ReplaceProjectVolumes(ctx context.Context, projectID string, links map[string]domain.ProjectVolumeLink) error {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return fmt.Errorf("project id is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace project volumes %s: %w", projectID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM project_volumes WHERE project_id = ?`, projectID); err != nil {
+		return fmt.Errorf("clear project volumes %s: %w", projectID, err)
+	}
+	now := time.Now().UTC().Unix()
+	for key, link := range links {
+		key = strings.TrimSpace(key)
+		volumeID := strings.TrimSpace(link.VolumeID)
+		if key == "" || volumeID == "" {
+			return fmt.Errorf("project volume key and volume id are required")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO project_volumes(project_id, volume_key, volume_id, external, created_at, updated_at)
+			VALUES(?, ?, ?, ?, ?, ?)`, projectID, key, volumeID, BoolToInt(link.External), now, now); err != nil {
+			return fmt.Errorf("replace project volume %s/%s: %w", projectID, key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace project volumes %s: %w", projectID, err)
 	}
 	return nil
 }

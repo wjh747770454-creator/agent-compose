@@ -45,8 +45,10 @@ func TestVolumeStoreCRUDAndReferences(t *testing.T) {
 	if len(listed) != 1 || listed[0].ID != created.ID {
 		t.Fatalf("ListVolumes = %#v", listed)
 	}
-	if err := store.UpsertProjectVolume(ctx, "project-1", "cache", created.ID, false); err != nil {
-		t.Fatalf("UpsertProjectVolume: %v", err)
+	if err := store.ReplaceProjectVolumes(ctx, "project-1", map[string]domain.ProjectVolumeLink{
+		"cache": {VolumeID: created.ID, External: false},
+	}); err != nil {
+		t.Fatalf("ReplaceProjectVolumes: %v", err)
 	}
 	projectVolumes, err := store.ListProjectVolumes(ctx, "project-1")
 	if err != nil {
@@ -74,5 +76,33 @@ func TestVolumeStoreCRUDAndReferences(t *testing.T) {
 	}
 	if len(refs) != 0 {
 		t.Fatalf("refs after RemoveProjectVolumes = %#v", refs)
+	}
+	if err := store.ReplaceProjectVolumes(ctx, "project-1", map[string]domain.ProjectVolumeLink{
+		"logs": {VolumeID: created.ID, External: true},
+	}); err != nil {
+		t.Fatalf("ReplaceProjectVolumes logs: %v", err)
+	}
+	projectVolumes, err = store.ListProjectVolumes(ctx, "project-1")
+	if err != nil {
+		t.Fatalf("ListProjectVolumes after replace: %v", err)
+	}
+	if len(projectVolumes) != 1 || projectVolumes["logs"].ID != created.ID {
+		t.Fatalf("project volumes after replace = %#v", projectVolumes)
+	}
+	if err := store.ReplaceProjectVolumes(ctx, "project-1", nil); err != nil {
+		t.Fatalf("ReplaceProjectVolumes clear: %v", err)
+	}
+	projectVolumes, err = store.ListProjectVolumes(ctx, "project-1")
+	if err != nil {
+		t.Fatalf("ListProjectVolumes after clear: %v", err)
+	}
+	if len(projectVolumes) != 0 {
+		t.Fatalf("project volumes after clear = %#v", projectVolumes)
+	}
+	if err := store.DeleteVolume(ctx, created.ID); err != nil {
+		t.Fatalf("DeleteVolume: %v", err)
+	}
+	if _, err := store.GetVolume(ctx, created.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetVolume after DeleteVolume err = %v, want ErrNotFound", err)
 	}
 }

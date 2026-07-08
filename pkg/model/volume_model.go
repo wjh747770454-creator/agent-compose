@@ -55,6 +55,11 @@ type VolumeReference struct {
 	Name         string `json:"name,omitempty"`
 }
 
+type ProjectVolumeLink struct {
+	VolumeID string `json:"volume_id"`
+	External bool   `json:"external,omitempty"`
+}
+
 type VolumeListOptions struct {
 	Query     string `json:"query,omitempty"`
 	Driver    string `json:"driver,omitempty"`

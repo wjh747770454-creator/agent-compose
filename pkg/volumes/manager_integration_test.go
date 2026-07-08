@@ -61,8 +61,10 @@ func TestIntegrationManagerPersistsProjectVolumeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create project volume: %v", err)
 	}
-	if err := manager.UpsertProjectVolume(ctx, "project-1", "cache", projectVolume.ID, false); err != nil {
-		t.Fatalf("UpsertProjectVolume: %v", err)
+	if err := manager.ReplaceProjectVolumes(ctx, "project-1", map[string]domain.ProjectVolumeLink{
+		"cache": {VolumeID: projectVolume.ID, External: false},
+	}); err != nil {
+		t.Fatalf("ReplaceProjectVolumes: %v", err)
 	}
 	projectVolumes, err := store.ListProjectVolumes(ctx, "project-1")
 	if err != nil {

@@ -396,7 +396,7 @@ func (m *controllerCoverageVolumeManager) Inspect(context.Context, string) (doma
 	return domain.VolumeRecord{}, nil
 }
 
-func (m *controllerCoverageVolumeManager) UpsertProjectVolume(context.Context, string, string, string, bool) error {
+func (m *controllerCoverageVolumeManager) ReplaceProjectVolumes(context.Context, string, map[string]domain.ProjectVolumeLink) error {
 	return nil
 }
 
