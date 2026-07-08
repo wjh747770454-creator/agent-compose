@@ -142,6 +142,78 @@ func TestPrepareRuntimeMountManifestForDockerIncludesSessionVolumeMounts(t *test
 	}
 }
 
+func TestPrepareRuntimeMountManifestForDockerPreservesVolumeMountEdges(t *testing.T) {
+	root := t.TempDir()
+	sharedSource := t.TempDir()
+	nestedSource := t.TempDir()
+	readonlySource := t.TempDir()
+	session := testRuntimeMountSession(root)
+	session.VolumeMounts = []SessionVolumeMount{
+		{
+			ID:       "mount-shared-a",
+			Type:     "volume",
+			Source:   "shared-cache",
+			Target:   "/mnt/shared-a",
+			VolumeID: "vol-shared",
+			Driver:   "local",
+			HostPath: sharedSource,
+		},
+		{
+			ID:       "mount-shared-b",
+			Type:     "volume",
+			Source:   "shared-cache",
+			Target:   "/mnt/shared-b",
+			VolumeID: "vol-shared",
+			Driver:   "local",
+			HostPath: sharedSource,
+		},
+		{
+			ID:       "mount-nested",
+			Type:     "volume",
+			Source:   "nested-cache",
+			Target:   "/mnt/nested/parent/child",
+			VolumeID: "vol-nested",
+			Driver:   "local",
+			HostPath: nestedSource,
+		},
+		{
+			ID:       "mount-readonly",
+			Type:     "volume",
+			Source:   "readonly-cache",
+			Target:   "/mnt/readonly",
+			ReadOnly: true,
+			VolumeID: "vol-readonly",
+			Driver:   "local",
+			HostPath: readonlySource,
+		},
+	}
+	manifest, err := prepareRuntimeMountManifest(testRuntimeMountConfig(), session, RuntimeDriverDocker)
+	if err != nil {
+		t.Fatalf("prepareRuntimeMountManifest returned error: %v", err)
+	}
+	got := map[string]RuntimeMount{}
+	for _, mount := range manifest.Mounts {
+		got[mount.GuestPath] = mount
+	}
+	for _, guestPath := range []string{"/mnt/shared-a", "/mnt/shared-b", "/mnt/nested/parent/child", "/mnt/readonly"} {
+		if got[guestPath].GuestPath == "" {
+			t.Fatalf("manifest missing volume target %s: %+v", guestPath, manifest.Mounts)
+		}
+	}
+	if got["/mnt/shared-a"].HostPath != sharedSource || got["/mnt/shared-b"].HostPath != sharedSource {
+		t.Fatalf("shared mounts = %+v %+v, want same host path %s", got["/mnt/shared-a"], got["/mnt/shared-b"], sharedSource)
+	}
+	if got["/mnt/shared-a"].ReadOnly || got["/mnt/shared-b"].ReadOnly {
+		t.Fatalf("shared mounts unexpectedly readonly: %+v %+v", got["/mnt/shared-a"], got["/mnt/shared-b"])
+	}
+	if got["/mnt/nested/parent/child"].HostPath != nestedSource || got["/mnt/nested/parent/child"].ReadOnly {
+		t.Fatalf("nested mount = %+v", got["/mnt/nested/parent/child"])
+	}
+	if got["/mnt/readonly"].HostPath != readonlySource || !got["/mnt/readonly"].ReadOnly {
+		t.Fatalf("readonly mount = %+v", got["/mnt/readonly"])
+	}
+}
+
 func TestPrepareRuntimeMountManifestForMicrosandboxIncludesSessionVolumeMounts(t *testing.T) {
 	root := t.TempDir()
 	volumeSource := t.TempDir()

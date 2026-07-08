@@ -118,6 +118,154 @@ func TestManagerResolveBindAndNamedVolumeMounts(t *testing.T) {
 	}
 }
 
+func TestManagerResolveNamedVolumeMultipleTargetsNestedAndReadOnly(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{}
+	manager := NewManager(store, LocalDriver{DataRoot: t.TempDir()})
+	shared, err := manager.Create(ctx, domain.VolumeRecord{Name: "shared-cache"})
+	if err != nil {
+		t.Fatalf("Create shared-cache: %v", err)
+	}
+	nested, err := manager.Create(ctx, domain.VolumeRecord{Name: "nested-cache"})
+	if err != nil {
+		t.Fatalf("Create nested-cache: %v", err)
+	}
+	readonly, err := manager.Create(ctx, domain.VolumeRecord{Name: "readonly-cache"})
+	if err != nil {
+		t.Fatalf("Create readonly-cache: %v", err)
+	}
+	mounts, warnings, err := manager.ResolveMounts(ctx, []domain.VolumeMountSpec{
+		{Source: "shared-cache", Target: "/mnt/shared-a"},
+		{Source: "shared-cache", Target: "/mnt/shared-b"},
+		{Source: "nested-cache", Target: "/mnt/nested/parent/child"},
+		{Source: "readonly-cache", Target: "/mnt/readonly", ReadOnly: true},
+	}, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveMounts: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	got := map[string]domain.SessionVolumeMount{}
+	for _, mount := range mounts {
+		got[mount.Target] = mount
+		if !strings.HasPrefix(mount.ID, "mount-") || len(mount.ID) != len("mount-")+24 {
+			t.Fatalf("mount id = %q, want stable hash id", mount.ID)
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("mount targets = %#v, want 4 distinct targets", got)
+	}
+	if got["/mnt/shared-a"].VolumeID != shared.ID || got["/mnt/shared-b"].VolumeID != shared.ID {
+		t.Fatalf("shared mounts = %#v %#v, want same volume id %s", got["/mnt/shared-a"], got["/mnt/shared-b"], shared.ID)
+	}
+	if got["/mnt/shared-a"].HostPath != got["/mnt/shared-b"].HostPath {
+		t.Fatalf("shared host paths differ: %q vs %q", got["/mnt/shared-a"].HostPath, got["/mnt/shared-b"].HostPath)
+	}
+	if got["/mnt/shared-a"].ID == got["/mnt/shared-b"].ID {
+		t.Fatalf("same source with different targets should have different mount ids: %#v %#v", got["/mnt/shared-a"], got["/mnt/shared-b"])
+	}
+	if got["/mnt/nested/parent/child"].VolumeID != nested.ID {
+		t.Fatalf("nested mount = %#v, want volume id %s", got["/mnt/nested/parent/child"], nested.ID)
+	}
+	if got["/mnt/readonly"].VolumeID != readonly.ID || !got["/mnt/readonly"].ReadOnly {
+		t.Fatalf("readonly mount = %#v, want readonly volume id %s", got["/mnt/readonly"], readonly.ID)
+	}
+}
+
+func TestManagerResolveProjectVolumeMappingTakesPrecedence(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	globalStore := &fakeStore{}
+	manager := NewManager(globalStore, LocalDriver{DataRoot: dataRoot})
+	global, err := manager.Create(ctx, domain.VolumeRecord{Name: "cache"})
+	if err != nil {
+		t.Fatalf("Create global cache: %v", err)
+	}
+	projectPath := filepath.Join(dataRoot, "project-cache")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project path: %v", err)
+	}
+	project := domain.VolumeRecord{
+		ID:        "project-volume-id",
+		Name:      "project_cache",
+		Driver:    domain.VolumeDriverLocal,
+		Path:      projectPath,
+		ProjectID: "project-1",
+	}
+	mounts, warnings, err := manager.ResolveMounts(ctx, []domain.VolumeMountSpec{
+		{Source: "cache", Target: "/cache"},
+	}, ResolveOptions{ProjectVolumes: map[string]domain.VolumeRecord{"cache": project}})
+	if err != nil {
+		t.Fatalf("ResolveMounts: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	if len(mounts) != 1 {
+		t.Fatalf("mounts = %#v, want one", mounts)
+	}
+	if mounts[0].VolumeID != project.ID || mounts[0].HostPath != projectPath {
+		t.Fatalf("mount = %#v, want project volume %s path %s; global was %s", mounts[0], project.ID, projectPath, global.ID)
+	}
+}
+
+func TestManagerResolveMountsReportsWarningsAndMissingVolumes(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{}
+	manager := NewManager(store, LocalDriver{DataRoot: t.TempDir()})
+	created, err := manager.Create(ctx, domain.VolumeRecord{Name: "cache"})
+	if err != nil {
+		t.Fatalf("Create cache: %v", err)
+	}
+	mounts, warnings, err := manager.ResolveMounts(ctx, []domain.VolumeMountSpec{
+		{Source: "cache", Target: "/data/cache"},
+		{Source: "cache", Target: "/root/.cache"},
+	}, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveMounts warnings case: %v", err)
+	}
+	if len(mounts) != 2 || mounts[0].VolumeID != created.ID || mounts[1].VolumeID != created.ID {
+		t.Fatalf("mounts = %#v", mounts)
+	}
+	if len(warnings) != 2 ||
+		!strings.Contains(warnings[0], "/data/cache") ||
+		!strings.Contains(warnings[1], "/root/.cache") {
+		t.Fatalf("warnings = %#v, want reserved target warnings", warnings)
+	}
+	if _, _, err := manager.ResolveMounts(ctx, []domain.VolumeMountSpec{
+		{Source: "missing-cache", Target: "/cache"},
+	}, ResolveOptions{}); err == nil {
+		t.Fatal("ResolveMounts missing volume returned nil error")
+	}
+}
+
+func TestBindResolverResolvesRelativeAbsoluteAndSymlinkDirectories(t *testing.T) {
+	root := t.TempDir()
+	relativeDir := filepath.Join(root, "relative")
+	absoluteDir := filepath.Join(root, "absolute")
+	if err := os.MkdirAll(relativeDir, 0o755); err != nil {
+		t.Fatalf("mkdir relative dir: %v", err)
+	}
+	if err := os.MkdirAll(absoluteDir, 0o755); err != nil {
+		t.Fatalf("mkdir absolute dir: %v", err)
+	}
+	linkPath := filepath.Join(root, "link")
+	if err := os.Symlink(relativeDir, linkPath); err != nil {
+		t.Fatalf("symlink relative dir: %v", err)
+	}
+	resolver := BindResolver{ProjectRoot: root}
+	if got, err := resolver.Resolve("./relative"); err != nil || got != relativeDir {
+		t.Fatalf("Resolve relative = %q err=%v, want %q", got, err, relativeDir)
+	}
+	if got, err := resolver.Resolve(absoluteDir); err != nil || got != absoluteDir {
+		t.Fatalf("Resolve absolute = %q err=%v, want %q", got, err, absoluteDir)
+	}
+	if got, err := resolver.Resolve("./link"); err != nil || got != relativeDir {
+		t.Fatalf("Resolve symlink = %q err=%v, want evaluated %q", got, err, relativeDir)
+	}
+}
+
 func TestManagerListAndPruneVolumes(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
