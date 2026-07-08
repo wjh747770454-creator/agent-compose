@@ -18,6 +18,7 @@ type fakeStore struct {
 	items       map[string]domain.VolumeRecord
 	createErr   error
 	removeErr   error
+	refs        []domain.VolumeReference
 	removedKeys []string
 }
 
@@ -80,7 +81,7 @@ func (s *fakeStore) RemoveVolume(_ context.Context, key string) error {
 }
 
 func (s *fakeStore) FindVolumeConfigReferences(context.Context, string) ([]domain.VolumeReference, error) {
-	return nil, nil
+	return append([]domain.VolumeReference(nil), s.refs...), nil
 }
 
 func TestManagerResolveBindAndNamedVolumeMounts(t *testing.T) {
@@ -362,7 +363,7 @@ func TestManagerRemoveRejectsActiveSessionVolumeReferences(t *testing.T) {
 		t.Fatalf("CreateVolume: %v", err)
 	}
 	manager := NewManager(store, LocalDriver{DataRoot: t.TempDir()})
-	manager.Sessions = fakeSessionStore{sessions: []*domain.Session{{
+	manager.Sessions = &fakeSessionStore{sessions: []*domain.Session{{
 		Summary: domain.SessionSummary{ID: "session-1", Title: "using cache"},
 		VolumeMounts: []domain.SessionVolumeMount{{
 			ID:       "mount-cache",
@@ -385,6 +386,60 @@ func TestManagerRemoveRejectsActiveSessionVolumeReferences(t *testing.T) {
 	}
 	if len(pruned.Skipped) != 1 || pruned.Skipped[0].ID != record.ID || len(pruned.Removed) != 0 {
 		t.Fatalf("prune result = %#v, want skipped active session volume", pruned)
+	}
+}
+
+func TestManagerRemoveForceSkipsConfigReferencesButNotSessionReferences(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		refs: []domain.VolumeReference{{ResourceType: "project_volume", ResourceID: "project-1", Name: "cache"}},
+	}
+	record, err := store.CreateVolume(ctx, domain.VolumeRecord{ID: "vol-cache", Name: "cache", Driver: domain.VolumeDriverLocal, Path: t.TempDir()})
+	if err != nil {
+		t.Fatalf("CreateVolume: %v", err)
+	}
+	manager := NewManager(store, LocalDriver{DataRoot: t.TempDir()})
+	if err := manager.Remove(ctx, record.Name, false); !errors.Is(err, domain.ErrReferenced) {
+		t.Fatalf("Remove without force err = %v, want ErrReferenced", err)
+	}
+	if len(store.removedKeys) != 0 {
+		t.Fatalf("store removed keys after non-force remove = %#v, want none", store.removedKeys)
+	}
+	if err := manager.Remove(ctx, record.Name, true); err != nil {
+		t.Fatalf("Remove with force returned error: %v", err)
+	}
+	if len(store.removedKeys) != 1 || store.removedKeys[0] != record.ID {
+		t.Fatalf("store removed keys after force remove = %#v, want %s", store.removedKeys, record.ID)
+	}
+}
+
+func TestManagerFindSessionReferencesUsesPagination(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{}
+	record, err := store.CreateVolume(ctx, domain.VolumeRecord{ID: "vol-cache", Name: "cache", Driver: domain.VolumeDriverLocal, Path: t.TempDir()})
+	if err != nil {
+		t.Fatalf("CreateVolume: %v", err)
+	}
+	sessions := make([]*domain.Session, 0, 501)
+	for i := range 501 {
+		session := &domain.Session{Summary: domain.SessionSummary{ID: fmt.Sprintf("session-%d", i)}}
+		if i == 500 {
+			session.VolumeMounts = []domain.SessionVolumeMount{{VolumeID: record.ID, Target: "/cache"}}
+		}
+		sessions = append(sessions, session)
+	}
+	sessionStore := &fakeSessionStore{sessions: sessions}
+	manager := NewManager(store, LocalDriver{DataRoot: t.TempDir()})
+	manager.Sessions = sessionStore
+	if err := manager.Remove(ctx, record.Name, false); !errors.Is(err, domain.ErrReferenced) {
+		t.Fatalf("Remove active session volume err = %v, want ErrReferenced", err)
+	}
+	if len(sessionStore.options) != 2 ||
+		sessionStore.options[0].Limit != 500 ||
+		sessionStore.options[0].Offset != 0 ||
+		sessionStore.options[1].Limit != 500 ||
+		sessionStore.options[1].Offset != 500 {
+		t.Fatalf("session list options = %#v, want paged offsets 0 and 500", sessionStore.options)
 	}
 }
 
@@ -430,12 +485,34 @@ func (d fakeDriver) ResolveMountSource(_ context.Context, record domain.VolumeRe
 
 type fakeSessionStore struct {
 	sessions []*domain.Session
+	options  []domain.SessionListOptions
 	err      error
 }
 
-func (s fakeSessionStore) ListSessions(context.Context, domain.SessionListOptions) (domain.SessionListResult, error) {
+func (s *fakeSessionStore) ListSessions(_ context.Context, options domain.SessionListOptions) (domain.SessionListResult, error) {
+	s.options = append(s.options, options)
 	if s.err != nil {
 		return domain.SessionListResult{}, s.err
 	}
-	return domain.SessionListResult{Sessions: s.sessions, TotalCount: len(s.sessions)}, nil
+	offset := options.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	limit := options.Limit
+	if limit <= 0 {
+		limit = len(s.sessions)
+	}
+	if offset > len(s.sessions) {
+		offset = len(s.sessions)
+	}
+	end := offset + limit
+	if end > len(s.sessions) {
+		end = len(s.sessions)
+	}
+	return domain.SessionListResult{
+		Sessions:   append([]*domain.Session(nil), s.sessions[offset:end]...),
+		TotalCount: len(s.sessions),
+		HasMore:    end < len(s.sessions),
+		NextOffset: end,
+	}, nil
 }

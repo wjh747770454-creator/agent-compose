@@ -156,7 +156,7 @@ func (m *Manager) RemoveProjectVolumes(ctx context.Context, projectID string) er
 	return m.Project.RemoveProjectVolumes(ctx, projectID)
 }
 
-func (m *Manager) Remove(ctx context.Context, nameOrID string, _ bool) error {
+func (m *Manager) Remove(ctx context.Context, nameOrID string, force bool) error {
 	if m == nil || m.Store == nil {
 		return fmt.Errorf("volume store is required")
 	}
@@ -164,7 +164,7 @@ func (m *Manager) Remove(ctx context.Context, nameOrID string, _ bool) error {
 	if err != nil {
 		return err
 	}
-	refs, err := m.findReferences(ctx, item.ID)
+	refs, err := m.findReferences(ctx, item.ID, referenceOptions{SkipConfig: force})
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (m *Manager) Prune(ctx context.Context, options domain.VolumeListOptions, f
 	}
 	result := PruneResult{DryRun: !force}
 	for _, item := range items {
-		refs, err := m.findReferences(ctx, item.ID)
+		refs, err := m.findReferences(ctx, item.ID, referenceOptions{})
 		if err != nil {
 			return PruneResult{}, err
 		}
@@ -211,10 +211,18 @@ func (m *Manager) Prune(ctx context.Context, options domain.VolumeListOptions, f
 	return result, nil
 }
 
-func (m *Manager) findReferences(ctx context.Context, volumeID string) ([]domain.VolumeReference, error) {
-	refs, err := m.Store.FindVolumeConfigReferences(ctx, volumeID)
-	if err != nil {
-		return nil, err
+type referenceOptions struct {
+	SkipConfig bool
+}
+
+func (m *Manager) findReferences(ctx context.Context, volumeID string, options referenceOptions) ([]domain.VolumeReference, error) {
+	var refs []domain.VolumeReference
+	if !options.SkipConfig {
+		configRefs, err := m.Store.FindVolumeConfigReferences(ctx, volumeID)
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, configRefs...)
 	}
 	sessionRefs, err := m.findSessionReferences(ctx, volumeID)
 	if err != nil {
@@ -229,25 +237,36 @@ func (m *Manager) findSessionReferences(ctx context.Context, volumeID string) ([
 	if volumeID == "" || m == nil || m.Sessions == nil {
 		return nil, nil
 	}
-	result, err := m.Sessions.ListSessions(ctx, domain.SessionListOptions{Limit: 1 << 30})
-	if err != nil {
-		return nil, fmt.Errorf("list sessions for volume references: %w", err)
-	}
+	const pageSize = 500
 	var refs []domain.VolumeReference
-	for _, session := range result.Sessions {
-		if session == nil {
-			continue
+	for offset := 0; ; {
+		result, err := m.Sessions.ListSessions(ctx, domain.SessionListOptions{Offset: offset, Limit: pageSize})
+		if err != nil {
+			return nil, fmt.Errorf("list sessions for volume references: %w", err)
 		}
-		for _, mount := range session.VolumeMounts {
-			if strings.TrimSpace(mount.VolumeID) != volumeID {
+		for _, session := range result.Sessions {
+			if session == nil {
 				continue
 			}
-			refs = append(refs, domain.VolumeReference{
-				ResourceType: "session",
-				ResourceID:   session.Summary.ID,
-				Name:         session.Summary.Title,
-			})
+			for _, mount := range session.VolumeMounts {
+				if strings.TrimSpace(mount.VolumeID) != volumeID {
+					continue
+				}
+				refs = append(refs, domain.VolumeReference{
+					ResourceType: "session",
+					ResourceID:   session.Summary.ID,
+					Name:         session.Summary.Title,
+				})
+				break
+			}
+		}
+		if !result.HasMore || len(result.Sessions) == 0 {
 			break
+		}
+		if result.NextOffset > offset {
+			offset = result.NextOffset
+		} else {
+			offset += len(result.Sessions)
 		}
 	}
 	return refs, nil
