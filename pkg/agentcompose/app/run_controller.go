@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -149,15 +148,6 @@ func runAgentRequestFromProto(msg *agentcomposev2.RunAgentRequest) runs.RunAgent
 		Jupyter:          msg.GetJupyter(),
 		Volumes:          volumeMountSpecsFromProto(msg.GetVolumes()),
 	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func volumeMountSpecsFromProto(values []*agentcomposev2.VolumeMountSpec) []domain.VolumeMountSpec {

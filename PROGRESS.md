@@ -973,7 +973,7 @@
 
 参考文档：[docs/plan/sandbox-naming-implementation-plan.md](docs/plan/sandbox-naming-implementation-plan.md#阶段-11完整质量门禁和发布停止条件)
 
-- [ ] 11.1 运行完整 harness 和 CI 等价补充门禁
+- [x] 11.1 运行完整 harness 和 CI 等价补充门禁
   - 依赖：10.3。
   - 工作内容：
     - 运行主门禁：`task lint`、`task build`、`task test`。
@@ -981,10 +981,10 @@
     - 如环境可用，额外运行 `task test:runtime-smoke`。
     - 检查 coverage 输出包含 unit、integration、E2E 和 total combined，且满足 `TESTING.md` baseline。
   - 可并行子任务：
-    - [ ] 可并行：运行 Go focused/all tests。
-    - [ ] 可并行：运行 runtime JS 和 runtime SDK gates。
-    - [ ] 可并行：运行 proto-client gen/build。
-    - [ ] 可并行：运行 lint/build/test 主门禁。
+    - [x] 可并行：运行 Go focused/all tests。
+    - [x] 可并行：运行 runtime JS 和 runtime SDK gates。
+    - [x] 可并行：运行 proto-client gen/build。
+    - [x] 可并行：运行 lint/build/test 主门禁。
   - 测试方案：
     - `task lint`
     - `task build`
@@ -999,10 +999,27 @@
     - 覆盖率 baseline 满足。
     - 生成代码无未预期 diff。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - 修复完整 lint 门禁发现的 `pkg/agentcompose/app/run_controller.go` 未使用 helper：删除 unused `firstNonEmpty` 和唯一相关 `strings` import。
+      - 运行完整主门禁、CI 等价补充门禁、TS client 生成检查、Go proto 生成审计、残留审计和 compose 渲染检查；最终未保留 proto/generated 或 proto-client diff。
+    - 验证：
+      - `task lint`：通过；初次运行发现 unused helper，修复后重跑通过。
+      - `task build`：通过，包含 `build:agent-compose` 和 runtime SDK build/package verification。
+      - `task test`：通过；coverage statements 为 Unit `78.56%`、Integration `70.08%`、E2E `66.95%`、Combined `81.31%`，均满足 `TESTING.md` baseline。
+      - `go test ./cmd/... ./pkg/...`：通过。
+      - `cd runtime/javascript && npm run test:unit`：通过，15 个 test files / 121 tests。
+      - `cd runtime/agent-compose-runtime-sdk && npm test && npm run test:packaging`：通过，5 个 test files / 31 tests，并验证 offline install package。
+      - `cd proto-client && npm run gen && npm run build`：通过。
+      - Go proto generation audit：`protoc` 命令可执行，但本机 `libprotoc 3.21.12` 会产生 source path / version drift；未提交该本地生成漂移，最终 `git diff --name-only -- proto proto-client` 为空。
+      - `rg -n "\bsession\b|session_id|sessionId|Session" cmd pkg proto runtime docs README.md .env.example Dockerfile docker-compose.yml docker-compose.override.yml > /tmp/agent-compose-11.1-session-audit.txt`：命中 `3825` 行，分布与 10.3 一致。
+      - `docker compose -f docker-compose.yml --env-file .env.example config`：通过。
+      - `git diff --check`：通过。
+    - 审计与例外：
+      - 生成检查确认 `proto/agentcompose/v1/**`、v2 generated Go、health generated Go 和 `proto-client` 最终均无 checked-in diff；v1 wire contract 未变化。本机 Go proto 生成工具链与部分 checked-in generated header/source path 不一致，漂移已作为环境性生成审计结果记录而未提交。
+      - 残留 audit 数量保持 `pkg=2335`、`proto=725`、`docs=314`、`cmd=299`、`runtime=150`、`README.md=2`；类别沿用 10.3：v1 compatibility、deprecated alias、auth/browser session、provider-native protocol、migration/error copy。
+      - Compose audit 确认 `docker-compose.yml` 使用 published images 和 deploy-time env；本地 `build:` 仅在 `docker-compose.override.yml`；`.env.example` 只保留旧 env breaking-change 注释。
+      - 可选 `task test:runtime-smoke` 已尝试但环境阻塞：BoxLite 失败于 `/dev/kvm: permission denied`，当前用户 `inno` 不在 `kvm` 组；单独 Microsandbox smoke 失败于 sandbox process `SIGABRT` before relay available。必跑门禁不依赖该可选 smoke，阻塞记录保存在 `/tmp/agent-compose-11.1-runtime-smoke*.log`。
     - 下一目标：11.2。
 
 - [ ] 11.2 最终发布审计和停止条件确认
