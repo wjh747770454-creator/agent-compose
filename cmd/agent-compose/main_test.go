@@ -1469,7 +1469,12 @@ agents:
 		t.Fatalf("run -d --command code/stderr = %d / %q", exitCode, stderr)
 	}
 	logOut, logErr, _, logCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", "run-detached-logs", "--follow")
-	if logCode != 0 || logErr != "" || logOut != "reviewer-run-detached-log | detached output\n" {
+	runPrefix := "reviewer-run-detached-log | "
+	wantLogOut := expectedLogSeparator(runPrefix, ">") +
+		"reviewer-run-detached-log | test prompt\n" +
+		expectedLogSeparator(runPrefix, "<") +
+		"reviewer-run-detached-log | detached output\n"
+	if logCode != 0 || logErr != "" || logOut != wantLogOut {
 		t.Fatalf("logs --follow code/stdout/stderr = %d / %q / %q", logCode, logOut, logErr)
 	}
 	if !sawCommand || !sawFollow {
@@ -2577,7 +2582,7 @@ agents:
 	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
 		t.Fatalf("logs JSON decode failed: %v\n%s", err, stdout)
 	}
-	if len(decoded.Runs) != 1 || decoded.Runs[0].RunID != displayOpaqueID(runID) || decoded.Runs[0].Content != "stored log output\n" {
+	if len(decoded.Runs) != 1 || decoded.Runs[0].RunID != displayOpaqueID(runID) || decoded.Runs[0].Prompt != "test prompt" || decoded.Runs[0].Content != "stored log output\n" {
 		t.Fatalf("logs JSON = %#v", decoded)
 	}
 	if !sawFilteredList {
@@ -2590,7 +2595,12 @@ agents:
 	}
 
 	runOut, runErr, _, runCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", identity.ShortID(runID))
-	if runCode != 0 || runErr != "" || runOut != "reviewer-run-"+identity.ShortID(runID)+" [2026-06-11T00:00:01.000Z]| stored log output\n" {
+	runPrefix := "reviewer-run-" + identity.ShortID(runID) + " | "
+	wantRunOut := expectedLogSeparator(runPrefix, ">") +
+		"reviewer-run-" + identity.ShortID(runID) + " | test prompt\n" +
+		expectedLogSeparator(runPrefix, "<") +
+		"reviewer-run-" + identity.ShortID(runID) + " | stored log output\n"
+	if runCode != 0 || runErr != "" || runOut != wantRunOut {
 		t.Fatalf("logs --run-id code/stdout/stderr = %d / %q / %q", runCode, runOut, runErr)
 	}
 }
@@ -2620,7 +2630,13 @@ agents:
 	defer server.Close()
 
 	stdout, stderr, _, exitCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--tail", "2")
-	if exitCode != 0 || stderr != "" || stdout != "reviewer-run-tail [2026-06-11T00:00:01.000Z]| two\nreviewer-run-tail [2026-06-11T00:00:01.000Z]| three\n" {
+	tailPrefix := "reviewer-run-tail | "
+	wantTail := expectedLogSeparator(tailPrefix, ">") +
+		"reviewer-run-tail | test prompt\n" +
+		expectedLogSeparator(tailPrefix, "<") +
+		"reviewer-run-tail | two\n" +
+		"reviewer-run-tail | three\n"
+	if exitCode != 0 || stderr != "" || stdout != wantTail {
 		t.Fatalf("logs --tail text code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
 	}
 
@@ -2632,12 +2648,16 @@ agents:
 	if err := json.Unmarshal([]byte(jsonOut), &decoded); err != nil {
 		t.Fatalf("logs --tail JSON decode failed: %v\n%s", err, jsonOut)
 	}
-	if len(decoded.Runs) != 1 || decoded.Runs[0].Content != "two\nthree\n" {
+	if len(decoded.Runs) != 1 || decoded.Runs[0].Prompt != "test prompt" || decoded.Runs[0].Content != "two\nthree\n" {
 		t.Fatalf("logs --tail JSON = %#v", decoded)
 	}
 
 	runOut, runErr, _, runCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", "run-tail", "-n", "1")
-	if runCode != 0 || runErr != "" || runOut != "reviewer-run-tail [2026-06-11T00:00:01.000Z]| three\n" {
+	wantRunTail := expectedLogSeparator(tailPrefix, ">") +
+		"reviewer-run-tail | test prompt\n" +
+		expectedLogSeparator(tailPrefix, "<") +
+		"reviewer-run-tail | three\n"
+	if runCode != 0 || runErr != "" || runOut != wantRunTail {
 		t.Fatalf("logs --run-id --tail code/stdout/stderr = %d / %q / %q", runCode, runOut, runErr)
 	}
 }
@@ -2694,8 +2714,16 @@ agents:
 	if exitCode != 0 || stderr != "" {
 		t.Fatalf("logs --timestamp code/stderr = %d / %q", exitCode, stderr)
 	}
-	want := "writer-run-writer [2026-06-11T00:00:04.000Z]| write one\n" +
+	writerPrefix := "writer-run-writer [2026-06-11T00:00:04.000Z]| "
+	reviewerPrefix := "reviewer-run-reviewer [2026-06-11T00:00:03.000Z]| "
+	want := expectedLogSeparator(writerPrefix, ">") +
+		"writer-run-writer [2026-06-11T00:00:04.000Z]| test prompt\n" +
+		expectedLogSeparator(writerPrefix, "<") +
+		"writer-run-writer [2026-06-11T00:00:04.000Z]| write one\n" +
 		"writer-run-writer [2026-06-11T00:00:04.000Z]| write two\n" +
+		expectedLogSeparator(reviewerPrefix, ">") +
+		"reviewer-run-reviewer [2026-06-11T00:00:03.000Z]| test prompt\n" +
+		expectedLogSeparator(reviewerPrefix, "<") +
 		"reviewer-run-reviewer [2026-06-11T00:00:03.000Z]| review one\n"
 	if stdout != want {
 		t.Fatalf("logs --timestamp stdout = %q, want %q", stdout, want)
@@ -2727,6 +2755,71 @@ func TestLogsAgentFlagAndPositionalIsUsageError(t *testing.T) {
 	}
 }
 
+func expectedLogSeparator(prefix, marker string) string {
+	width := 80 - len(prefix)
+	if width < 8 {
+		width = 8
+	}
+	return prefix + strings.Repeat(marker, width) + "\n"
+}
+
+func TestRunLogLinePrefixWidthUsesDisplayWidth(t *testing.T) {
+	summary := &agentcomposev2.RunSummary{
+		RunId:       "run-123456789abc",
+		AgentName:   "审查",
+		CompletedAt: "2026-06-11T00:00:03Z",
+	}
+	if got, want := runLogLinePrefixWidth(summary, "", false), 24; got != want {
+		t.Fatalf("runLogLinePrefixWidth without timestamp = %d, want %d", got, want)
+	}
+	if got, want := runLogLinePrefixWidth(summary, summary.GetCompletedAt(), true), 50; got != want {
+		t.Fatalf("runLogLinePrefixWidth with timestamp = %d, want %d", got, want)
+	}
+}
+
+func TestWritePrefixedRunOutputHonorsTimestampFlag(t *testing.T) {
+	summary := &agentcomposev2.RunSummary{
+		RunId:       "run-123456789abc",
+		AgentName:   "reviewer",
+		CompletedAt: "2026-06-11T00:00:03Z",
+	}
+	var out strings.Builder
+	if err := writePrefixedRunOutput(&out, summary, "line\n", false); err != nil {
+		t.Fatalf("writePrefixedRunOutput returned error: %v", err)
+	}
+	if got, want := out.String(), "reviewer-run-123456789abc | line\n"; got != want {
+		t.Fatalf("writePrefixedRunOutput without timestamp = %q, want %q", got, want)
+	}
+}
+
+func TestWriteLogDetailsFollowPrintsPromptOnce(t *testing.T) {
+	detail := testRunDetail("project-logs", "run-follow-repeat", "reviewer", "session-follow-repeat", agentcomposev2.RunStatus_RUN_STATUS_RUNNING, 0, "first\n")
+	printed := map[string]runLogPrintState{}
+	options := composeLogsOptions{Follow: true, TailLines: -1}
+	var out bytes.Buffer
+	if err := writeLogDetails(&out, []*agentcomposev2.RunDetail{detail}, printed, options); err != nil {
+		t.Fatalf("writeLogDetails first follow call returned error: %v", err)
+	}
+	detail.Output = "first\nsecond\n"
+	if err := writeLogDetails(&out, []*agentcomposev2.RunDetail{detail}, printed, options); err != nil {
+		t.Fatalf("writeLogDetails second follow call returned error: %v", err)
+	}
+	if err := writeLogDetails(&out, []*agentcomposev2.RunDetail{detail}, printed, options); err != nil {
+		t.Fatalf("writeLogDetails third follow call returned error: %v", err)
+	}
+	got := out.String()
+	promptPrefix := runLogPrefix(detail.GetSummary()) + " | "
+	promptSeparator := expectedLogSeparator(promptPrefix, ">")
+	if strings.Count(got, promptSeparator) != 1 {
+		t.Fatalf("follow log prompt printed %d times; output = %q", strings.Count(got, promptSeparator), got)
+	}
+	if !strings.Contains(got, "| test prompt\n") ||
+		!strings.Contains(got, "| first\n") ||
+		!strings.Contains(got, "| second\n") {
+		t.Fatalf("follow log output missing expected content: %q", got)
+	}
+}
+
 func TestIntegrationCLILogsFollowUsesServerStream(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-logs-follow
@@ -2735,6 +2828,7 @@ agents:
     provider: codex
 `)
 	var listCalls int
+	var getCalls int
 	var followCalls int
 	server := newRunServiceStubServer(t, runServiceStub{
 		listRuns: func(ctx context.Context, req *connect.Request[agentcomposev2.ListRunsRequest]) (*connect.Response[agentcomposev2.ListRunsResponse], error) {
@@ -2746,6 +2840,21 @@ agents:
 				Status:    agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
 				SessionId: "session-follow",
 			}}}), nil
+		},
+		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+			getCalls++
+			if req.Msg.GetRunId() != "run-follow" {
+				t.Fatalf("GetRun request = %#v", req.Msg)
+			}
+			run := testRunDetail(req.Msg.GetProjectId(), "run-follow", "reviewer", "session-follow", agentcomposev2.RunStatus_RUN_STATUS_RUNNING, 0, "")
+			if getCalls == 1 {
+				run.Prompt = ""
+				run.ResultJson = "{}"
+			} else {
+				run.Prompt = ""
+				run.ResultJson = `{"mode":"command","command":"echo delayed prompt"}`
+			}
+			return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: run}), nil
 		},
 		followRunLogs: func(ctx context.Context, req *connect.Request[agentcomposev2.FollowRunLogsRequest], stream *connect.ServerStream[agentcomposev2.RunLogChunk]) error {
 			followCalls++
@@ -2767,11 +2876,64 @@ agents:
 	if stderr != "" {
 		t.Fatalf("logs follow stderr = %q, want empty", stderr)
 	}
-	if stdout != "reviewer-run-follow [2026-07-06T08:01:36.372Z]| first\nreviewer-run-follow [2026-07-06T08:01:36.875Z]| second\n" {
+	followPrefix := "reviewer-run-follow [2026-06-11T00:00:01.000Z]| "
+	want := expectedLogSeparator(followPrefix, ">") +
+		"reviewer-run-follow [2026-06-11T00:00:01.000Z]| echo delayed prompt\n" +
+		expectedLogSeparator(followPrefix, "<") +
+		"reviewer-run-follow [2026-06-11T00:00:01.000Z]| first\n" +
+		"reviewer-run-follow [2026-06-11T00:00:01.000Z]| second\n"
+	if stdout != want {
 		t.Fatalf("logs follow stdout = %q", stdout)
 	}
-	if listCalls != 1 || followCalls != 1 {
-		t.Fatalf("logs follow list/follow calls = %d/%d, want 1/1", listCalls, followCalls)
+	if listCalls != 1 || getCalls != 2 || followCalls != 1 {
+		t.Fatalf("logs follow list/get/follow calls = %d/%d/%d, want 1/2/1", listCalls, getCalls, followCalls)
+	}
+}
+
+func TestIntegrationCLILogsFollowPrintsDelayedPromptWithoutOutput(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-logs-follow-empty
+agents:
+  reviewer:
+    provider: codex
+`)
+	var getCalls int
+	server := newRunServiceStubServer(t, runServiceStub{
+		listRuns: func(ctx context.Context, req *connect.Request[agentcomposev2.ListRunsRequest]) (*connect.Response[agentcomposev2.ListRunsResponse], error) {
+			return connect.NewResponse(&agentcomposev2.ListRunsResponse{Runs: []*agentcomposev2.RunSummary{{
+				RunId:     "run-follow-empty",
+				ProjectId: req.Msg.GetProjectId(),
+				AgentName: "reviewer",
+				Status:    agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
+				SessionId: "session-follow-empty",
+			}}}), nil
+		},
+		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+			getCalls++
+			run := testRunDetail(req.Msg.GetProjectId(), "run-follow-empty", "reviewer", "session-follow-empty", agentcomposev2.RunStatus_RUN_STATUS_RUNNING, 0, "")
+			run.Prompt = ""
+			if getCalls == 1 {
+				run.ResultJson = "{}"
+			} else {
+				run.ResultJson = `{"mode":"command","command":"true"}`
+			}
+			return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: run}), nil
+		},
+		followRunLogs: func(ctx context.Context, req *connect.Request[agentcomposev2.FollowRunLogsRequest], stream *connect.ServerStream[agentcomposev2.RunLogChunk]) error {
+			return stream.Send(&agentcomposev2.RunLogChunk{RunStatus: agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, IsFinal: true})
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--follow", "--timestamp")
+	followEmptyPrefix := "reviewer-run-follow-empty [2026-06-11T00:00:01.000Z]| "
+	want := expectedLogSeparator(followEmptyPrefix, ">") +
+		"reviewer-run-follow-empty [2026-06-11T00:00:01.000Z]| true\n"
+	if exitCode != 0 || stderr != "" || stdout != want {
+		t.Fatalf("logs follow no output code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+	}
+	if getCalls != 2 {
+		t.Fatalf("GetRun calls = %d, want 2", getCalls)
 	}
 }
 

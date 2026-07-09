@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"connectrpc.com/connect"
 	"github.com/joho/godotenv"
@@ -30,6 +31,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/samber/do/v2"
 	"github.com/spf13/cobra"
+	"golang.org/x/text/width"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -3914,6 +3916,7 @@ type composeLogRunOutput struct {
 	RunID      string `json:"run_id"`
 	RunShortID string `json:"run_short_id,omitempty"`
 	Time       string `json:"time,omitempty"`
+	Prompt     string `json:"prompt,omitempty"`
 	Content    string `json:"content"`
 }
 
@@ -5818,7 +5821,7 @@ func followOrPrintProjectLogs(cmd *cobra.Command, cli cliOptions, client agentco
 		}
 		return nil
 	}
-	printed := map[string]int{}
+	printed := map[string]runLogPrintState{}
 	for {
 		runs, err := listLogRuns(cmd.Context(), client, projectID, options)
 		if err != nil {
@@ -6080,6 +6083,45 @@ func followRunLogStream(ctx context.Context, out io.Writer, client agentcomposev
 	if summary == nil {
 		return nil
 	}
+	detailResp, err := getRunDetail(ctx, client, projectID, summary.GetRunId())
+	if err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("get run %s for project %s: %w", summary.GetRunId(), projectID, err))
+	}
+	detailRun := detailResp.Msg.GetRun()
+	displaySummary := summary
+	if detailSummary := detailRun.GetSummary(); detailSummary != nil {
+		displaySummary = detailSummary
+	}
+	prompt := runLogPrompt(detailRun)
+	promptPrinted := false
+	refreshPrompt := func() error {
+		if promptPrinted || prompt != "" {
+			return nil
+		}
+		detailResp, err := getRunDetail(ctx, client, projectID, summary.GetRunId())
+		if err != nil {
+			return commandExitErrorForConnect(fmt.Errorf("get run %s for project %s: %w", summary.GetRunId(), projectID, err))
+		}
+		detailRun = detailResp.Msg.GetRun()
+		if detailSummary := detailRun.GetSummary(); detailSummary != nil {
+			displaySummary = detailSummary
+		}
+		prompt = runLogPrompt(detailRun)
+		return nil
+	}
+	printPrompt := func() error {
+		if prompt == "" || promptPrinted {
+			return nil
+		}
+		if err := writePrefixedRunOutput(out, displaySummary, runLogConversationText(out, displaySummary, prompt, "", options.Timestamp), options.Timestamp); err != nil {
+			return err
+		}
+		promptPrinted = true
+		return nil
+	}
+	if err := printPrompt(); err != nil {
+		return err
+	}
 	tailLines := uint32(0)
 	if options.TailLines > 0 {
 		tailLines = uint32(options.TailLines)
@@ -6093,14 +6135,37 @@ func followRunLogStream(ctx context.Context, out io.Writer, client agentcomposev
 	if err != nil {
 		return commandExitErrorForConnect(fmt.Errorf("follow run %s logs: %w", summary.GetRunId(), err))
 	}
+	assistantStarted := false
 	for stream.Receive() {
 		chunk := stream.Msg()
 		if chunk.GetData() != "" {
-			if err := writePrefixedRunOutputWithTimestamp(out, summary, chunk.GetData(), options.Timestamp, chunk.GetCreatedAt()); err != nil {
+			if !assistantStarted && !promptPrinted && prompt == "" {
+				if err := refreshPrompt(); err != nil {
+					return err
+				}
+				if err := printPrompt(); err != nil {
+					return err
+				}
+			}
+			if !assistantStarted {
+				if err := writePrefixedRunOutput(out, displaySummary, runLogAssistantSeparator(out, displaySummary, options.Timestamp), options.Timestamp); err != nil {
+					return err
+				}
+				assistantStarted = true
+			}
+			if err := writePrefixedRunOutput(out, displaySummary, chunk.GetData(), options.Timestamp); err != nil {
 				return err
 			}
 		}
 		if chunk.GetIsFinal() {
+			if !assistantStarted && !promptPrinted && prompt == "" {
+				if err := refreshPrompt(); err != nil {
+					return err
+				}
+				if err := printPrompt(); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 	}
@@ -6125,7 +6190,7 @@ func writeLogsForRun(out io.Writer, run *agentcomposev2.RunDetail, asJSON bool, 
 		}
 		return writeCommandOutput(out, append(data, '\n'))
 	}
-	return writeLogDetails(out, []*agentcomposev2.RunDetail{run}, map[string]int{}, options)
+	return writeLogDetails(out, []*agentcomposev2.RunDetail{run}, map[string]runLogPrintState{}, options)
 }
 
 func composeLogRunOutputFromDetail(run *agentcomposev2.RunDetail, options composeLogsOptions) composeLogRunOutput {
@@ -6135,34 +6200,163 @@ func composeLogRunOutputFromDetail(run *agentcomposev2.RunDetail, options compos
 		RunID:      displayOpaqueID(summary.GetRunId()),
 		RunShortID: shortOpaqueID(summary.GetRunId()),
 		Time:       formatComposeLogTimestamp(runLogTimestamp(summary)),
+		Prompt:     runLogPrompt(run),
 		Content:    tailLogOutput(run.GetOutput(), options.TailLines),
 	}
 }
 
-func writeLogDetails(out io.Writer, details []*agentcomposev2.RunDetail, printed map[string]int, options composeLogsOptions) error {
+type runLogPrintState struct {
+	outputPos     int
+	promptPrinted bool
+}
+
+func writeLogDetails(out io.Writer, details []*agentcomposev2.RunDetail, printed map[string]runLogPrintState, options composeLogsOptions) error {
 	for _, detail := range details {
 		summary := detail.GetSummary()
+		runID := summary.GetRunId()
 		output := detail.GetOutput()
+		prompt := runLogPrompt(detail)
+		state := printed[runID]
 		start := 0
 		if options.Follow {
-			start = printed[summary.GetRunId()]
+			start = state.outputPos
 			if start > len(output) {
 				start = 0
 			}
 		}
-		if start == len(output) {
+		promptChunk := ""
+		if prompt != "" && !state.promptPrinted {
+			promptChunk = prompt
+		}
+		if start == len(output) && promptChunk == "" {
 			continue
 		}
 		chunk := output[start:]
 		if options.TailLines >= 0 && (!options.Follow || start == 0) {
 			chunk = tailLogOutput(chunk, options.TailLines)
 		}
-		if err := writePrefixedRunOutput(out, summary, chunk, options.Timestamp); err != nil {
+		text := runLogConversationText(out, summary, promptChunk, chunk, options.Timestamp)
+		if err := writePrefixedRunOutput(out, summary, text, options.Timestamp); err != nil {
 			return err
 		}
-		printed[summary.GetRunId()] = len(output)
+		state.outputPos = len(output)
+		state.promptPrinted = state.promptPrinted || promptChunk != ""
+		printed[runID] = state
 	}
 	return nil
+}
+
+func runLogPrompt(run *agentcomposev2.RunDetail) string {
+	if run == nil {
+		return ""
+	}
+	if prompt := run.GetPrompt(); strings.TrimSpace(prompt) != "" {
+		return prompt
+	}
+	var result struct {
+		Mode    string `json:"mode"`
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal([]byte(run.GetResultJson()), &result); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(result.Mode) == "command" && strings.TrimSpace(result.Command) != "" {
+		return result.Command
+	}
+	return ""
+}
+
+func runLogConversationText(out io.Writer, summary *agentcomposev2.RunSummary, prompt, output string, timestamp bool) string {
+	var builder strings.Builder
+	if prompt != "" {
+		builder.WriteString(runLogUserSeparator(out, summary, timestamp))
+		builder.WriteString(prompt)
+		if !strings.HasSuffix(prompt, "\n") {
+			builder.WriteString("\n")
+		}
+	}
+	if output != "" {
+		builder.WriteString(runLogAssistantSeparator(out, summary, timestamp))
+		builder.WriteString(output)
+		if !strings.HasSuffix(output, "\n") {
+			builder.WriteString("\n")
+		}
+	}
+	return builder.String()
+}
+
+func runLogUserSeparator(out io.Writer, summary *agentcomposev2.RunSummary, timestamp bool) string {
+	return runLogSeparator(out, summary, timestamp, '>')
+}
+
+func runLogAssistantSeparator(out io.Writer, summary *agentcomposev2.RunSummary, timestamp bool) string {
+	return runLogSeparator(out, summary, timestamp, '<')
+}
+
+func runLogSeparator(out io.Writer, summary *agentcomposev2.RunSummary, timestamp bool, marker rune) string {
+	width := runLogSeparatorWidth(out, summary, timestamp)
+	if width < 8 {
+		width = 8
+	}
+	return strings.Repeat(string(marker), width) + "\n"
+}
+
+func runLogSeparatorWidth(out io.Writer, summary *agentcomposev2.RunSummary, timestamp bool) int {
+	width := terminalOutputWidth(out)
+	if width <= 0 {
+		width = 80
+	}
+	prefixWidth := runLogLinePrefixWidth(summary, runLogTimestamp(summary), timestamp)
+	if width > prefixWidth {
+		return width - prefixWidth
+	}
+	return width
+}
+
+func terminalOutputWidth(out io.Writer) int {
+	file, ok := out.(*os.File)
+	if !ok {
+		return 80
+	}
+	width := terminalFileWidth(file)
+	if width <= 0 {
+		return 80
+	}
+	return width
+}
+
+func runLogLinePrefixWidth(summary *agentcomposev2.RunSummary, timestampValue string, timestamp bool) int {
+	prefixWidth := displayStringWidth(runLogPrefix(summary))
+	runTime := ""
+	if timestamp {
+		runTime = formatComposeLogTimestamp(timestampValue)
+	}
+	if runTime != "" {
+		return prefixWidth + displayStringWidth(runTime) + len(" []| ")
+	}
+	return prefixWidth + len(" | ")
+}
+
+func displayStringWidth(value string) int {
+	total := 0
+	for _, r := range value {
+		switch {
+		case r == '\n' || r == '\r':
+			continue
+		case r == '\t':
+			total++
+		case unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Cf, r):
+			continue
+		default:
+			switch width.LookupRune(r).Kind() {
+			case width.EastAsianFullwidth, width.EastAsianWide:
+				total += 2
+			default:
+				total++
+			}
+		}
+	}
+	return total
 }
 
 func writePrefixedRunOutput(out io.Writer, summary *agentcomposev2.RunSummary, output string, timestamp bool) error {
@@ -6174,7 +6368,10 @@ func writePrefixedRunOutputWithTimestamp(out io.Writer, summary *agentcomposev2.
 		return nil
 	}
 	prefix := runLogPrefix(summary)
-	runTime := formatComposeLogTimestamp(timestampValue)
+	runTime := ""
+	if timestamp {
+		runTime = formatComposeLogTimestamp(timestampValue)
+	}
 	for len(output) > 0 {
 		line := output
 		rest := ""

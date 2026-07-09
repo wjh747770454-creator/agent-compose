@@ -383,18 +383,41 @@ func testComposeRunLogAndExecHelpers(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := writeLogDetails(&out, []*agentcomposev2.RunDetail{detail}, map[string]int{}, composeLogsOptions{TailLines: 1, Timestamp: true}); err != nil {
+	if err := writeLogDetails(&out, []*agentcomposev2.RunDetail{detail}, map[string]runLogPrintState{}, composeLogsOptions{TailLines: 1, Timestamp: true}); err != nil {
 		t.Fatalf("writeLogDetails returned error: %v", err)
 	}
-	if !strings.Contains(out.String(), "reviewer-run-1 [completed]| line3") {
+	logPrefix := "reviewer-run-1 [completed]| "
+	if !strings.Contains(out.String(), expectedLogSeparator(logPrefix, ">")) ||
+		!strings.Contains(out.String(), "reviewer-run-1 [completed]| prompt\n") ||
+		!strings.Contains(out.String(), expectedLogSeparator(logPrefix, "<")) ||
+		!strings.Contains(out.String(), "reviewer-run-1 [completed]| line3") {
 		t.Fatalf("log details = %q", out.String())
 	}
 	out.Reset()
 	if err := writeLogsForRun(&out, detail, true, composeLogsOptions{TailLines: 1}); err != nil {
 		t.Fatalf("writeLogsForRun json returned error: %v", err)
 	}
-	if !strings.Contains(out.String(), `"run_id": "run-1"`) || !strings.Contains(out.String(), "line3") {
+	if !strings.Contains(out.String(), `"run_id": "run-1"`) || !strings.Contains(out.String(), `"prompt": "prompt"`) || !strings.Contains(out.String(), "line3") {
 		t.Fatalf("json logs = %q", out.String())
+	}
+	commandDetail := &agentcomposev2.RunDetail{ResultJson: `{"mode":"command","command":" echo hi\n"}`}
+	if got := runLogPrompt(commandDetail); got != " echo hi\n" {
+		t.Fatalf("runLogPrompt command fallback = %q", got)
+	}
+	if got := runLogPrompt(&agentcomposev2.RunDetail{Prompt: "  explicit prompt  ", ResultJson: `{"mode":"command","command":"echo hi"}`}); got != "  explicit prompt  " {
+		t.Fatalf("runLogPrompt prompt precedence = %q", got)
+	}
+	if got := runLogConversationText(&out, nil, "", "", false); got != "" {
+		t.Fatalf("empty conversation text = %q", got)
+	}
+	if got := runLogConversationText(&out, nil, "ask", "", false); got != strings.Repeat(">", 76)+"\nask\n" {
+		t.Fatalf("prompt-only conversation text = %q", got)
+	}
+	if got := runLogConversationText(&out, nil, "  ask\n\n", "answer", false); got != strings.Repeat(">", 76)+"\n  ask\n\n"+strings.Repeat("<", 76)+"\nanswer\n" {
+		t.Fatalf("preserved prompt conversation text = %q", got)
+	}
+	if got := runLogConversationText(&out, nil, "", "answer", false); got != strings.Repeat("<", 76)+"\nanswer\n" {
+		t.Fatalf("output-only conversation text = %q", got)
 	}
 	out.Reset()
 	if err := writePrefixedRunOutput(&out, &agentcomposev2.RunSummary{RunId: "fallback"}, "last-line", false); err != nil {
