@@ -969,9 +969,15 @@ func microsandboxPullPolicyForImageRef(imageRef string, perCallPolicy string) mi
 }
 
 func (r *microsandboxRuntime) launchJupyter(ctx context.Context, sandbox *microsandbox.Sandbox, proxyState ProxyState) error {
-	command := directoryOnlyJupyterLaunchCommand(r.config, proxyState, true)
-	// Run from "/" (not GuestWorkspacePath): /workspace is created by the bootstrap
-	// inside command itself, so cwd=/workspace would fail chdir before the script runs.
+	// Use the launch command WITHOUT the directory-only bootstrap: the guest
+	// session bootstrap already ran unconditionally in ensureDirectoryOnlyGuestSessionBootstrap
+	// before this call, so re-running it here is redundant. Worse, the embedded
+	// bootstrap (~1.5s of symlink setup) can consume the entire observeCtx window
+	// below before the script reaches "nohup jupyterlab", so closing the exec
+	// handle tears the still-bootstrapping process down and jupyter never starts.
+	command := jupyterLaunchCommand(r.config, proxyState, true)
+	// Run from "/" (not GuestWorkspacePath): /workspace is a symlink created by the
+	// earlier bootstrap, so cwd=/workspace could fail chdir if anything is off.
 	// Matches the boxlite driver; jupyter still serves /workspace via --ServerApp.root_dir.
 	handle, err := sandbox.ExecStream(ctx, "/bin/bash", []string{"-lc", command}, r.execOptions(ctx, ExecSpec{Cwd: "/"})...)
 	if err != nil {
