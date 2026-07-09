@@ -274,7 +274,7 @@ Upgrade notes for the UI server split:
   separately if enabled.
 - After changing runtime-reachable URLs or capability proxy settings such as
   `AGENT_COMPOSE_RUNTIME_BASE_URL`, `CAP_GRPC_LISTEN`, or `CAP_GRPC_TARGET`,
-  restart the daemon and create new agent sessions so guest containers receive
+  restart the daemon and create new sandboxes so guest containers receive
   the updated facade and capability environment.
 
 ## Configuration
@@ -308,8 +308,10 @@ Important variables include:
   used when generating runtime LLM facade configuration. Docker Compose
   defaults this to `http://agent-compose:7410`; host-based Docker setups should
   set it to a concrete host IP/name and port.
-- `DOCKER_HOST_SESSION_ROOT`: host path for sandbox data bind-mounted into guest
-  containers. Docker Compose defaults this to `./data/agent-compose/sessions`.
+- `SANDBOX_ROOT`: container path for sandbox metadata, state, workspaces, and
+  runtime files. The published image defaults this to `/data/sandboxes`.
+- `DOCKER_HOST_SANDBOX_ROOT`: host path for sandbox data bind-mounted into guest
+  containers. Docker Compose defaults this to `${PWD}/data/sandboxes`.
 - `CAP_GRPC_LISTEN`, `CAP_GRPC_TARGET`: required only when agents need to call
   OctoBus gRPC capabilities. `CAP_GRPC_LISTEN` starts the agent-compose
   capability proxy; `CAP_GRPC_TARGET` is the guest-reachable address injected
@@ -488,5 +490,3 @@ Join the community to discuss Agent-compose usage, deployment, and development w
     <td align="center"><img src="https://github.com/user-attachments/assets/fcdbb42b-2e06-409e-b116-60544461fbc1" width="160" /><br/>WeChat Group</td>
   </tr>
 </table>
-
-

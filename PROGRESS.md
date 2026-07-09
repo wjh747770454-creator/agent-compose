@@ -121,7 +121,7 @@
       - `pkg/storage/sessionstore` 包名和内部 session domain 命名仍按计划留给阶段 3/4 迁移，本任务只切换配置字段和 env。
     - 下一目标：2.2。
 
-- [ ] 2.2 更新 Docker/Compose 和 `.env.example` 的部署变量
+- [x] 2.2 更新 Docker/Compose 和 `.env.example` 的部署变量
   - 依赖：2.1。
   - 工作内容：
     - 更新 `Dockerfile` image ENV 为 `SANDBOX_ROOT=/data/sandboxes`。
@@ -129,8 +129,8 @@
     - 保持 `docker-compose.override.yml` 只承载本地开发行为。
     - 更新 `.env.example`，按部署用途分组记录新变量；旧变量仅写 breaking-change 注释，不提供可复制默认值。
   - 可并行子任务：
-    - [ ] 可并行：审计 `Dockerfile`、`docker-compose.yml`、`docker-compose.override.yml` 的变量来源。
-    - [ ] 可并行：更新 `.env.example` 和 README 中部署变量片段。
+    - [x] 可并行：审计 `Dockerfile`、`docker-compose.yml`、`docker-compose.override.yml` 的变量来源。
+    - [x] 可并行：更新 `.env.example` 和 README 中部署变量片段。
   - 测试方案：
     - `task build`
     - 人工检查 compose：远端部署仍只需 `docker-compose.yml` 加用户 `.env`。
@@ -139,10 +139,20 @@
     - `.env.example` 不暴露旧变量默认值。
     - 本地 build 行为未进入远端部署 compose。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - `Dockerfile` image ENV 从 `SESSION_ROOT=/data/sessions` 改为 `SANDBOX_ROOT=/data/sandboxes`。
+      - `docker-compose.yml` 改用 deploy-time `DOCKER_HOST_SANDBOX_ROOT`，默认 host 路径为 `${PWD}/data/sandboxes`。
+      - `.env.example` 增加 `SANDBOX_ROOT=/data/sandboxes`，将 Docker host root 和 start/stop timeout 示例改为 `SANDBOX_*`，并以 breaking-change 注释记录旧 env 不再接受。
+      - `README.md` 和 `AGENTS.md` 更新部署变量、默认 sandbox root、compose 数据挂载和 `.env` 挂载路径说明。
+    - 验证：
+      - `task build`
+      - `docker compose -f docker-compose.yml --env-file .env.example config`
+      - `rg -n "SESSION_ROOT|DOCKER_HOST_SESSION_ROOT|SESSION_START_TIMEOUT|SESSION_STOP_TIMEOUT" Dockerfile docker-compose.yml docker-compose.override.yml .env.example README.md AGENTS.md`
+    - 审计与例外：
+      - 旧 env audit 仅命中 `.env.example` 的 breaking-change 注释；未在 Dockerfile、Compose、README 或 AGENTS 中保留旧默认值。
+      - `docker-compose.override.yml` 未修改；本地 `build:` 行为仍只在 override 中，远端 `docker-compose.yml` 单独渲染使用 published images。
+      - 本任务只更新部署和用户-facing env 文档；文件存储布局和旧 `<DATA_ROOT>/sessions` 拒绝路径留给阶段 3。
     - 下一目标：3.1。
 
 ## 3. 阶段 3：文件存储和旧数据目录拒绝

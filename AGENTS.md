@@ -54,7 +54,7 @@ The default runtime driver is `docker`.
 
 Important defaults:
 - `DATA_ROOT`: `./data/`
-- `SESSION_ROOT`: `<data-root>/sessions`
+- `SANDBOX_ROOT`: `<data-root>/sandboxes`
 - `HTTP_LISTEN`: `127.0.0.1:7410`
 - `DEFAULT_IMAGE`: `debian:bookworm-slim`
 - `JUPYTER_PROXY_BASE`: `/jupyter`
@@ -68,7 +68,7 @@ Daemon LLM client (`LLMService`, `scheduler.llm`, SDK `runtime.llm`):
 
 ## Persistence
 
-Session metadata, notebook cells, event history, runtime state, and proxy state are stored under `SESSION_ROOT`. Session file storage helpers live in `pkg/storage/sessionstore`.
+Sandbox metadata, notebook cells, event history, runtime state, and proxy state are stored under `SANDBOX_ROOT`. Session file storage helpers live in `pkg/storage/sessionstore`.
 
 Global environment variables, workspace configs, loader definitions, loader triggers, loader runs, and loader events are stored in `DATA_ROOT/data.db`. SQLite config-store helpers live in `pkg/storage/configstore`.
 
@@ -82,8 +82,8 @@ Current Docker build behavior:
 Current compose behavior:
 - `docker-compose.yml` deploys the `agent-compose` service and the published `agent-compose-frontend` nginx image
 - the agent-compose service listens on `7410`
-- data is mounted from `./data/agent-compose`
-- the user-created `.env` is mounted read-only at `/app/.env` for daemon configuration
+- data is mounted from `./data`
+- the user-created `.env` is mounted read-only at `/data/work/.env` for daemon configuration
 - the Docker socket and `/dev/kvm` are exposed for runtime support
 
 Compose and environment variable conventions:
