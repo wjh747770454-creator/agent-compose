@@ -56,7 +56,7 @@ func (r *fakeAgentRuntime) ExecStream(_ context.Context, _ *domain.Sandbox, _ do
 	if r.result.Stdout != "" || r.result.Stderr != "" || r.result.Output != "" || r.result.ExitCode != 0 || r.result.Success {
 		return r.result, nil
 	}
-	payload := execution.AgentResultPrefix + `{"provider":"codex","sessionId":"agent-session-1","finalText":"done","transcript":"trace","stopReason":"completed"}`
+	payload := execution.AgentResultPrefix + `{"provider":"codex","threadId":"agent-thread-1","finalText":"done","transcript":"trace","stopReason":"completed"}`
 	return domain.ExecResult{Stdout: payload, Output: payload, ExitCode: 0, Success: true}, nil
 }
 

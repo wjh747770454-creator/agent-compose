@@ -606,7 +606,7 @@
       - subagent 并行审计尝试因 `agent thread limit reached` 未执行；本任务由主 agent 完成实现、测试和审计。
     - 下一目标：7.3。
 
-- [ ] 7.3 迁移 host artifact、guest env 和 runtime LLM facade
+- [x] 7.3 迁移 host artifact、guest env 和 runtime LLM facade
   - 依赖：5.1、7.1。
   - 工作内容：
     - host cell artifact 从 `agent-session.json` 改为 `agent-thread.json`。
@@ -616,9 +616,9 @@
     - Runtime LLM facade env 改为 `AGENT_COMPOSE_SANDBOX_TOKEN`，不再注入 `AGENT_COMPOSE_SESSION_TOKEN`。
     - Runtime LLM facade path 改为 `/api/runtime/sandboxes/:sandbox_id/llm/...`，token scope 校验使用 sandbox。
   - 可并行子任务：
-    - [ ] 可并行：迁移 `pkg/execution` artifact/resume/parser tests。
-    - [ ] 可并行：迁移 `pkg/agentcompose/adapters` guest env 和 managed env tests。
-    - [ ] 可并行：迁移 `pkg/llms` runtimefacade 和 `pkg/agentcompose/proxy` tests。
+    - [x] 可并行：迁移 `pkg/execution` artifact/resume/parser tests。
+    - [x] 可并行：迁移 `pkg/agentcompose/adapters` guest env 和 managed env tests。
+    - [x] 可并行：迁移 `pkg/llms` runtimefacade 和 `pkg/agentcompose/proxy` tests。
   - 测试方案：
     - `go test ./pkg/execution ./pkg/agentcompose/adapters ./pkg/llms/... ./pkg/agentcompose/proxy`
     - 集成测试覆盖 runtime LLM facade 新 path、token scope、StopSandbox revoke。
@@ -627,10 +627,27 @@
     - `SESSION_ID` 和 `AGENT_COMPOSE_SESSION_TOKEN` 不再由 daemon 写入。
     - facade token 必须属于 path 中的 `sandbox_id`。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - host cell artifact 从 `agent-session.json` 切换为 `agent-thread.json`，artifact payload 使用 `thread_id`、`thread_state_path`、`thread_manifest_path`、`provider_log_paths` 和 `updated_at`。
+      - host parser 改为读取 runtime `__AGENT_RESULT__` payload 的 `threadId`；provider state reader 改为读取 `threadId`。
+      - `FindAgentSessionJSONLPaths`、`AgentSessionJSONLRoots` 和 host home helper 已收敛为 `FindAgentThreadLogPaths`、`AgentThreadLogRoots`、`HostSandboxHome`；第三方 `.codex/sessions` log 目录作为 provider-native 路径保留。
+      - daemon runtime env 测试固定 `SANDBOX_ID` 注入并断言不再注入 `SESSION_ID`。
+      - runtime LLM facade env 改为 `AGENT_COMPOSE_SANDBOX_TOKEN`，Codex/OpenCode runtime config 也改为读取该 env；`LLM_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN` 继续指向同一 facade token。
+      - runtime LLM facade route 从 `/api/runtime/sessions/:session_id/llm/...` 改为 `/api/runtime/sandboxes/:sandbox_id/llm/...`，handler 使用 path `sandbox_id` 校验 token `SandboxID`。
+      - tests 增加 host `agent-thread.json` 写入和旧 `agent-session.json` 不存在断言、旧 runtime sessions route 不再匹配断言、facade path sandbox mismatch 403 断言，以及旧 `AGENT_COMPOSE_SESSION_TOKEN` 不再 emit/inject 断言。
+    - 验证：
+      - `go test ./pkg/execution ./pkg/agentcompose/adapters ./pkg/llms/... ./pkg/agentcompose/proxy`
+      - `go test ./pkg/agentcompose/app`
+      - `go test ./pkg/sessions`
+      - `git diff --check`
+      - `rg -n "AGENT_COMPOSE_SESSION_TOKEN|/api/runtime/sessions/|SESSION_ID|agent-session\\.json|\"sessionId\"|WriteAgentSessionArtifact|ThreadJSONLPaths|thread_jsonl_paths" pkg/execution pkg/agentcompose pkg/llms pkg/sessions -g'*.go' -g'!*_test.go'`
+      - `rg -n "AGENT_COMPOSE_SANDBOX_TOKEN|/api/runtime/sandboxes/|SANDBOX_ID|agent-thread\\.json|\"threadId\"|ProviderLogPaths|provider_log_paths" pkg/execution pkg/agentcompose pkg/llms pkg/sessions -g'*.go' -g'!*_test.go'`
+    - 审计与例外：
+      - implementation-only audit 未发现 daemon 写入 `SESSION_ID`、`AGENT_COMPOSE_SESSION_TOKEN`、`/api/runtime/sessions/...` 或 `agent-session.json`；旧 token/path 仅保留在 tests 的负向断言中。
+      - `sessionId` implementation 残留仅位于 loader v1/deprecated RPC JSON compatibility helpers 和对应 tests；不属于 runtime JS/SDK public contract。
+      - v1 mapping 未修改，`CellToProto` 和 `AgentRunToProto` 继续把内部 `AgentThreadID` 映射回 v1 `agent_session_id`。
+      - 两个 subagent read-only audits 已完成并整合：adapter env audit 与 runtime LLM facade path/token audit。
     - 下一目标：8.1。
 
 ## 8. 阶段 8：Run、Exec、Loader、Capability 和 topic workflow 收敛

@@ -14,20 +14,20 @@ import (
 
 func TestDriverConversionWorkflows(t *testing.T) {
 	if ToDriverSandbox(nil) != nil {
-		t.Fatalf("nil session should map to nil")
+		t.Fatalf("nil sandbox should map to nil")
 	}
 	now := time.Date(2026, 7, 4, 8, 0, 0, 0, time.UTC)
 	session := &domain.Sandbox{
 		Summary: domain.SandboxSummary{
-			ID: "session-1", Driver: "docker", GuestImage: "guest:latest", RuntimeRef: "runtime-1",
+			ID: "sandbox-1", Driver: "docker", GuestImage: "guest:latest", RuntimeRef: "runtime-1",
 			WorkspacePath: "/workspace", CreatedAt: now, UpdatedAt: now,
 		},
 		EnvItems:        []domain.SandboxEnvVar{{Name: "A", Value: "B", Secret: true}},
 		RuntimeEnvItems: []domain.SandboxEnvVar{{Name: "R", Value: "V"}},
 	}
 	driverSession := ToDriverSandbox(session)
-	if driverSession.Summary.ID != "session-1" || len(driverSession.EnvItems) != 1 || !driverSession.EnvItems[0].Secret || len(driverSession.RuntimeEnvItems) != 1 {
-		t.Fatalf("driver session = %#v", driverSession)
+	if driverSession.Summary.ID != "sandbox-1" || len(driverSession.EnvItems) != 1 || !driverSession.EnvItems[0].Secret || len(driverSession.RuntimeEnvItems) != 1 {
+		t.Fatalf("driver sandbox = %#v", driverSession)
 	}
 	vmState := domain.VMState{Driver: "docker", Mode: "runtime", BoxName: "box", BoxID: "box-id", Image: "image", Registry: "registry", RuntimeHome: "/root", StartedAt: now, StoppedAt: now, LastError: "none", BootstrapRef: "boot"}
 	driverVMState := ToDriverVMState(vmState)
@@ -80,8 +80,11 @@ func TestDriverConversionWorkflows(t *testing.T) {
 	session.EnvItems = []domain.SandboxEnvVar{{Name: "USER_VAR", Value: "ok"}, {Name: "LLM_API_KEY", Value: "secret"}}
 	session.RuntimeEnvItems = []domain.SandboxEnvVar{{Name: "MANAGED", Value: "yes"}}
 	env := BuildSandboxExecEnv(config, session, "/home/agent")
-	if env["USER_VAR"] != "ok" || env["LLM_API_KEY"] != "" || env["MANAGED"] != "yes" || env["SANDBOX_ID"] != "session-1" {
-		t.Fatalf("session exec env = %#v", env)
+	if env["USER_VAR"] != "ok" || env["LLM_API_KEY"] != "" || env["MANAGED"] != "yes" || env["SANDBOX_ID"] != "sandbox-1" {
+		t.Fatalf("sandbox exec env = %#v", env)
+	}
+	if env["SESSION_ID"] != "" {
+		t.Fatalf("SESSION_ID should not be injected: %#v", env)
 	}
 	execSpec := BuildLoaderCommandExecSpec(config, session, "/state/cells/cell-1/request.json", "/home/agent")
 	if execSpec.Command != "sh" || len(execSpec.Args) != 2 || !strings.Contains(execSpec.Args[1], "agent-compose-runtime exec") || execSpec.Cwd != "/workspace" {

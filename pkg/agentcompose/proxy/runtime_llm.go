@@ -39,9 +39,9 @@ type RuntimeLLMOptions struct {
 
 func RegisterRuntimeLLMFacadeRoutes(app *echo.Echo, opts RuntimeLLMOptions) {
 	handler := runtimeLLMHandler{opts: opts}
-	app.POST("/api/runtime/sessions/:session_id/llm/openai/v1/responses", handler.handleResponses)
-	app.POST("/api/runtime/sessions/:session_id/llm/openai/v1/chat/completions", handler.handleChatCompletions)
-	app.POST("/api/runtime/sessions/:session_id/llm/anthropic/v1/messages", handler.handleAnthropicMessages)
+	app.POST("/api/runtime/sandboxes/:sandbox_id/llm/openai/v1/responses", handler.handleResponses)
+	app.POST("/api/runtime/sandboxes/:sandbox_id/llm/openai/v1/chat/completions", handler.handleChatCompletions)
+	app.POST("/api/runtime/sandboxes/:sandbox_id/llm/anthropic/v1/messages", handler.handleAnthropicMessages)
 }
 
 type runtimeLLMHandler struct {
@@ -64,9 +64,9 @@ func (h runtimeLLMHandler) handle(c echo.Context, inboundProtocol protocolbridge
 	if h.opts.Tokens == nil || h.opts.Sessions == nil || h.opts.ResolveTarget == nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "llm facade dependencies are required"})
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
+	sandboxID := strings.TrimSpace(c.Param("sandbox_id"))
 	rawToken := llms.RuntimeFacadeToken(c.Request().Header)
-	if sessionID == "" || rawToken == "" {
+	if sandboxID == "" || rawToken == "" {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "llm facade token is required"})
 	}
 	token, err := h.opts.Tokens.GetLLMFacadeToken(c.Request().Context(), rawToken)
@@ -74,18 +74,18 @@ func (h runtimeLLMHandler) handle(c echo.Context, inboundProtocol protocolbridge
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid llm facade token"})
 	}
 	now := time.Now().UTC()
-	if token.SandboxID != sessionID || !token.RevokedAt.IsZero() || (!token.ExpiresAt.IsZero() && now.After(token.ExpiresAt)) {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "llm facade token is not valid for this session"})
+	if token.SandboxID != sandboxID || !token.RevokedAt.IsZero() || (!token.ExpiresAt.IsZero() && now.After(token.ExpiresAt)) {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "llm facade token is not valid for this sandbox"})
 	}
 	if token.WireAPI != "" && llms.NormalizeWireAPI(token.WireAPI) != llms.NormalizeWireAPI(facadeWireAPI) {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "llm facade token wire api mismatch"})
 	}
-	session, err := h.opts.Sessions.GetSandbox(c.Request().Context(), sessionID)
+	session, err := h.opts.Sessions.GetSandbox(c.Request().Context(), sandboxID)
 	if err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "session is not available"})
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "sandbox is not available"})
 	}
 	if session.Summary.VMStatus == domain.VMStatusStopped || session.Summary.VMStatus == domain.VMStatusFailed {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "session is not running"})
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "sandbox is not running"})
 	}
 	body, err := io.ReadAll(io.LimitReader(c.Request().Body, 64<<20))
 	if err != nil {

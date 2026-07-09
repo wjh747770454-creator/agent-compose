@@ -114,13 +114,14 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 		if err := execution.WriteCellArtifacts(hostCellDir, message, execResult); err != nil {
 			return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 		}
-		resumeInfo := execution.CollectAgentResumeInfo(session, firstNonEmpty(result.Agent, cell.Agent, agent), result.ThreadID, filepath.Join(hostCellDir, "agent-session.json"))
-		if err := execution.WriteAgentSessionArtifact(filepath.Join(hostCellDir, "agent-session.json"), resumeInfo); err != nil {
+		threadArtifactPath := filepath.Join(hostCellDir, "agent-thread.json")
+		resumeInfo := execution.CollectAgentResumeInfo(session, firstNonEmpty(result.Agent, cell.Agent, agent), result.ThreadID, threadArtifactPath)
+		if err := execution.WriteAgentThreadArtifact(threadArtifactPath, resumeInfo); err != nil {
 			return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 		}
-		agentSessionID := strings.TrimSpace(result.ThreadID)
-		if resumeInfo != nil && agentSessionID == "" {
-			agentSessionID = resumeInfo.ThreadID
+		agentThreadID := strings.TrimSpace(result.ThreadID)
+		if resumeInfo != nil && agentThreadID == "" {
+			agentThreadID = resumeInfo.ThreadID
 		}
 		cellMu.Lock()
 		cell.Stdout = execResult.Stdout
@@ -130,7 +131,7 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 		cell.Success = false
 		cell.Running = false
 		cell.Agent = firstNonEmpty(result.Agent, cell.Agent, agent)
-		cell.AgentThreadID = agentSessionID
+		cell.AgentThreadID = agentThreadID
 		cell.StopReason = result.StopReason
 		cell.AgentResume = resumeInfo
 		failedCell := cell
@@ -206,13 +207,14 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 	if err := execution.WriteCellArtifacts(hostCellDir, message, execResult); err != nil {
 		return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 	}
-	resumeInfo := execution.CollectAgentResumeInfo(session, firstNonEmpty(result.Agent, cell.Agent), result.ThreadID, filepath.Join(hostCellDir, "agent-session.json"))
-	if err := execution.WriteAgentSessionArtifact(filepath.Join(hostCellDir, "agent-session.json"), resumeInfo); err != nil {
+	threadArtifactPath := filepath.Join(hostCellDir, "agent-thread.json")
+	resumeInfo := execution.CollectAgentResumeInfo(session, firstNonEmpty(result.Agent, cell.Agent), result.ThreadID, threadArtifactPath)
+	if err := execution.WriteAgentThreadArtifact(threadArtifactPath, resumeInfo); err != nil {
 		return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 	}
-	agentSessionID := strings.TrimSpace(result.ThreadID)
-	if resumeInfo != nil && agentSessionID == "" {
-		agentSessionID = resumeInfo.ThreadID
+	agentThreadID := strings.TrimSpace(result.ThreadID)
+	if resumeInfo != nil && agentThreadID == "" {
+		agentThreadID = resumeInfo.ThreadID
 	}
 	cellMu.Lock()
 	cell.Stdout = execResult.Stdout
@@ -222,7 +224,7 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 	cell.Success = result.Success
 	cell.Running = false
 	cell.Agent = firstNonEmpty(result.Agent, cell.Agent)
-	cell.AgentThreadID = agentSessionID
+	cell.AgentThreadID = agentThreadID
 	cell.StopReason = result.StopReason
 	cell.AgentResume = resumeInfo
 	cellSnapshot := cell

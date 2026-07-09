@@ -13,22 +13,22 @@ import (
 	domain "agent-compose/pkg/model"
 )
 
-func WriteAgentSessionArtifact(path string, info *domain.AgentResumeInfo) error {
+func WriteAgentThreadArtifact(path string, info *domain.AgentResumeInfo) error {
 	if info == nil {
 		return nil
 	}
 	data, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode agent session artifact: %w", err)
+		return fmt.Errorf("encode agent thread artifact: %w", err)
 	}
 	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
-		return fmt.Errorf("write agent session artifact: %w", err)
+		return fmt.Errorf("write agent thread artifact: %w", err)
 	}
 	return nil
 }
 
-type storedAgentSessionState struct {
-	ThreadID string `json:"sessionId"`
+type storedAgentThreadState struct {
+	ThreadID string `json:"threadId"`
 }
 
 func LoadStoredAgentThreadID(path string) string {
@@ -36,18 +36,18 @@ func LoadStoredAgentThreadID(path string) string {
 	if err != nil {
 		return ""
 	}
-	var state storedAgentSessionState
+	var state storedAgentThreadState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return ""
 	}
 	return strings.TrimSpace(state.ThreadID)
 }
 
-func CollectAgentResumeInfo(session *domain.Sandbox, agent, agentSessionID, manifestPath string) *domain.AgentResumeInfo {
+func CollectAgentResumeInfo(session *domain.Sandbox, agent, threadID, manifestPath string) *domain.AgentResumeInfo {
 	provider := domain.NormalizeAgentKind(agent)
 	info := &domain.AgentResumeInfo{
 		Provider:           provider,
-		ThreadID:           strings.TrimSpace(agentSessionID),
+		ThreadID:           strings.TrimSpace(threadID),
 		ThreadManifestPath: manifestPath,
 		UpdatedAt:          time.Now().UTC(),
 	}
@@ -58,15 +58,15 @@ func CollectAgentResumeInfo(session *domain.Sandbox, agent, agentSessionID, mani
 			info.ThreadID = LoadStoredAgentThreadID(statePath)
 		}
 	}
-	info.ThreadJSONLPaths = FindAgentSessionJSONLPaths(HostSessionHome(session), provider, info.ThreadID)
-	if info.Provider == "" && info.ThreadID == "" && info.ThreadStatePath == "" && info.ThreadManifestPath == "" && len(info.ThreadJSONLPaths) == 0 {
+	info.ProviderLogPaths = FindAgentThreadLogPaths(HostSandboxHome(session), provider, info.ThreadID)
+	if info.Provider == "" && info.ThreadID == "" && info.ThreadStatePath == "" && info.ThreadManifestPath == "" && len(info.ProviderLogPaths) == 0 {
 		return nil
 	}
 	return info
 }
 
-func FindAgentSessionJSONLPaths(homeDir, provider, sessionID string) []string {
-	roots := AgentSessionJSONLRoots(homeDir, provider)
+func FindAgentThreadLogPaths(homeDir, provider, threadID string) []string {
+	roots := AgentThreadLogRoots(homeDir, provider)
 	if len(roots) == 0 {
 		return nil
 	}
@@ -81,7 +81,7 @@ func FindAgentSessionJSONLPaths(homeDir, provider, sessionID string) []string {
 			continue
 		}
 		if !info.IsDir() {
-			if ShouldIncludeAgentJSONL(root, provider, sessionID) {
+			if ShouldIncludeAgentJSONL(root, provider, threadID) {
 				if _, ok := seen[root]; !ok {
 					seen[root] = struct{}{}
 					paths = append(paths, root)
@@ -93,7 +93,7 @@ func FindAgentSessionJSONLPaths(homeDir, provider, sessionID string) []string {
 			if walkErr != nil || entry == nil || entry.IsDir() {
 				return nil
 			}
-			if !ShouldIncludeAgentJSONL(path, provider, sessionID) {
+			if !ShouldIncludeAgentJSONL(path, provider, threadID) {
 				return nil
 			}
 			if _, ok := seen[path]; ok {
@@ -108,7 +108,7 @@ func FindAgentSessionJSONLPaths(homeDir, provider, sessionID string) []string {
 	return paths
 }
 
-func AgentSessionJSONLRoots(homeDir, provider string) []string {
+func AgentThreadLogRoots(homeDir, provider string) []string {
 	switch provider {
 	case "codex":
 		return []string{
@@ -132,12 +132,12 @@ func AgentSessionJSONLRoots(homeDir, provider string) []string {
 	}
 }
 
-func ShouldIncludeAgentJSONL(path, provider, sessionID string) bool {
+func ShouldIncludeAgentJSONL(path, provider, threadID string) bool {
 	if filepath.Ext(path) != ".jsonl" {
 		return false
 	}
-	if provider == "codex" && sessionID != "" && strings.Contains(path, string(filepath.Separator)+"sessions"+string(filepath.Separator)) {
-		return strings.Contains(filepath.Base(path), sessionID)
+	if provider == "codex" && threadID != "" && strings.Contains(path, string(filepath.Separator)+"sessions"+string(filepath.Separator)) {
+		return strings.Contains(filepath.Base(path), threadID)
 	}
 	return true
 }
@@ -146,10 +146,6 @@ func HostSandboxDir(session *domain.Sandbox) string {
 	return filepath.Dir(session.Summary.WorkspacePath)
 }
 
-func HostSessionDir(session *domain.Sandbox) string {
-	return HostSandboxDir(session)
-}
-
-func HostSessionHome(session *domain.Sandbox) string {
+func HostSandboxHome(session *domain.Sandbox) string {
 	return filepath.Join(HostSandboxDir(session), "home")
 }

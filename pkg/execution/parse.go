@@ -15,7 +15,7 @@ const (
 
 type agentExecResponse struct {
 	Provider   string `json:"provider"`
-	SessionID  string `json:"sessionId"`
+	ThreadID   string `json:"threadId"`
 	StopReason string `json:"stopReason"`
 	FinalText  string `json:"finalText"`
 	JSON       any    `json:"json"`
@@ -53,7 +53,7 @@ func ParseAgentExecResult(agent string, result domain.ExecResult) (domain.AgentR
 		FinalText:     strings.TrimSpace(payload.FinalText),
 		JSONText:      strings.TrimSpace(payload.FinalText),
 		Transcript:    strings.TrimSpace(payload.Transcript),
-		ThreadID:      strings.TrimSpace(payload.SessionID),
+		ThreadID:      strings.TrimSpace(payload.ThreadID),
 		StopReason:    strings.TrimSpace(payload.StopReason),
 		ExitCode:      result.ExitCode,
 		Success:       result.Success,

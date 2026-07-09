@@ -203,7 +203,7 @@ type AgentResumeInfo struct {
 	ThreadID           string    `json:"thread_id,omitempty"`
 	ThreadStatePath    string    `json:"thread_state_path,omitempty"`
 	ThreadManifestPath string    `json:"thread_manifest_path,omitempty"`
-	ThreadJSONLPaths   []string  `json:"thread_jsonl_paths,omitempty"`
+	ProviderLogPaths   []string  `json:"provider_log_paths,omitempty"`
 	UpdatedAt          time.Time `json:"updated_at,omitempty"`
 }
 

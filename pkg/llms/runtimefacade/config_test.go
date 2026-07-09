@@ -37,9 +37,9 @@ func TestEnsureSessionLLMFacadeConfigCreatesCodexEnvAndToken(t *testing.T) {
 	}
 	session := &domain.Sandbox{
 		Summary: domain.SandboxSummary{
-			ID:            "session-runtimefacade",
+			ID:            "sandbox-runtimefacade",
 			Driver:        driverpkg.RuntimeDriverDocker,
-			WorkspacePath: filepath.Join(root, "sessions", "session-runtimefacade", "workspace"),
+			WorkspacePath: filepath.Join(root, "sandboxes", "sandbox-runtimefacade", "workspace"),
 		},
 	}
 
@@ -50,13 +50,16 @@ func TestEnsureSessionLLMFacadeConfigCreatesCodexEnvAndToken(t *testing.T) {
 	if env["LLM_API_PROTOCOL"] != llms.APIProtocolResponses {
 		t.Fatalf("LLM_API_PROTOCOL = %q, want responses", env["LLM_API_PROTOCOL"])
 	}
-	if env["OPENAI_BASE_URL"] != "http://agent-compose.test:7410/api/runtime/sessions/session-runtimefacade/llm/openai/v1" {
+	if env["OPENAI_BASE_URL"] != "http://agent-compose.test:7410/api/runtime/sandboxes/sandbox-runtimefacade/llm/openai/v1" {
 		t.Fatalf("OPENAI_BASE_URL = %q", env["OPENAI_BASE_URL"])
 	}
-	if env["AGENT_COMPOSE_SESSION_TOKEN"] == "" {
-		t.Fatalf("AGENT_COMPOSE_SESSION_TOKEN is empty")
+	if env["AGENT_COMPOSE_SANDBOX_TOKEN"] == "" {
+		t.Fatalf("AGENT_COMPOSE_SANDBOX_TOKEN is empty")
 	}
-	token, err := store.GetLLMFacadeToken(ctx, env["AGENT_COMPOSE_SESSION_TOKEN"])
+	if env["AGENT_COMPOSE_SESSION_TOKEN"] != "" {
+		t.Fatalf("AGENT_COMPOSE_SESSION_TOKEN should not be emitted")
+	}
+	token, err := store.GetLLMFacadeToken(ctx, env["AGENT_COMPOSE_SANDBOX_TOKEN"])
 	if err != nil {
 		t.Fatalf("GetLLMFacadeToken returned error: %v", err)
 	}
@@ -85,9 +88,9 @@ func TestEnsureSessionAgentRuntimeConfigClaudeAndOpenCodeWorkflows(t *testing.T)
 	}
 	session := &domain.Sandbox{
 		Summary: domain.SandboxSummary{
-			ID:            "session-claude",
+			ID:            "sandbox-claude",
 			Driver:        driverpkg.RuntimeDriverDocker,
-			WorkspacePath: filepath.Join(root, "sessions", "session-claude", "workspace"),
+			WorkspacePath: filepath.Join(root, "sandboxes", "sandbox-claude", "workspace"),
 		},
 		ProviderEnvItems: []domain.SandboxEnvVar{
 			{Name: "ANTHROPIC_BASE_URL", Value: "https://anthropic.example.test"},
@@ -108,8 +111,11 @@ func TestEnsureSessionAgentRuntimeConfigClaudeAndOpenCodeWorkflows(t *testing.T)
 	if claude.Env["ANTHROPIC_BASE_URL"] == "" || claude.Env["ANTHROPIC_AUTH_TOKEN"] == "" || claude.Env["ANTHROPIC_AUTH_TOKEN"] != claude.Env["ANTHROPIC_API_KEY"] {
 		t.Fatalf("claude anthropic facade env = %#v", claude.Env)
 	}
-	if _, err := store.GetLLMFacadeToken(ctx, claude.Env["AGENT_COMPOSE_SESSION_TOKEN"]); err != nil {
+	if _, err := store.GetLLMFacadeToken(ctx, claude.Env["AGENT_COMPOSE_SANDBOX_TOKEN"]); err != nil {
 		t.Fatalf("claude token not stored: %v", err)
+	}
+	if claude.Env["AGENT_COMPOSE_SESSION_TOKEN"] != "" {
+		t.Fatalf("claude emitted deprecated session token env")
 	}
 
 	openAI, err := EnsureSessionAgentRuntimeConfig(ctx, config, store, session, "opencode", "openai/gpt-test", TokenSourceAgent, "run-openai")

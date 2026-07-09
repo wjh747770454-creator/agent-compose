@@ -79,7 +79,7 @@ func (r *AgentRunner) ExecuteAgentRun(ctx context.Context, session *domain.Sandb
 	if len(managedEnv) > 0 {
 		spec.Env = llms.MergeManagedExecEnv(spec.Env, managedEnv)
 		if r.configDB != nil {
-			if token := managedEnv["AGENT_COMPOSE_SESSION_TOKEN"]; token != "" {
+			if token := managedEnv["AGENT_COMPOSE_SANDBOX_TOKEN"]; token != "" {
 				defer func() { _ = r.configDB.DeleteLLMFacadeToken(context.WithoutCancel(ctx), token) }()
 			}
 		}

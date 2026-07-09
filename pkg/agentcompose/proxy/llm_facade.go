@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const RuntimeLLMFacadePrefix = "/api/runtime/sessions/"
+const RuntimeLLMFacadePrefix = "/api/runtime/sandboxes/"
 
 func IsRuntimeLLMFacadeRequest(r *http.Request) bool {
 	if r == nil || r.Method != http.MethodPost {

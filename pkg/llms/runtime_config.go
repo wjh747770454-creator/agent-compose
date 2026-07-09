@@ -21,7 +21,7 @@ func WriteCodexRuntimeConfig(session *domain.Sandbox, model, baseURL, wireAPI st
 	if model == "" || baseURL == "" {
 		return nil
 	}
-	path := filepath.Join(execution.HostSessionHome(session), ".codex", "config.toml")
+	path := filepath.Join(execution.HostSandboxHome(session), ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create codex config dir: %w", err)
 	}
@@ -31,7 +31,7 @@ model = %q
 [model_providers.agent_compose]
 name = "agent-compose"
 base_url = %q
-env_key = "AGENT_COMPOSE_SESSION_TOKEN"
+env_key = "AGENT_COMPOSE_SANDBOX_TOKEN"
 wire_api = %q
 request_max_retries = 30
 stream_max_retries = 50
@@ -69,7 +69,7 @@ func WriteOpenCodeRuntimeConfig(session *domain.Sandbox, providerID, model, base
 	if providerID == "openai" {
 		providerPackage = "@ai-sdk/openai"
 	}
-	path := filepath.Join(execution.HostSessionHome(session), ".config", "opencode", "opencode.json")
+	path := filepath.Join(execution.HostSandboxHome(session), ".config", "opencode", "opencode.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create opencode config dir: %w", err)
 	}
@@ -81,7 +81,7 @@ func WriteOpenCodeRuntimeConfig(session *domain.Sandbox, providerID, model, base
 				"name": "agent-compose " + providerID,
 				"options": map[string]any{
 					"baseURL": baseURL,
-					"apiKey":  "{env:AGENT_COMPOSE_SESSION_TOKEN}",
+					"apiKey":  "{env:AGENT_COMPOSE_SANDBOX_TOKEN}",
 				},
 				"models": map[string]any{
 					model: map[string]any{"name": model},
@@ -108,7 +108,7 @@ func WriteOpenCodeAnthropicRuntimeConfig(session *domain.Sandbox, model, baseURL
 	if model == "" || baseURL == "" {
 		return nil
 	}
-	path := filepath.Join(execution.HostSessionHome(session), ".config", "opencode", "opencode.json")
+	path := filepath.Join(execution.HostSandboxHome(session), ".config", "opencode", "opencode.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create opencode config dir: %w", err)
 	}
@@ -120,7 +120,7 @@ func WriteOpenCodeAnthropicRuntimeConfig(session *domain.Sandbox, model, baseURL
 				"name": "agent-compose anthropic",
 				"options": map[string]any{
 					"baseURL": baseURL,
-					"apiKey":  "{env:AGENT_COMPOSE_SESSION_TOKEN}",
+					"apiKey":  "{env:AGENT_COMPOSE_SANDBOX_TOKEN}",
 				},
 				"models": map[string]any{
 					model: map[string]any{"name": model},

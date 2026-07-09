@@ -158,8 +158,8 @@ func cloneNotebookCell(cell *domain.NotebookCell) *domain.NotebookCell {
 	cloned := *cell
 	if cell.AgentResume != nil {
 		resume := *cell.AgentResume
-		if len(cell.AgentResume.ThreadJSONLPaths) > 0 {
-			resume.ThreadJSONLPaths = append([]string(nil), cell.AgentResume.ThreadJSONLPaths...)
+		if len(cell.AgentResume.ProviderLogPaths) > 0 {
+			resume.ProviderLogPaths = append([]string(nil), cell.AgentResume.ProviderLogPaths...)
 		}
 		cloned.AgentResume = &resume
 	}

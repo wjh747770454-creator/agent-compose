@@ -125,7 +125,7 @@ func TestSandboxDriverStartSandboxVMSavesRuntimeState(t *testing.T) {
 	}
 	updatedProxyState := domain.ProxyState{
 		ProxyPath:  session.Summary.ProxyPath,
-		GuestHost:  "agent-compose-session-1",
+		GuestHost:  "agent-compose-sandbox-1",
 		HostPort:   39000,
 		GuestPort:  8888,
 		JupyterURL: "http://127.0.0.1:39000/lab?token=secret",
@@ -144,8 +144,8 @@ func TestSandboxDriverStartSandboxVMSavesRuntimeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProxyState returned error: %v", err)
 	}
-	if savedProxyState.GuestHost != "agent-compose-session-1" || savedProxyState.GuestPort != 8888 {
-		t.Fatalf("saved proxy target = %s:%d, want agent-compose-session-1:8888", savedProxyState.GuestHost, savedProxyState.GuestPort)
+	if savedProxyState.GuestHost != "agent-compose-sandbox-1" || savedProxyState.GuestPort != 8888 {
+		t.Fatalf("saved proxy target = %s:%d, want agent-compose-sandbox-1:8888", savedProxyState.GuestHost, savedProxyState.GuestPort)
 	}
 	vmState, err := store.GetVMState(session.Summary.ID)
 	if err != nil {
@@ -232,7 +232,7 @@ func TestSandboxDriverStartSandboxVMInjectsOpenAIAndAnthropicFacadeEnv(t *testin
 	}
 	updatedProxyState := domain.ProxyState{
 		ProxyPath:  session.Summary.ProxyPath,
-		GuestHost:  "agent-compose-session-1",
+		GuestHost:  "agent-compose-sandbox-1",
 		HostPort:   39000,
 		GuestPort:  8888,
 		JupyterURL: "http://127.0.0.1:39000/lab?token=secret",
@@ -252,10 +252,10 @@ func TestSandboxDriverStartSandboxVMInjectsOpenAIAndAnthropicFacadeEnv(t *testin
 	if err := driver.StartSandboxVM(ctx, session); err != nil {
 		t.Fatalf("StartSandboxVM returned error: %v", err)
 	}
-	if runtimeEnv["OPENAI_BASE_URL"] != "http://agent-compose.test:7410/api/runtime/sessions/"+session.Summary.ID+"/llm/openai/v1" {
+	if runtimeEnv["OPENAI_BASE_URL"] != "http://agent-compose.test:7410/api/runtime/sandboxes/"+session.Summary.ID+"/llm/openai/v1" {
 		t.Fatalf("OPENAI_BASE_URL = %q", runtimeEnv["OPENAI_BASE_URL"])
 	}
-	if runtimeEnv["ANTHROPIC_BASE_URL"] != "http://agent-compose.test:7410/api/runtime/sessions/"+session.Summary.ID+"/llm/anthropic" {
+	if runtimeEnv["ANTHROPIC_BASE_URL"] != "http://agent-compose.test:7410/api/runtime/sandboxes/"+session.Summary.ID+"/llm/anthropic" {
 		t.Fatalf("ANTHROPIC_BASE_URL = %q", runtimeEnv["ANTHROPIC_BASE_URL"])
 	}
 	if runtimeEnv["OPENAI_API_KEY"] == "" {
@@ -276,8 +276,11 @@ func TestSandboxDriverStartSandboxVMInjectsOpenAIAndAnthropicFacadeEnv(t *testin
 	if runtimeEnv["ANTHROPIC_AUTH_TOKEN"] == "anthropic-secret" {
 		t.Fatalf("expected managed anthropic facade token, got raw provider token")
 	}
-	if runtimeEnv["AGENT_COMPOSE_SESSION_TOKEN"] == runtimeEnv["ANTHROPIC_AUTH_TOKEN"] {
-		t.Fatalf("expected generic session token to remain openai facade token")
+	if runtimeEnv["AGENT_COMPOSE_SANDBOX_TOKEN"] == runtimeEnv["ANTHROPIC_AUTH_TOKEN"] {
+		t.Fatalf("expected generic sandbox token to remain openai facade token")
+	}
+	if runtimeEnv["AGENT_COMPOSE_SESSION_TOKEN"] != "" {
+		t.Fatalf("AGENT_COMPOSE_SESSION_TOKEN should not be injected")
 	}
 }
 
@@ -289,12 +292,12 @@ func TestSandboxDriverStartSandboxVMIgnoresOptionalClaudeConfigError(t *testing.
 		switch agent {
 		case "codex":
 			return map[string]string{
-				"AGENT_COMPOSE_SESSION_TOKEN": "openai-token",
-				"LLM_API_ENDPOINT":            "http://agent-compose.test:7410/api/runtime/sessions/" + session.Summary.ID + "/llm/openai/v1",
+				"AGENT_COMPOSE_SANDBOX_TOKEN": "openai-token",
+				"LLM_API_ENDPOINT":            "http://agent-compose.test:7410/api/runtime/sandboxes/" + session.Summary.ID + "/llm/openai/v1",
 				"LLM_API_KEY":                 "openai-token",
 				"LLM_API_PROTOCOL":            "responses",
 				"OPENAI_API_KEY":              "openai-token",
-				"OPENAI_BASE_URL":             "http://agent-compose.test:7410/api/runtime/sessions/" + session.Summary.ID + "/llm/openai/v1",
+				"OPENAI_BASE_URL":             "http://agent-compose.test:7410/api/runtime/sandboxes/" + session.Summary.ID + "/llm/openai/v1",
 			}, nil
 		case "claude":
 			return nil, domain.ClassifyError(domain.ErrRequired, "anthropic provider is required", nil)
@@ -332,7 +335,7 @@ func TestSandboxDriverStartSandboxVMIgnoresOptionalClaudeConfigError(t *testing.
 	}
 	updatedProxyState := domain.ProxyState{
 		ProxyPath:  session.Summary.ProxyPath,
-		GuestHost:  "agent-compose-session-1",
+		GuestHost:  "agent-compose-sandbox-1",
 		HostPort:   39000,
 		GuestPort:  8888,
 		JupyterURL: "http://127.0.0.1:39000/lab?token=secret",

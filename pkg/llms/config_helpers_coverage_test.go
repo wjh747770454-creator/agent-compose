@@ -15,12 +15,12 @@ import (
 
 func TestRuntimeConfigAndEnvHelperWorkflows(t *testing.T) {
 	root := t.TempDir()
-	session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-1", WorkspacePath: filepath.Join(root, "workspace")}}
+	session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", WorkspacePath: filepath.Join(root, "workspace")}}
 	if err := WriteCodexRuntimeConfig(session, "gpt", "http://runtime/openai/v1/", APIProtocolChatCompletions); err != nil {
 		t.Fatalf("WriteCodexRuntimeConfig returned error: %v", err)
 	}
-	codexConfig, err := os.ReadFile(filepath.Join(execution.HostSessionHome(session), ".codex", "config.toml"))
-	if err != nil || !strings.Contains(string(codexConfig), `wire_api = "chat_completions"`) {
+	codexConfig, err := os.ReadFile(filepath.Join(execution.HostSandboxHome(session), ".codex", "config.toml"))
+	if err != nil || !strings.Contains(string(codexConfig), `wire_api = "chat_completions"`) || !strings.Contains(string(codexConfig), `AGENT_COMPOSE_SANDBOX_TOKEN`) {
 		t.Fatalf("codex config=%q err=%v", string(codexConfig), err)
 	}
 	if err := WriteOpenCodeRuntimeConfig(session, "custom", "gpt-custom", "http://runtime/openai/v1/"); err != nil {
@@ -29,8 +29,8 @@ func TestRuntimeConfigAndEnvHelperWorkflows(t *testing.T) {
 	if err := WriteOpenCodeAnthropicRuntimeConfig(session, "claude", "http://runtime/anthropic/"); err != nil {
 		t.Fatalf("WriteOpenCodeAnthropicRuntimeConfig returned error: %v", err)
 	}
-	openCodeConfig, err := os.ReadFile(filepath.Join(execution.HostSessionHome(session), ".config", "opencode", "opencode.json"))
-	if err != nil || !strings.Contains(string(openCodeConfig), "@ai-sdk/anthropic") {
+	openCodeConfig, err := os.ReadFile(filepath.Join(execution.HostSandboxHome(session), ".config", "opencode", "opencode.json"))
+	if err != nil || !strings.Contains(string(openCodeConfig), "@ai-sdk/anthropic") || !strings.Contains(string(openCodeConfig), "AGENT_COMPOSE_SANDBOX_TOKEN") {
 		t.Fatalf("opencode config=%q err=%v", string(openCodeConfig), err)
 	}
 	if err := WriteCodexRuntimeConfig(nil, "gpt", "http://runtime", ""); err != nil {

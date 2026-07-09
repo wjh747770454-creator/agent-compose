@@ -14,7 +14,7 @@ import (
 func TestLoadStoredAgentThreadIDHandlesMissingInvalidAndValidFiles(t *testing.T) {
 	root := t.TempDir()
 	if got := LoadStoredAgentThreadID(filepath.Join(root, "missing.json")); got != "" {
-		t.Fatalf("missing session id = %q, want empty", got)
+		t.Fatalf("missing thread id = %q, want empty", got)
 	}
 
 	invalidPath := filepath.Join(root, "invalid.json")
@@ -22,43 +22,43 @@ func TestLoadStoredAgentThreadIDHandlesMissingInvalidAndValidFiles(t *testing.T)
 		t.Fatalf("write invalid state: %v", err)
 	}
 	if got := LoadStoredAgentThreadID(invalidPath); got != "" {
-		t.Fatalf("invalid session id = %q, want empty", got)
+		t.Fatalf("invalid thread id = %q, want empty", got)
 	}
 
 	blankPath := filepath.Join(root, "blank.json")
-	if err := os.WriteFile(blankPath, []byte(`{"sessionId":"   "}`), 0o644); err != nil {
+	if err := os.WriteFile(blankPath, []byte(`{"threadId":"   "}`), 0o644); err != nil {
 		t.Fatalf("write blank state: %v", err)
 	}
 	if got := LoadStoredAgentThreadID(blankPath); got != "" {
-		t.Fatalf("blank session id = %q, want empty", got)
+		t.Fatalf("blank thread id = %q, want empty", got)
 	}
 
 	validPath := filepath.Join(root, "valid.json")
-	if err := os.WriteFile(validPath, []byte(`{"sessionId":"  sess-123  "}`), 0o644); err != nil {
+	if err := os.WriteFile(validPath, []byte(`{"threadId":"  thread-123  "}`), 0o644); err != nil {
 		t.Fatalf("write valid state: %v", err)
 	}
-	if got := LoadStoredAgentThreadID(validPath); got != "sess-123" {
-		t.Fatalf("valid session id = %q, want sess-123", got)
+	if got := LoadStoredAgentThreadID(validPath); got != "thread-123" {
+		t.Fatalf("valid thread id = %q, want thread-123", got)
 	}
 }
 
-func TestAgentSessionJSONLSelectionAndResumeInfo(t *testing.T) {
+func TestAgentThreadLogSelectionAndResumeInfo(t *testing.T) {
 	root := t.TempDir()
-	sessionDir := filepath.Join(root, "session")
+	sessionDir := filepath.Join(root, "sandbox")
 	session := &domain.Sandbox{Summary: domain.SandboxSummary{WorkspacePath: filepath.Join(sessionDir, "workspace")}}
 
 	statePath := filepath.Join(sessionDir, "state", "agents", "providers", "codex.json")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		t.Fatalf("mkdir state dir: %v", err)
 	}
-	if err := os.WriteFile(statePath, []byte(`{"sessionId":" sess-1 "}`), 0o644); err != nil {
+	if err := os.WriteFile(statePath, []byte(`{"threadId":" thread-1 "}`), 0o644); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
 
 	historyPath := filepath.Join(sessionDir, "home", ".codex", "history.jsonl")
-	matchingSessionPath := filepath.Join(sessionDir, "home", ".codex", "sessions", "run-sess-1.jsonl")
-	otherSessionPath := filepath.Join(sessionDir, "home", ".codex", "sessions", "run-other.jsonl")
-	for _, path := range []string{historyPath, matchingSessionPath, otherSessionPath} {
+	matchingThreadPath := filepath.Join(sessionDir, "home", ".codex", "sessions", "run-thread-1.jsonl")
+	otherThreadPath := filepath.Join(sessionDir, "home", ".codex", "sessions", "run-other.jsonl")
+	for _, path := range []string{historyPath, matchingThreadPath, otherThreadPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 		}
@@ -66,45 +66,45 @@ func TestAgentSessionJSONLSelectionAndResumeInfo(t *testing.T) {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	txtPath := filepath.Join(sessionDir, "home", ".codex", "sessions", "run-sess-1.txt")
+	txtPath := filepath.Join(sessionDir, "home", ".codex", "sessions", "run-thread-1.txt")
 	if err := os.WriteFile(txtPath, []byte("skip"), 0o644); err != nil {
-		t.Fatalf("write txt session: %v", err)
+		t.Fatalf("write txt thread: %v", err)
 	}
 
-	if ShouldIncludeAgentJSONL(txtPath, "codex", "sess-1") {
+	if ShouldIncludeAgentJSONL(txtPath, "codex", "thread-1") {
 		t.Fatal("txt path included as jsonl")
 	}
-	if !ShouldIncludeAgentJSONL(historyPath, "codex", "sess-1") {
+	if !ShouldIncludeAgentJSONL(historyPath, "codex", "thread-1") {
 		t.Fatal("codex history jsonl excluded")
 	}
-	if !ShouldIncludeAgentJSONL(matchingSessionPath, "codex", "sess-1") {
-		t.Fatal("matching codex session jsonl excluded")
+	if !ShouldIncludeAgentJSONL(matchingThreadPath, "codex", "thread-1") {
+		t.Fatal("matching codex thread jsonl excluded")
 	}
-	if ShouldIncludeAgentJSONL(otherSessionPath, "codex", "sess-1") {
-		t.Fatal("non-matching codex session jsonl included")
+	if ShouldIncludeAgentJSONL(otherThreadPath, "codex", "thread-1") {
+		t.Fatal("non-matching codex thread jsonl included")
 	}
-	if !ShouldIncludeAgentJSONL(filepath.Join(root, "claude.jsonl"), "claude", "sess-1") {
+	if !ShouldIncludeAgentJSONL(filepath.Join(root, "claude.jsonl"), "claude", "thread-1") {
 		t.Fatal("claude jsonl excluded")
 	}
 
-	paths := FindAgentSessionJSONLPaths(HostSessionHome(session), "codex", "sess-1")
-	wantPaths := []string{historyPath, matchingSessionPath}
+	paths := FindAgentThreadLogPaths(HostSandboxHome(session), "codex", "thread-1")
+	wantPaths := []string{historyPath, matchingThreadPath}
 	if !reflect.DeepEqual(paths, wantPaths) {
-		t.Fatalf("FindAgentSessionJSONLPaths = %#v, want %#v", paths, wantPaths)
+		t.Fatalf("FindAgentThreadLogPaths = %#v, want %#v", paths, wantPaths)
 	}
-	if got := FindAgentSessionJSONLPaths(HostSessionHome(session), "unknown", "sess-1"); got != nil {
+	if got := FindAgentThreadLogPaths(HostSandboxHome(session), "unknown", "thread-1"); got != nil {
 		t.Fatalf("unknown provider paths = %#v, want nil", got)
 	}
 
-	info := CollectAgentResumeInfo(session, "codex", "", "/guest/session.json")
+	info := CollectAgentResumeInfo(session, "codex", "", "/guest/agent-thread.json")
 	if info == nil {
 		t.Fatal("CollectAgentResumeInfo returned nil")
 	}
-	if info.Provider != "codex" || info.ThreadID != "sess-1" || info.ThreadStatePath != statePath || info.ThreadManifestPath != "/guest/session.json" {
+	if info.Provider != "codex" || info.ThreadID != "thread-1" || info.ThreadStatePath != statePath || info.ThreadManifestPath != "/guest/agent-thread.json" {
 		t.Fatalf("resume info = %#v", info)
 	}
-	if !reflect.DeepEqual(info.ThreadJSONLPaths, wantPaths) {
-		t.Fatalf("resume jsonl paths = %#v, want %#v", info.ThreadJSONLPaths, wantPaths)
+	if !reflect.DeepEqual(info.ProviderLogPaths, wantPaths) {
+		t.Fatalf("provider log paths = %#v, want %#v", info.ProviderLogPaths, wantPaths)
 	}
 
 	emptySession := &domain.Sandbox{Summary: domain.SandboxSummary{WorkspacePath: filepath.Join(root, "empty", "workspace")}}
@@ -115,13 +115,13 @@ func TestAgentSessionJSONLSelectionAndResumeInfo(t *testing.T) {
 
 func TestAgentSandboxRootsAndTraceDetails(t *testing.T) {
 	home := t.TempDir()
-	if roots := AgentSessionJSONLRoots(home, "claude"); len(roots) != 3 || !strings.Contains(roots[0], ".claude") {
+	if roots := AgentThreadLogRoots(home, "claude"); len(roots) != 3 || !strings.Contains(roots[0], ".claude") {
 		t.Fatalf("claude roots = %#v", roots)
 	}
-	if roots := AgentSessionJSONLRoots(home, "gemini"); len(roots) != 3 || !strings.Contains(roots[0], ".gemini") {
+	if roots := AgentThreadLogRoots(home, "gemini"); len(roots) != 3 || !strings.Contains(roots[0], ".gemini") {
 		t.Fatalf("gemini roots = %#v", roots)
 	}
-	if roots := AgentSessionJSONLRoots(home, "opencode"); roots != nil {
+	if roots := AgentThreadLogRoots(home, "opencode"); roots != nil {
 		t.Fatalf("opencode roots = %#v, want nil", roots)
 	}
 

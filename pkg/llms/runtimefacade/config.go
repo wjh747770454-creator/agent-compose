@@ -80,12 +80,12 @@ func ensureSessionCodexConfig(ctx context.Context, config *appconfig.Config, sto
 	if err := store.SaveLLMFacadeToken(ctx, token); err != nil {
 		return nil, err
 	}
-	openAIBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sessions/" + session.Summary.ID + "/llm/openai/v1"
+	openAIBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sandboxes/" + session.Summary.ID + "/llm/openai/v1"
 	if err := llms.WriteCodexRuntimeConfig(session, target.Model.Name, openAIBaseURL, facadeWireAPI); err != nil {
 		return nil, err
 	}
 	return map[string]string{
-		"AGENT_COMPOSE_SESSION_TOKEN": tokenValue,
+		"AGENT_COMPOSE_SANDBOX_TOKEN": tokenValue,
 		"LLM_API_ENDPOINT":            openAIBaseURL,
 		"LLM_API_KEY":                 tokenValue,
 		"LLM_API_PROTOCOL":            facadeWireAPI,
@@ -118,9 +118,9 @@ func ensureSessionClaudeConfig(ctx context.Context, config *appconfig.Config, st
 	if err := store.SaveLLMFacadeToken(ctx, token); err != nil {
 		return nil, err
 	}
-	anthropicBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sessions/" + session.Summary.ID + "/llm/anthropic"
+	anthropicBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sandboxes/" + session.Summary.ID + "/llm/anthropic"
 	env := map[string]string{
-		"AGENT_COMPOSE_SESSION_TOKEN": tokenValue,
+		"AGENT_COMPOSE_SANDBOX_TOKEN": tokenValue,
 		"LLM_API_ENDPOINT":            anthropicBaseURL,
 		"LLM_API_KEY":                 tokenValue,
 		"LLM_API_PROTOCOL":            llms.APIProtocolMessages,
@@ -172,12 +172,12 @@ func ensureOpenCodeAnthropicConfig(ctx context.Context, config *appconfig.Config
 	if err := store.SaveLLMFacadeToken(ctx, token); err != nil {
 		return nil, err
 	}
-	anthropicBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sessions/" + session.Summary.ID + "/llm/anthropic"
+	anthropicBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sandboxes/" + session.Summary.ID + "/llm/anthropic"
 	if err := llms.WriteOpenCodeAnthropicRuntimeConfig(session, target.Model.Name, anthropicBaseURL+"/v1"); err != nil {
 		return nil, err
 	}
 	return map[string]string{
-		"AGENT_COMPOSE_SESSION_TOKEN": tokenValue,
+		"AGENT_COMPOSE_SANDBOX_TOKEN": tokenValue,
 		"LLM_API_ENDPOINT":            anthropicBaseURL,
 		"LLM_API_KEY":                 tokenValue,
 		"LLM_API_PROTOCOL":            llms.APIProtocolMessages,
@@ -204,12 +204,12 @@ func ensureOpenCodeOpenAIConfig(ctx context.Context, config *appconfig.Config, s
 	if err := store.SaveLLMFacadeToken(ctx, token); err != nil {
 		return nil, err
 	}
-	openAIBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sessions/" + session.Summary.ID + "/llm/openai/v1"
+	openAIBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sandboxes/" + session.Summary.ID + "/llm/openai/v1"
 	if err := llms.WriteOpenCodeRuntimeConfig(session, "openai", target.Model.Name, openAIBaseURL); err != nil {
 		return nil, err
 	}
 	return map[string]string{
-		"AGENT_COMPOSE_SESSION_TOKEN": tokenValue,
+		"AGENT_COMPOSE_SANDBOX_TOKEN": tokenValue,
 		"LLM_API_ENDPOINT":            openAIBaseURL,
 		"LLM_API_KEY":                 tokenValue,
 		"LLM_API_PROTOCOL":            llms.APIProtocolResponses,
@@ -235,12 +235,12 @@ func ensureOpenCodeCustomProviderConfig(ctx context.Context, config *appconfig.C
 	if err := store.SaveLLMFacadeToken(ctx, token); err != nil {
 		return nil, err
 	}
-	openAIBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sessions/" + session.Summary.ID + "/llm/openai/v1"
+	openAIBaseURL := strings.TrimRight(baseURL, "/") + "/api/runtime/sandboxes/" + session.Summary.ID + "/llm/openai/v1"
 	if err := llms.WriteOpenCodeRuntimeConfig(session, providerID, target.Model.Name, openAIBaseURL); err != nil {
 		return nil, err
 	}
 	return map[string]string{
-		"AGENT_COMPOSE_SESSION_TOKEN": tokenValue,
+		"AGENT_COMPOSE_SANDBOX_TOKEN": tokenValue,
 		"LLM_API_ENDPOINT":            openAIBaseURL,
 		"LLM_API_KEY":                 tokenValue,
 		"LLM_API_PROTOCOL":            llms.APIProtocolChatCompletions,
