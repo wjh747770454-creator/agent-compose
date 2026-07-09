@@ -572,25 +572,38 @@
       - subagent 并行尝试因 `agent thread limit reached` 未执行；本任务由主 agent 完成实现、测试和审计。
     - 下一目标：7.2。
 
-- [ ] 7.2 更新 runtime SDK public result type 和包装测试
+- [x] 7.2 更新 runtime SDK public result type 和包装测试
   - 依赖：7.1。
   - 工作内容：
     - `runtime/agent-compose-runtime-sdk` 中 public result type `sessionId` -> `threadId`。
     - SDK parser 读取 `__AGENT_RESULT__` 的 `threadId`。
     - 更新 SDK README、tests、packaging 验证。
   - 可并行子任务：
-    - [ ] 可并行：迁移 SDK source/types/tests。
-    - [ ] 可并行：迁移 SDK README 示例。
+    - [x] 可并行：迁移 SDK source/types/tests。
+    - [x] 可并行：迁移 SDK README 示例。
   - 测试方案：
     - `cd runtime/agent-compose-runtime-sdk && npm test && npm run test:packaging`
   - 验收标准：
     - SDK public API 使用 `threadId`。
     - packaging test 通过。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
+    - 状态：已完成。
+    - 变更：
+      - `runtime/agent-compose-runtime-sdk/src/agent.ts` 的 public `RuntimeAgentResult` 字段已从 `sessionId` 切换为 `threadId`。
+      - SDK `runtime.agent()` parser 现在读取 `__AGENT_RESULT__` payload 中的 `threadId`，缺失时保持空字符串默认值。
+      - `runtime/agent-compose-runtime-sdk/test/agent.test.ts` fixture payload 和 result expectation 已改为 `threadId`。
+      - `runtime/agent-compose-runtime-sdk/README.md` 的 `runtime.agent()` return value 示例已改为 `threadId`。
+    - 验证：
+      - `cd runtime/agent-compose-runtime-sdk && npm test`
+      - `cd runtime/agent-compose-runtime-sdk && npm run test:packaging`
+      - `git diff --check`
+      - `rg -n "sessionId|session_id|Session" runtime/agent-compose-runtime-sdk/src runtime/agent-compose-runtime-sdk/test runtime/agent-compose-runtime-sdk/README.md -g'*.ts' -g'*.md'`
+      - `rg -n "sessionId|threadId" runtime/agent-compose-runtime-sdk/dist/types runtime/agent-compose-runtime-sdk/dist/esm/agent.js runtime/agent-compose-runtime-sdk/dist/cjs/agent.js`
+    - 审计与例外：
+      - tracked SDK source、tests 和 README 中已无 `sessionId/session_id/Session` 命中；SDK public API 使用 `threadId`。
+      - `npm test` 生成的 ignored `runtime/agent-compose-runtime-sdk/dist` 中 `agent.d.ts`、ESM 和 CJS agent bundle 均包含 `threadId`，未发现 `sessionId`。
+      - 本任务未修改 runtime JS、host artifact/env 或 LLM facade；`SANDBOX_ID`、`AGENT_COMPOSE_SANDBOX_TOKEN` 和 agent-thread artifact 收敛按 7.3 继续。
+      - subagent 并行审计尝试因 `agent thread limit reached` 未执行；本任务由主 agent 完成实现、测试和审计。
     - 下一目标：7.3。
 
 - [ ] 7.3 迁移 host artifact、guest env 和 runtime LLM facade

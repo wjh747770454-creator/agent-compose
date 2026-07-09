@@ -24,7 +24,7 @@ describe("runtime.agent", () => {
         "const payload = { args, message: fs.readFileSync(messageFile, 'utf8') };",
         `fs.writeFileSync(${JSON.stringify(callsFile)}, JSON.stringify(payload));`,
         "process.stderr.write('runtime progress\\n');",
-        "process.stdout.write('__AGENT_RESULT__' + JSON.stringify({ provider: 'codex', sessionId: 's1', stopReason: 'completed', finalText: 'done', transcript: 'trace', stderr: 'err' }) + '\\n');",
+        "process.stdout.write('__AGENT_RESULT__' + JSON.stringify({ provider: 'codex', threadId: 't1', stopReason: 'completed', finalText: 'done', transcript: 'trace', stderr: 'err' }) + '\\n');",
       ].join("\n"), "utf8");
       await fs.chmod(fakeRuntime, 0o755);
 
@@ -41,7 +41,7 @@ describe("runtime.agent", () => {
         });
         expect(result).toEqual({
           provider: "codex",
-          sessionId: "s1",
+          threadId: "t1",
           stopReason: "completed",
           finalText: "done",
           json: null,
@@ -80,7 +80,7 @@ describe("runtime.agent", () => {
         "const schemaFile = args[args.indexOf('--output-schema-file') + 1];",
         "const payload = { args, schema: JSON.parse(fs.readFileSync(schemaFile, 'utf8')) };",
         `fs.writeFileSync(${JSON.stringify(callsFile)}, JSON.stringify(payload));`,
-        "process.stdout.write('__AGENT_RESULT__' + JSON.stringify({ provider: 'codex', sessionId: 's1', stopReason: 'completed', finalText: JSON.stringify({ summary: 'ok', risk: 'low' }), transcript: '{}', stderr: '' }) + '\\n');",
+        "process.stdout.write('__AGENT_RESULT__' + JSON.stringify({ provider: 'codex', threadId: 't1', stopReason: 'completed', finalText: JSON.stringify({ summary: 'ok', risk: 'low' }), transcript: '{}', stderr: '' }) + '\\n');",
       ].join("\n"), "utf8");
       await fs.chmod(fakeRuntime, 0o755);
 

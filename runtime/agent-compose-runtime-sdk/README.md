@@ -187,7 +187,7 @@ Return value:
 ```ts
 {
   provider: string;
-  sessionId: string;
+  threadId: string;
   stopReason: string;
   finalText: string;
   json: unknown | null;
