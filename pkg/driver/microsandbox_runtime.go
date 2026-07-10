@@ -853,7 +853,17 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sandbo
 	}
 	mounts := make(map[string]microsandbox.MountConfig, len(manifest.Mounts)+1)
 	for _, mount := range manifest.Mounts {
-		mounts[mount.GuestPath] = r.microsandboxBindMount(mount.HostPath, mount.ReadOnly)
+		bindMount := r.microsandboxBindMount(mount.HostPath, mount.ReadOnly)
+		mounts[mount.GuestPath] = bindMount
+		slog.Info(
+			"agent-compose microsandbox configured bind mount",
+			"sandbox", name,
+			"guest_path", mount.GuestPath,
+			"readonly", mount.ReadOnly,
+			"quota_mib", bindMount.QuotaMiB,
+			"configured_bind_quota_gb", r.config.MicrosandboxBindQuotaGB,
+			"box_disk_size_gb", r.config.BoxDiskSizeGB,
+		)
 	}
 	// Give docker its own disk-backed ext4 volume. The guest root is virtiofs,
 	// on which the kernel rejects overlayfs (docker's default storage driver)
