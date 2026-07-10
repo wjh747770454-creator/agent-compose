@@ -8,7 +8,7 @@ func TestE2ECLISandboxNamingUserWorkflows(t *testing.T) {
 		run  func(*testing.T)
 	}{
 		{
-			name: "run --sandbox-id",
+			name: "run --sandbox",
 			run:  TestIntegrationCLIRunStreamsOutputAndSupportsSandboxReuse,
 		},
 		{

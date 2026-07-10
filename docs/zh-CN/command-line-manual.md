@@ -141,7 +141,7 @@ agent-compose -f /path/to/project/agent-compose.yml down
 ```bash
 agent-compose run <agent> --prompt "..."
 agent-compose run <agent> --command "..."
-agent-compose run <agent> --sandbox-id <sandbox> --prompt "..."
+agent-compose run <agent> --sandbox <sandbox> --prompt "..."
 ```
 
 输入模式：
@@ -152,7 +152,7 @@ agent-compose run <agent> --sandbox-id <sandbox> --prompt "..."
 | command | `run <agent> --command "..."` | 启动或复用该 agent 的 sandbox 后通过 guest `agent-compose-runtime exec` 执行 shell 命令；命令 transcript 会实时输出，并写入该次 run 记录。 |
 | prompt REPL | `run <agent> -i --prompt` | 从 stdin 逐行读取 prompt；每条非空输入创建一次 run，并复用同一个 sandbox。 |
 | command REPL | `run <agent> -i --command` | 从 stdin 逐行读取 command；每条非空输入创建一次 run，并复用同一个 sandbox。 |
-| sandbox 复用 | `run <agent> --sandbox-id <sandbox> --prompt "..."` | 在指定 sandbox 中继续运行。 |
+| sandbox 复用 | `run <agent> --sandbox <sandbox> --prompt "..."` | 在指定 sandbox 中继续运行。 |
 
 prompt 输入必须使用 `--prompt`；非交互 run 必须选择 `--prompt` 或 `--command`。不再支持 positional prompt 参数。
 不支持额外的位置参数。
@@ -162,7 +162,7 @@ prompt 输入必须使用 `--prompt`；非交互 run 必须选择 `--prompt` 或
 | 参数 | 说明 |
 | --- | --- |
 | `--keep-running` | 运行结束后保留 sandbox runtime。 |
-| `--sandbox-id <sandbox>` | 指定已有 sandbox。 |
+| `--sandbox <sandbox>` | 指定已有 sandbox。 |
 | `--rm` | 运行结束后删除 sandbox。 |
 | `--jupyter` | 为本次 run 启用 Jupyter；未设置时使用 agent YAML 默认，YAML 未设置时默认关闭。 |
 | `--jupyter-expose` | 标记本次 run 的 Jupyter agent-compose proxy 入口为显式暴露意图；该参数不请求 runtime driver 暴露 host port，并会同时启用 Jupyter。 |
@@ -178,7 +178,7 @@ agent-compose run tester --command "task test" --keep-running
 agent-compose run tester --command "task test" -d
 agent-compose run reviewer -i --prompt
 agent-compose run tester -i --command
-agent-compose run reviewer --sandbox-id sandbox_123 --prompt "Continue the review"
+agent-compose run reviewer --sandbox sandbox_123 --prompt "Continue the review"
 agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the notebook state"
 ```
 
@@ -190,7 +190,7 @@ agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the note
 - `run -i/--interactive` 必须选择 `--prompt` 或 `--command`，不能与 `--json` 组合。
 - REPL 中空行不会创建 run；输入 `/exit` 或 Ctrl+D 退出。
 - REPL 不是 TTY/PTY 或运行中 stdin 透传；每条输入都是一次独立 `RunAgentStream`，但复用同一个 sandbox。
-- detached run 可通过输出的 `agent-compose logs --run-id <run-id> --follow` 命令观察输出，也可继续使用 `stop`/`logs` 操作该 run。
+- detached run 可通过输出的 `agent-compose logs --run <run-id> --follow` 命令观察输出，也可继续使用 `stop`/`logs` 操作该 run。
 - `run -i --prompt` 仅支持可复用 provider conversation 的 Codex、Claude/cc 和 OpenCode；Gemini 当前会返回 unsupported。
 - `StopRun` 会请求 daemon 内当前活动 run 取消；daemon 重启后遗留的 running/pending run 会在启动 reconcile 中标记为 failed，并带 `daemon interrupted` 错误。
 
@@ -381,7 +381,7 @@ agent-compose exec <sandbox> --command "..."
 | `--command "..."` | 以 flag 形式传入 shell 命令，等价于在 sandbox 中执行 `bash -lc "..."`。 |
 | `--cwd <path>` | 指定 sandbox 内工作目录。 |
 | `--agent <agent>` | 兼容旧目标选择参数，会输出 deprecated warning；新命令应使用 `exec <sandbox>`。 |
-| `--run-id <run-id>` | 兼容旧目标选择参数，会输出 deprecated warning；新命令应使用 `exec <sandbox>`。 |
+| `--run <run-id>` | 兼容旧目标选择参数，会输出 deprecated warning；新命令应使用 `exec <sandbox>`。 |
 
 示例：
 
@@ -405,7 +405,7 @@ agent-compose exec sandbox_123 --cwd /workspace --command "pwd"
 agent-compose logs
 agent-compose logs <agent>
 agent-compose logs --agent reviewer
-agent-compose logs --run-id <run-id>
+agent-compose logs --run <run-id>
 agent-compose logs --sandbox <sandbox>
 agent-compose logs --follow
 agent-compose logs -n 100
@@ -420,7 +420,7 @@ agent-compose logs -t
 | `--follow` | 持续跟随日志输出。 |
 | `-t, --timestamp` | 文本输出显示 run 级时间戳。当前没有逐 chunk 时间戳，会使用该 run 的 `completed_at`、`updated_at`、`started_at` 中最合适的可用时间。 |
 | `--agent <agent>` | 按 agent 过滤。 |
-| `--run-id <run-id>` | 按 run 过滤。 |
+| `--run <run-id>` | 按 run 过滤。 |
 | `--sandbox <sandbox>` | 按 sandbox 过滤。 |
 
 示例：
@@ -430,7 +430,7 @@ agent-compose logs
 agent-compose logs reviewer
 agent-compose logs --agent reviewer --tail 200
 agent-compose logs --sandbox sandbox_123 --follow -t
-agent-compose logs --run-id run_123 --json
+agent-compose logs --run run_123 --json
 ```
 
 ## `inspect`：查看资源详情

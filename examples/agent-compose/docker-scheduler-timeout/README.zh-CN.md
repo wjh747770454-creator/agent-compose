@@ -59,7 +59,7 @@ agent-compose up
 sleep 35
 agent-compose ps
 agent-compose inspect run <run-id>
-agent-compose logs --run-id <run-id>
+agent-compose logs --run <run-id>
 agent-compose down
 ```
 
@@ -71,7 +71,7 @@ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeou
 sleep 35
 go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml ps
 go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml inspect run <run-id>
-go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml logs --run-id <run-id>
+go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml logs --run <run-id>
 go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml down
 ```
 
@@ -83,7 +83,7 @@ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeou
 - `up` 创建或更新 managed scheduler 和 loader。
 - 等待 timeout 触发一次后，`ps` 显示 scheduler 创建的 run。
 - `inspect run <run-id>` 显示 `source: scheduler`、`status: succeeded`、`driver: docker`，并包含 agent 输出。
-- `logs --run-id <run-id>` 输出 agent 日志。
+- `logs --run <run-id>` 输出 agent 日志。
 - `down` 禁用 managed scheduler 和 loader。
 
 ## 验证输出
@@ -166,7 +166,7 @@ $ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-time
 ### 5. Run 日志
 
 ```console
-$ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml logs --run-id run-reviewer-28c0ef985c8d
+$ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml logs --run run-reviewer-28c0ef985c8d
 timeout scheduler ok
 ```
 

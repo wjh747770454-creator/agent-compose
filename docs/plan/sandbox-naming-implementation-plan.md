@@ -357,7 +357,7 @@
 
 1. 更新 `cmd/agent-compose/main.go` 中所有 v2 client request/response 使用 `sandbox_id`、`RunSandboxCleanupPolicy`、`ExecSandboxSelector`。
 2. CLI 命令保持或调整为：
-   - `run --sandbox-id`
+   - `run --sandbox`
    - `ps` 显示 `SANDBOX ID`
    - `exec <sandbox>`
    - `logs --sandbox`
@@ -373,7 +373,7 @@
 
 - `go test ./cmd/agent-compose`
 - E2E/CLI 测试覆盖：
-  - `agent-compose run <agent> --sandbox-id <id>`
+  - `agent-compose run <agent> --sandbox <id>`
   - `agent-compose ps --json` 不包含 `session_id`
   - `agent-compose exec <sandbox> --command ...`
   - `agent-compose logs --sandbox <sandbox>`

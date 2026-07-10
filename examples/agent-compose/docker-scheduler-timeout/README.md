@@ -60,7 +60,7 @@ agent-compose up
 sleep 35
 agent-compose ps
 agent-compose inspect run <run-id>
-agent-compose logs --run-id <run-id>
+agent-compose logs --run <run-id>
 agent-compose down
 ```
 
@@ -72,7 +72,7 @@ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeou
 sleep 35
 go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml ps
 go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml inspect run <run-id>
-go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml logs --run-id <run-id>
+go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml logs --run <run-id>
 go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml down
 ```
 
@@ -84,7 +84,7 @@ Expected result:
 - `up` creates or updates the managed scheduler and loader.
 - After the timeout fires once, `ps` shows a scheduler-created run.
 - `inspect run <run-id>` shows `source: scheduler`, `status: succeeded`, `driver: docker`, and output from the agent.
-- `logs --run-id <run-id>` prints the agent output.
+- `logs --run <run-id>` prints the agent output.
 - `down` disables the managed scheduler and loader.
 
 ## Verification output
@@ -168,7 +168,7 @@ $ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-time
 ### 5. Run logs
 
 ```console
-$ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml logs --run-id run-reviewer-28c0ef985c8d
+$ go run ./cmd/agent-compose --file examples/agent-compose/docker-scheduler-timeout/agent-compose.yml logs --run run-reviewer-28c0ef985c8d
 timeout scheduler ok
 ```
 

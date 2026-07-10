@@ -773,7 +773,7 @@
   - 依赖：6.2、8.1。
   - 工作内容：
     - 更新 `cmd/agent-compose/main.go` 中 v2 client request/response 使用 `sandbox_id`、`RunSandboxCleanupPolicy`、`ExecSandboxSelector`。
-    - CLI 命令和 help 使用 `run --sandbox-id`、`ps` 的 `SANDBOX ID`、`exec <sandbox>`、`logs --sandbox`、`inspect sandbox`、`sandbox stop|resume|rm|prune`、`stats <sandbox>`。
+    - CLI 命令和 help 使用 `run --sandbox`、`ps` 的 `SANDBOX ID`、`exec <sandbox>`、`logs --sandbox`、`inspect sandbox`、`sandbox stop|resume|rm|prune`、`stats <sandbox>`。
     - JSON 输出只包含 `sandbox_id`、`sandbox_short_id`、`agent_thread_id`、`thread_id`、`linked_sandbox_id`、`linked_agent_thread_id`。
     - `inspect session <sandbox>` 保留 deprecated alias，stderr 输出 warning，JSON shape 仍为 sandbox output。
   - 可并行子任务：
@@ -805,7 +805,7 @@
 - [x] 9.2 补齐 CLI/E2E 和 compose env 工作流测试
   - 依赖：9.1。
   - 工作内容：
-    - 覆盖 `agent-compose run <agent> --sandbox-id <id>`。
+    - 覆盖 `agent-compose run <agent> --sandbox <id>`。
     - 覆盖 `agent-compose ps --json` 不包含 `session_id`。
     - 覆盖 `agent-compose exec <sandbox> --command ...`。
     - 覆盖 `agent-compose logs --sandbox <sandbox>`。
@@ -824,7 +824,7 @@
   - 完成总结：
     - 状态：已完成。
     - 变更：
-      - 新增 `cmd/agent-compose/cli_sandbox_workflows_e2e_test.go`，用 `TestE2ECLISandboxNamingUserWorkflows` 显式聚合 9.2 要求的 CLI 用户工作流：`run --sandbox-id`、`ps --json` sandbox shape、`exec <sandbox> --command`、`logs --sandbox`、`inspect sandbox`/deprecated `inspect session`、`sandbox stop|resume|rm|prune`。
+      - 新增 `cmd/agent-compose/cli_sandbox_workflows_e2e_test.go`，用 `TestE2ECLISandboxNamingUserWorkflows` 显式聚合 9.2 要求的 CLI 用户工作流：`run --sandbox`、`ps --json` sandbox shape、`exec <sandbox> --command`、`logs --sandbox`、`inspect sandbox`/deprecated `inspect session`、`sandbox stop|resume|rm|prune`。
       - 新增 `cmd/agent-compose/compose_env_e2e_test.go`，解析 `docker-compose.yml` 并审计 `.env.example`、`Dockerfile`，固定远端 compose 使用 published image、`DOCKER_HOST_SANDBOX_ROOT`、`SANDBOX_ROOT=/data/sandboxes`、`./data:/data` 和 `/data/work/.env` 挂载，不暴露 copyable legacy session env 默认值。
     - 验证：
       - `go test ./cmd/agent-compose -run 'TestE2E(CLISandboxNamingUserWorkflows|DockerComposeSandboxEnvContract)$'`

@@ -584,9 +584,9 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 	if err := composeExecArgs(execCmd, nil); err == nil {
 		t.Fatalf("composeExecArgs without target returned nil error")
 	}
-	execCmd.Flags().String("run-id", "", "")
-	if err := execCmd.Flags().Set("run-id", "run-1"); err != nil {
-		t.Fatalf("set exec run-id: %v", err)
+	execCmd.Flags().String("run", "", "")
+	if err := execCmd.Flags().Set("run", "run-1"); err != nil {
+		t.Fatalf("set exec run: %v", err)
 	}
 	if err := composeExecArgs(execCmd, nil); err != nil {
 		t.Fatalf("composeExecArgs with legacy target returned error: %v", err)
@@ -612,8 +612,8 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 		{
 			name: "empty run flag",
 			setup: func(cmd *cobra.Command) composeExecOptions {
-				cmd.Flags().String("run-id", "", "")
-				_ = cmd.Flags().Set("run-id", " ")
+				cmd.Flags().String("run", "", "")
+				_ = cmd.Flags().Set("run", " ")
 				return composeExecOptions{RunID: " ", Command: "pwd"}
 			},
 			wantErr: "requires a value",

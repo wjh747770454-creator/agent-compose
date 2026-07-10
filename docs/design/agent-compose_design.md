@@ -124,7 +124,7 @@ Current main commands:
 - `ps`: query project, agent, latest run, and running sandbox state.
 - `run <agent>`: call `RunService.RunAgentStream` for a manual agent run;
   creates a new sandbox by default, supports reusing an existing sandbox with
-  `--sandbox-id`, stops the runtime after completion by default, and can keep it
+  `--sandbox`, stops the runtime after completion by default, and can keep it
   running with `--keep-running`.
 - `logs`: inspect run output by project, agent, run id, or sandbox id; supports
   `--follow`.
@@ -393,7 +393,7 @@ scheduler trigger, or future API clients.
 3. Merge runtime environment. Priority from low to high is global env, project
    variables, agent env, then run request env.
 4. Prepare local/Git workspace snapshot from project/agent workspace spec.
-5. Create a new sandbox or reuse an existing sandbox with `--sandbox-id`.
+5. Create a new sandbox or reuse an existing sandbox with `--sandbox`.
 6. Write project, agent, run_id, scheduler_id, source, and related tags to the
    sandbox.
 7. Mark run as running and call the existing agent executor.
