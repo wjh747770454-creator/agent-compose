@@ -92,50 +92,9 @@ func materializeLocalDockerImageRootfsWithClient(ctx context.Context, dataRoot s
 
 	layout, layoutReady, _ := materializeLocalDockerImageLayoutWithClient(ctx, dataRoot, dockerClient, resolvedRef)
 	if layoutReady {
-		if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-			return localDockerImageRootfs{}, false, fmt.Errorf("create image cache dir: %w", err)
-		}
-		lockPath := filepath.Join(cacheDir, ".lock")
-		lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
-		if err != nil {
-			return localDockerImageRootfs{}, false, fmt.Errorf("open image cache lock: %w", err)
-		}
-		defer func() { _ = lockFile.Close() }()
-		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-			return localDockerImageRootfs{}, false, fmt.Errorf("lock image cache dir: %w", err)
-		}
-		defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
-
-		if _, err := os.Stat(readyFlag); err == nil {
-			if info, statErr := os.Stat(rootfsDir); statErr == nil && info.IsDir() {
-				return localDockerImageRootfs{ImageID: imageID, ResolvedRef: resolvedRef, RootfsPath: rootfsDir}, true, nil
-			}
-		}
-		_ = os.Remove(readyFlag)
-
-		tmpDir := filepath.Join(cacheDir, "rootfs.tmp")
-		_ = os.RemoveAll(tmpDir)
-		if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-			return localDockerImageRootfs{}, false, fmt.Errorf("create temp rootfs dir: %w", err)
-		}
-		rootfsTmpDir := filepath.Join(tmpDir, "layout")
-		if err := os.MkdirAll(rootfsTmpDir, 0o755); err != nil {
-			_ = os.RemoveAll(tmpDir)
-			return localDockerImageRootfs{}, false, fmt.Errorf("create temp extracted rootfs dir: %w", err)
-		}
-		if err := extractOCILayoutRootfs(layout.RootfsPath, rootfsTmpDir, resolvedRef); err != nil {
-			_ = os.RemoveAll(tmpDir)
-		} else {
-			_ = os.RemoveAll(rootfsDir)
-			if err := os.Rename(rootfsTmpDir, rootfsDir); err != nil {
-				_ = os.RemoveAll(tmpDir)
-			} else {
-				_ = os.RemoveAll(tmpDir)
-				if err := os.WriteFile(readyFlag, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644); err != nil {
-					return localDockerImageRootfs{}, false, fmt.Errorf("write image cache ready flag: %w", err)
-				}
-				return localDockerImageRootfs{ImageID: imageID, ResolvedRef: resolvedRef, RootfsPath: rootfsDir}, true, nil
-			}
+		result, ok, err := materializeRootfsFromReadyLayout(cacheDir, rootfsDir, readyFlag, layout, resolvedRef)
+		if err != nil || ok {
+			return result, ok, err
 		}
 	}
 
@@ -198,6 +157,54 @@ func materializeLocalDockerImageRootfsWithClient(ctx context.Context, dataRoot s
 		return localDockerImageRootfs{}, false, fmt.Errorf("write image cache ready flag: %w", err)
 	}
 	return localDockerImageRootfs{ImageID: imageID, ResolvedRef: resolvedRef, RootfsPath: rootfsDir}, true, nil
+}
+
+func materializeRootfsFromReadyLayout(cacheDir, rootfsDir, readyFlag string, layout localDockerImageLayout, resolvedRef string) (localDockerImageRootfs, bool, error) {
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return localDockerImageRootfs{}, false, fmt.Errorf("create image cache dir: %w", err)
+	}
+	lockPath := filepath.Join(cacheDir, ".lock")
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return localDockerImageRootfs{}, false, fmt.Errorf("open image cache lock: %w", err)
+	}
+	defer func() { _ = lockFile.Close() }()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return localDockerImageRootfs{}, false, fmt.Errorf("lock image cache dir: %w", err)
+	}
+	defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
+
+	if _, err := os.Stat(readyFlag); err == nil {
+		if info, statErr := os.Stat(rootfsDir); statErr == nil && info.IsDir() {
+			return localDockerImageRootfs{ImageID: layout.ImageID, ResolvedRef: resolvedRef, RootfsPath: rootfsDir}, true, nil
+		}
+	}
+	_ = os.Remove(readyFlag)
+
+	tmpDir := filepath.Join(cacheDir, "rootfs.tmp")
+	_ = os.RemoveAll(tmpDir)
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return localDockerImageRootfs{}, false, fmt.Errorf("create temp rootfs dir: %w", err)
+	}
+	rootfsTmpDir := filepath.Join(tmpDir, "layout")
+	if err := os.MkdirAll(rootfsTmpDir, 0o755); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return localDockerImageRootfs{}, false, fmt.Errorf("create temp extracted rootfs dir: %w", err)
+	}
+	if err := extractOCILayoutRootfs(layout.RootfsPath, rootfsTmpDir, resolvedRef); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return localDockerImageRootfs{}, false, nil
+	}
+	_ = os.RemoveAll(rootfsDir)
+	if err := os.Rename(rootfsTmpDir, rootfsDir); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return localDockerImageRootfs{}, false, nil
+	}
+	_ = os.RemoveAll(tmpDir)
+	if err := os.WriteFile(readyFlag, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644); err != nil {
+		return localDockerImageRootfs{}, false, fmt.Errorf("write image cache ready flag: %w", err)
+	}
+	return localDockerImageRootfs{ImageID: layout.ImageID, ResolvedRef: resolvedRef, RootfsPath: rootfsDir}, true, nil
 }
 
 func materializeLocalDockerImageLayout(ctx context.Context, dataRoot, imageRef string) (localDockerImageLayout, bool, error) {
@@ -287,6 +294,20 @@ func materializeLocalDockerImageLayoutWithClient(ctx context.Context, dataRoot s
 func isValidOCILayout(rootfsDir string) bool {
 	for _, name := range []string{"oci-layout", "index.json"} {
 		if _, err := os.Stat(filepath.Join(rootfsDir, name)); err != nil {
+			return false
+		}
+	}
+	manifest, err := loadOCILayoutManifest(rootfsDir, "")
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(manifest.Config.Digest) != "" {
+		if _, err := os.Stat(ociLayoutBlobPath(rootfsDir, manifest.Config.Digest)); err != nil {
+			return false
+		}
+	}
+	for _, layer := range manifest.Layers {
+		if _, err := os.Stat(ociLayoutBlobPath(rootfsDir, layer.Digest)); err != nil {
 			return false
 		}
 	}

@@ -92,7 +92,11 @@ func PrepareProjectRun(ctx context.Context, store PreparationStore, resolver Wor
 	if resolver == nil {
 		return prepared, nil
 	}
-	workspaceConfig, workspaceSnapshot, err := resolver.ResolveProjectRunWorkspace(ctx, run, project, ComposeWorkspaceSpecFromV2(spec.GetWorkspace()), ComposeWorkspaceSpecFromV2(agentSpec.GetWorkspace()))
+	projectWorkspace, agentWorkspace, err := ProjectRunWorkspaceSpecsFromV2(spec.GetWorkspaces(), agentSpec.GetWorkspace())
+	if err != nil {
+		return Preparation{}, err
+	}
+	workspaceConfig, workspaceSnapshot, err := resolver.ResolveProjectRunWorkspace(ctx, run, project, projectWorkspace, agentWorkspace)
 	if err != nil {
 		return Preparation{}, err
 	}
@@ -167,11 +171,57 @@ func ComposeWorkspaceSpecFromV2(workspace *agentcomposev2.WorkspaceSpec) *compos
 		return nil
 	}
 	return &compose.WorkspaceSpec{
+		Name:     workspace.GetName(),
 		Provider: workspace.GetProvider(),
 		URL:      workspace.GetUrl(),
 		Branch:   workspace.GetBranch(),
 		Path:     workspace.GetPath(),
 	}
+}
+
+func ProjectRunWorkspaceSpecsFromV2(projectWorkspaces []*agentcomposev2.NamedWorkspaceSpec, agentWorkspace *agentcomposev2.WorkspaceSpec) (*compose.WorkspaceSpec, *compose.WorkspaceSpec, error) {
+	globals := make(map[string]compose.WorkspaceSpec, len(projectWorkspaces))
+	keys := make([]string, 0, len(projectWorkspaces))
+	for i, item := range projectWorkspaces {
+		name := strings.TrimSpace(item.GetName())
+		if name == "" {
+			return nil, nil, fmt.Errorf("project workspace %d name is required", i)
+		}
+		if _, exists := globals[name]; exists {
+			return nil, nil, fmt.Errorf("duplicate project workspace %q", name)
+		}
+		workspace := ComposeWorkspaceSpecFromV2(item.GetWorkspace())
+		if workspace == nil {
+			return nil, nil, fmt.Errorf("project workspace %q spec is required", name)
+		}
+		workspace.Name = ""
+		globals[name] = *workspace
+		keys = append(keys, name)
+	}
+
+	agent := ComposeWorkspaceSpecFromV2(agentWorkspace)
+	if agent != nil {
+		hasName := strings.TrimSpace(agent.Name) != ""
+		hasInline := strings.TrimSpace(agent.Provider) != "" || strings.TrimSpace(agent.URL) != "" || strings.TrimSpace(agent.Branch) != "" || strings.TrimSpace(agent.Path) != ""
+		switch {
+		case hasName && hasInline:
+			return nil, nil, fmt.Errorf("agent workspace reference cannot set name together with provider, url, branch, or path")
+		case hasName:
+			workspace, ok := globals[strings.TrimSpace(agent.Name)]
+			if !ok {
+				return nil, nil, fmt.Errorf("agent workspace %q is not defined", agent.Name)
+			}
+			return nil, &workspace, nil
+		case hasInline:
+			return nil, agent, nil
+		}
+	}
+
+	if len(globals) == 1 {
+		workspace := globals[keys[0]]
+		return &workspace, nil, nil
+	}
+	return nil, nil, nil
 }
 
 func MergeEnvItems(groups ...[]domain.SandboxEnvVar) []domain.SandboxEnvVar {

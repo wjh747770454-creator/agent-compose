@@ -620,6 +620,24 @@ func TestJupyterLaunchCommandDoesNotRunDirectoryOnlyBootstrapByDefault(t *testin
 	}
 }
 
+func TestBackgroundJupyterLaunchCommandStartsBeforeJupyterLabImportProbe(t *testing.T) {
+	config := testRuntimeMountConfig()
+	proxyState := ProxyState{Enabled: true, GuestPort: 8888, Token: "test-token"}
+
+	foregroundCommand := jupyterLaunchCommand(config, proxyState, false)
+	if !strings.Contains(foregroundCommand, "python3 -c \"import jupyterlab;") {
+		t.Fatalf("foreground jupyter command missing import probe: %s", foregroundCommand)
+	}
+
+	backgroundCommand := jupyterLaunchCommand(config, proxyState, true)
+	if strings.Contains(backgroundCommand, "python3 -c \"import jupyterlab;") {
+		t.Fatalf("background jupyter command should not block on import probe before nohup: %s", backgroundCommand)
+	}
+	if !strings.Contains(backgroundCommand, "nohup python3 -m jupyterlab") {
+		t.Fatalf("background jupyter command missing nohup launch: %s", backgroundCommand)
+	}
+}
+
 func TestPrepareRuntimeMountManifestRegeneratesForDriverSwitch(t *testing.T) {
 	root := t.TempDir()
 	session := testRuntimeMountSandbox(root)

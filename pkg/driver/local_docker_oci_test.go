@@ -55,24 +55,23 @@ func TestBuildOCIPlatformFallsBackToDefaultLinuxAmd64(t *testing.T) {
 
 func TestNormalizeSavedOCILayoutAddsMissingPlatform(t *testing.T) {
 	layoutDir := t.TempDir()
-	index := ociIndex{
-		SchemaVersion: 2,
-		MediaType:     "application/vnd.oci.image.index.v1+json",
-		Manifests: []ociDescriptor{{
-			MediaType: "application/vnd.oci.image.manifest.v1+json",
-			Digest:    "sha256:deadbeef",
-			Size:      123,
-		}},
-	}
-	indexBytes, err := json.Marshal(index)
+	makeTestOCILayout(t, layoutDir, "", []testLayerSpec{{entries: []testTarEntry{{name: "etc/config.txt", body: "base\n"}}}})
+	indexBytes, err := os.ReadFile(filepath.Join(layoutDir, "index.json"))
 	if err != nil {
-		t.Fatalf("marshal index: %v", err)
+		t.Fatalf("read index.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layoutDir, "oci-layout"), []byte("{\"imageLayoutVersion\":\"1.0.0\"}\n"), 0o644); err != nil {
-		t.Fatalf("write oci-layout: %v", err)
+	var index ociIndex
+	if err := json.Unmarshal(indexBytes, &index); err != nil {
+		t.Fatalf("decode index.json: %v", err)
+	}
+	index.Manifests[0].Platform = nil
+	index.Manifests[0].Annotations = nil
+	indexBytes, err = json.Marshal(index)
+	if err != nil {
+		t.Fatalf("marshal stripped index: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(layoutDir, "index.json"), indexBytes, 0o644); err != nil {
-		t.Fatalf("write index.json: %v", err)
+		t.Fatalf("write stripped index.json: %v", err)
 	}
 
 	inspect := typesimage.InspectResponse{Architecture: "arm64", Variant: "v8", Os: "linux", OsVersion: "6.9"}
@@ -110,6 +109,39 @@ func TestNormalizeSavedOCILayoutAddsMissingPlatform(t *testing.T) {
 	}
 	if got := patched.Manifests[0].Annotations["org.opencontainers.image.ref.name"]; got != "agent-compose-guest:latest" {
 		t.Fatalf("ref annotation = %q, want %q", got, "agent-compose-guest:latest")
+	}
+}
+
+func TestIsValidOCILayoutRejectsMissingLayerBlob(t *testing.T) {
+	layoutDir := t.TempDir()
+	makeTestOCILayout(t, layoutDir, "agent-compose-guest:latest", []testLayerSpec{
+		{entries: []testTarEntry{{name: "etc/config.txt", body: "base\n"}}},
+	})
+	if !isValidOCILayout(layoutDir) {
+		t.Fatalf("complete test layout reported invalid")
+	}
+
+	manifest, err := loadOCILayoutManifest(layoutDir, "agent-compose-guest:latest")
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	if len(manifest.Layers) == 0 {
+		t.Fatalf("test layout has no layers")
+	}
+	if err := os.Remove(ociLayoutBlobPath(layoutDir, manifest.Layers[0].Digest)); err != nil {
+		t.Fatalf("remove layer blob: %v", err)
+	}
+	if isValidOCILayout(layoutDir) {
+		t.Fatalf("layout with missing layer blob reported valid")
+	}
+}
+
+func TestIsValidOCILayoutAllowsZeroLayerManifest(t *testing.T) {
+	layoutDir := t.TempDir()
+	makeTestOCILayout(t, layoutDir, "scratch:latest", nil)
+
+	if !isValidOCILayout(layoutDir) {
+		t.Fatalf("zero-layer layout reported invalid")
 	}
 }
 
@@ -226,12 +258,12 @@ func makeTestOCILayout(t *testing.T, layoutDir, imageRef string, layers []testLa
 	manifest := ociManifest{
 		SchemaVersion: 2,
 		MediaType:     "application/vnd.oci.image.manifest.v1+json",
-		Config: ociDescriptor{
-			MediaType: "application/vnd.oci.image.config.v1+json",
-			Digest:    "sha256:config",
-			Size:      2,
-		},
 	}
+	configDesc, err := addOCIBlobFromBytes([]byte("{}"), filepath.Join(layoutDir, "blobs", "sha256"), "application/vnd.oci.image.config.v1+json")
+	if err != nil {
+		t.Fatalf("write config blob: %v", err)
+	}
+	manifest.Config = configDesc
 	for _, layer := range layers {
 		data := makeLayerTar(t, layer.entries)
 		desc, err := addOCIBlobFromBytes(data, filepath.Join(layoutDir, "blobs", "sha256"), "application/vnd.oci.image.layer.v1.tar")
