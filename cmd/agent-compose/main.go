@@ -5537,11 +5537,7 @@ func composePSStatusFilter(options composePSOptions) (map[string]bool, error) {
 	return map[string]bool{"running": true}, nil
 }
 
-type sessionLister interface {
-	ListSessions(context.Context, *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error)
-}
-
-func listAllSessions(ctx context.Context, client sessionLister) ([]*agentcomposev1.SessionSummary, error) {
+func listAllSessions(ctx context.Context, client agentcomposev1connect.SessionServiceClient) ([]*agentcomposev1.SessionSummary, error) {
 	var result []*agentcomposev1.SessionSummary
 	var offset uint32
 	const limit uint32 = 100
@@ -6975,7 +6971,7 @@ func resolveComposeSandboxRefWithProject(ctx context.Context, clients cliService
 	return resolveComposeSandboxRefFromProject(ctx, clients, project.Msg.GetProject(), ref)
 }
 
-func resolveComposeSandboxRefFromSessions(ctx context.Context, client sessionLister, ref string) (string, error) {
+func resolveComposeSandboxRefFromSessions(ctx context.Context, client agentcomposev1connect.SessionServiceClient, ref string) (string, error) {
 	sessions, err := listAllSessions(ctx, client)
 	if err != nil {
 		return "", commandExitErrorForConnect(fmt.Errorf("resolve sandbox %s from daemon sessions: %w", ref, err))

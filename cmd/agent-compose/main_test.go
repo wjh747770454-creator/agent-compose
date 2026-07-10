@@ -9095,12 +9095,16 @@ func testResolveComposeSandboxRefFromSessions(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := sessionServiceStub{listSessions: func(context.Context, *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error) {
-				if tc.listErr != nil {
-					return nil, tc.listErr
-				}
-				return connect.NewResponse(&agentcomposev1.ListSessionsResponse{Sessions: tc.sessions}), nil
-			}}
+			server := newComposeServiceStubServer(t, composeServiceStubs{session: sessionServiceStub{
+				listSessions: func(context.Context, *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error) {
+					if tc.listErr != nil {
+						return nil, tc.listErr
+					}
+					return connect.NewResponse(&agentcomposev1.ListSessionsResponse{Sessions: tc.sessions}), nil
+				},
+			}})
+			defer server.Close()
+			client := agentcomposev1connect.NewSessionServiceClient(server.Client(), server.URL)
 			got, err := resolveComposeSandboxRefFromSessions(context.Background(), client, tc.ref)
 			if tc.wantCode == 0 {
 				if err != nil {
