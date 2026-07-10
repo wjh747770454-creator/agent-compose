@@ -138,7 +138,7 @@ Start a sandbox for an agent, or continue work in an existing sandbox.
 ```bash
 agent-compose run <agent> --prompt "..."
 agent-compose run <agent> --command "..."
-agent-compose run <agent> --sandbox-id <sandbox> --prompt "..."
+agent-compose run <agent> --sandbox <sandbox> --prompt "..."
 ```
 
 Input modes:
@@ -149,7 +149,7 @@ Input modes:
 | command | `run <agent> --command "..."` | Start or reuse the agent sandbox and execute a shell command through guest `agent-compose-runtime exec`; stdout/stderr transcript is streamed and persisted to the run record without protocol payload markers. |
 | prompt REPL | `run <agent> -i --prompt` | Read prompts line by line from stdin. Each non-empty input creates one run and reuses the same sandbox. |
 | command REPL | `run <agent> -i --command` | Read commands line by line from stdin. Each non-empty input creates one run and reuses the same sandbox. |
-| sandbox reuse | `run <agent> --sandbox-id <sandbox> --prompt "..."` | Continue in a specific sandbox. |
+| sandbox reuse | `run <agent> --sandbox <sandbox> --prompt "..."` | Continue in a specific sandbox. |
 
 Prompt input must use `--prompt`, and non-interactive runs must choose `--prompt` or `--command`. Positional prompt arguments are not supported.
 Additional positional arguments are not supported.
@@ -157,7 +157,7 @@ Additional positional arguments are not supported.
 | Option | Description |
 | --- | --- |
 | `--keep-running` | Keep the sandbox runtime after the run completes. |
-| `--sandbox-id <sandbox>` | Reuse an existing sandbox. |
+| `--sandbox <sandbox>` | Reuse an existing sandbox. |
 | `--rm` | Remove the sandbox after the run reaches a terminal state. |
 | `--jupyter` | Enable Jupyter for this run. When unset, the agent YAML default is used; when YAML is unset, Jupyter is disabled. |
 | `--jupyter-expose` | Mark the Jupyter agent-compose proxy endpoint for this run as explicitly exposed. This does not request runtime-driver host port exposure and also enables Jupyter. |
@@ -173,7 +173,7 @@ agent-compose run tester --command "task test" --keep-running
 agent-compose run tester --command "task test" -d
 agent-compose run reviewer -i --prompt
 agent-compose run tester -i --command
-agent-compose run reviewer --sandbox-id sandbox_123 --prompt "Continue the review"
+agent-compose run reviewer --sandbox sandbox_123 --prompt "Continue the review"
 agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the notebook state"
 ```
 
@@ -185,7 +185,7 @@ Rules:
 - `run -i/--interactive` must select `--prompt` or `--command`; it cannot be combined with `--json`.
 - Empty REPL lines do not create runs. Enter `/exit` or press Ctrl+D to exit.
 - REPL mode is not TTY/PTY or running stdin passthrough. Each input is one independent `RunAgentStream` call that reuses the same sandbox.
-- Detached runs can be observed with the printed `agent-compose logs --run-id <run-id> --follow` command, or managed later with `stop` and `logs`.
+- Detached runs can be observed with the printed `agent-compose logs --run <run-id> --follow` command, or managed later with `stop` and `logs`.
 - `run -i --prompt` supports providers with reusable provider conversations: Codex, Claude/cc, and OpenCode. Gemini currently returns unsupported.
 - `StopRun` requests cancellation for active in-daemon runs. Pending/running runs left behind after daemon restart are reconciled to failed with a `daemon interrupted` error.
 
@@ -370,7 +370,7 @@ agent-compose exec <sandbox> --command "..."
 | `--command "..."` | Pass a shell command as a flag. It is executed as `bash -lc "..."` in the sandbox. |
 | `--cwd <path>` | Set the working directory inside the sandbox. |
 | `--agent <agent>` | Deprecated target selection option; use `exec <sandbox>` instead. |
-| `--run-id <run-id>` | Deprecated target selection option; use `exec <sandbox>` instead. |
+| `--run <run-id>` | Deprecated target selection option; use `exec <sandbox>` instead. |
 
 Examples:
 
@@ -394,7 +394,7 @@ Current `logs` output is based on run log artifacts returned by the v2 RunServic
 agent-compose logs
 agent-compose logs <agent>
 agent-compose logs --agent reviewer
-agent-compose logs --run-id <run-id>
+agent-compose logs --run <run-id>
 agent-compose logs --sandbox <sandbox>
 agent-compose logs --follow
 agent-compose logs -n 100
@@ -407,7 +407,7 @@ agent-compose logs -t
 | `--follow` | Follow log output. |
 | `-t, --timestamp` | Prefix text log lines with a run-level timestamp. Current output does not have per-chunk timestamps; the CLI uses the best available run timestamp. |
 | `--agent <agent>` | Filter by agent. |
-| `--run-id <run-id>` | Filter by run id. |
+| `--run <run-id>` | Filter by run id. |
 | `--sandbox <sandbox>` | Filter by sandbox. |
 
 Examples:
@@ -417,7 +417,7 @@ agent-compose logs
 agent-compose logs reviewer
 agent-compose logs --agent reviewer --tail 200
 agent-compose logs --sandbox sandbox_123 --follow -t
-agent-compose logs --run-id run_123 --json
+agent-compose logs --run run_123 --json
 ```
 
 ## `inspect`: Inspect Resources

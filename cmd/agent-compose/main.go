@@ -513,7 +513,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	}
 	runCmd.Flags().StringVar(&runOptions.Prompt, "prompt", "", "Prompt to send to the agent")
 	runCmd.Flags().StringVar(&runOptions.Command, "command", "", "Bash command to execute in the agent sandbox")
-	runCmd.Flags().StringVar(&runOptions.SandboxID, "sandbox-id", "", "Reuse an existing sandbox")
+	runCmd.Flags().StringVar(&runOptions.SandboxID, "sandbox", "", "Reuse an existing sandbox")
 	runCmd.Flags().StringVar(&runOptions.Driver, "driver", "", "Runtime driver override for a new sandbox")
 	runCmd.Flags().BoolVar(&runOptions.KeepRunning, "keep-running", false, "Keep the sandbox runtime running after completion")
 	runCmd.Flags().BoolVar(&runOptions.Remove, "rm", false, "Remove the sandbox after a successful run")
@@ -553,7 +553,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 			return runComposeSchedulerTriggerCommand(cmd, options, schedulerTriggerOptions, args[0], args[1])
 		},
 	}
-	schedulerTriggerCmd.Flags().StringVar(&schedulerTriggerOptions.SandboxID, "sandbox-id", "", "Reuse an existing sandbox")
+	schedulerTriggerCmd.Flags().StringVar(&schedulerTriggerOptions.SandboxID, "sandbox", "", "Reuse an existing sandbox")
 	schedulerTriggerCmd.Flags().StringVar(&schedulerTriggerOptions.Driver, "driver", "", "Runtime driver override for a new sandbox")
 	schedulerTriggerCmd.Flags().BoolVar(&schedulerTriggerOptions.KeepRunning, "keep-running", false, "Keep the sandbox runtime running after completion")
 	schedulerTriggerCmd.Flags().BoolVar(&schedulerTriggerOptions.Remove, "rm", false, "Remove the sandbox after a successful run")
@@ -580,7 +580,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 		},
 	}
 	logsCmd.Flags().StringVar(&logsOptions.AgentName, "agent", "", "Filter logs by agent name")
-	logsCmd.Flags().StringVar(&logsOptions.RunID, "run-id", "", "Filter logs by run id")
+	logsCmd.Flags().StringVar(&logsOptions.RunID, "run", "", "Filter logs by run id")
 	logsCmd.Flags().StringVar(&logsOptions.SandboxID, "sandbox", "", "Filter logs by sandbox id")
 	logsCmd.Flags().BoolVar(&logsOptions.Follow, "follow", false, "Follow running run output")
 	logsCmd.Flags().IntVarP(&logsOptions.TailLines, "tail", "n", -1, "Show the last N lines of run output")
@@ -710,7 +710,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 		},
 	}
 	// Deprecated: use `agent-compose exec <sandbox>` instead.
-	execCmd.Flags().StringVar(&execOptions.RunID, "run-id", "", "Deprecated target selection by run; use exec <sandbox>")
+	execCmd.Flags().StringVar(&execOptions.RunID, "run", "", "Deprecated target selection by run; use exec <sandbox>")
 	execCmd.Flags().StringVar(&execOptions.Command, "command", "", "Shell command to execute in the sandbox")
 	execCmd.Flags().StringVar(&execOptions.Prompt, "prompt", "", "Prompt the sandbox agent and attach to the response")
 	execCmd.Flags().BoolVarP(&execOptions.Interactive, "interactive", "i", false, "Attach stdin to the sandbox command")
@@ -2003,7 +2003,7 @@ func normalizeComposeSchedulerTriggerOptions(options composeSchedulerTriggerOpti
 		options.Driver = driver
 	}
 	if options.SandboxID != "" && options.Driver != "" {
-		return options, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler trigger --driver cannot be combined with --sandbox-id")}
+		return options, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler trigger --driver cannot be combined with --sandbox")}
 	}
 	return options, nil
 }
@@ -2494,7 +2494,7 @@ func normalizeComposeRunOptions(cmd *cobra.Command, options composeRunOptions) (
 		options.Driver = driver
 	}
 	if options.SandboxID != "" && options.Driver != "" {
-		return options, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --driver cannot be combined with --sandbox-id")}
+		return options, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --driver cannot be combined with --sandbox")}
 	}
 	return options, nil
 }
@@ -2769,7 +2769,7 @@ func shouldResolveComposeLogResourceRef(ref string) bool {
 }
 
 func composeExecArgs(cmd *cobra.Command, args []string) error {
-	if cmd.Flags().Changed("run-id") {
+	if cmd.Flags().Changed("run") {
 		return nil
 	}
 	return cobra.MinimumNArgs(1)(cmd, args)
@@ -3517,8 +3517,8 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires --command or --prompt")}
 	}
 	legacyTargetFlags := []string{}
-	if cmd.Flags().Changed("run-id") {
-		legacyTargetFlags = append(legacyTargetFlags, "--run-id")
+	if cmd.Flags().Changed("run") {
+		legacyTargetFlags = append(legacyTargetFlags, "--run")
 	}
 	if len(legacyTargetFlags) > 1 {
 		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec target can only be specified once")}
@@ -3536,10 +3536,10 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 			Cwd:     strings.TrimSpace(options.Cwd),
 		}
 		switch legacyTargetFlags[0] {
-		case "--run-id":
+		case "--run":
 			runID := strings.TrimSpace(options.RunID)
 			if runID == "" {
-				return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --run-id requires a value")}
+				return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --run requires a value")}
 			}
 			runID, err = resolveComposeRunIDRef(cmd.Context(), clients.run, projectID, "", runID)
 			if err != nil {
@@ -7871,7 +7871,7 @@ func detachedRunLogsCommand(cli cliOptions, runID string) string {
 	if value := strings.TrimSpace(cli.ProjectName); value != "" {
 		parts = append(parts, "--project-name", value)
 	}
-	parts = append(parts, "logs", "--run-id", strings.TrimSpace(runID), "--follow")
+	parts = append(parts, "logs", "--run", strings.TrimSpace(runID), "--follow")
 	for i, part := range parts {
 		parts[i] = shellQuoteCLIArg(part)
 	}

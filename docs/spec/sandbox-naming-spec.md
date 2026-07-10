@@ -160,7 +160,7 @@ Docker label、boxlite runtime ref、microsandbox cache references、mount manif
 
 CLI 是 daemon client，不直接读写 sandbox 文件或 SQLite。用户可见命令使用 sandbox：
 
-- `run --sandbox-id`
+- `run --sandbox`
 - `ps` 显示 `SANDBOX ID`
 - `exec <sandbox>`
 - `logs --sandbox`
@@ -528,7 +528,7 @@ protoc -I proto \
 
 覆盖：
 
-- `agent-compose run <agent> --sandbox-id <id>`。
+- `agent-compose run <agent> --sandbox <id>`。
 - `agent-compose ps --json` 不包含 `session_id`。
 - `agent-compose exec <sandbox> --command ...`。
 - `agent-compose logs --sandbox <sandbox>`。

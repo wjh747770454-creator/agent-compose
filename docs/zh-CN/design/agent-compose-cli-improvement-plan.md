@@ -128,7 +128,7 @@ agents:
 - `--prompt`、`--command` 一次只能选择一种。
 - 使用 `--prompt` 或 `--command` 后不能再传额外位置参数。
 - prompt 输入必须使用 `--prompt`；`run <agent> <trigger-name>` 的第二个位置参数不再作为 prompt 处理。
-- 复用 sandbox 使用 `--sandbox-id`。
+- 复用 sandbox 使用 `--sandbox`。
 
 ### Trigger 解析
 
@@ -147,7 +147,7 @@ v2 `RunSessionCleanupPolicy` 当前包括：
 - `KEEP_RUNNING`：`--keep-running`，run 完成后保留 runtime。
 - `REMOVE_ON_COMPLETION`：`--rm`，run terminal 后删除本次 run 创建的 sandbox。
 
-`--rm` 由 service 端 `pkg/runs.Controller` 负责，不依赖 CLI 进程存活。它覆盖 succeeded、failed、canceled 等 terminal 状态。显式传入已有 `--sandbox-id` 时，不删除该 sandbox。cleanup 失败写入 `project_run.cleanup_error`；run 原始错误优先于 cleanup 错误。
+`--rm` 由 service 端 `pkg/runs.Controller` 负责，不依赖 CLI 进程存活。它覆盖 succeeded、failed、canceled 等 terminal 状态。显式传入已有 `--sandbox` 时，不删除该 sandbox。cleanup 失败写入 `project_run.cleanup_error`；run 原始错误优先于 cleanup 错误。
 
 ### Detach 和 StopRun
 

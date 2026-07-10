@@ -1666,7 +1666,7 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, runCount, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--sandbox-id", "session-reuse", "--keep-running", "reviewer", "--prompt", "check this")
+	stdout, stderr, runCount, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--sandbox", "session-reuse", "--keep-running", "reviewer", "--prompt", "check this")
 	if exitCode != 0 {
 		t.Fatalf("run success exit code = %d, stderr=%q", exitCode, stderr)
 	}
@@ -1684,7 +1684,7 @@ agents:
 		name string
 		flag string
 	}{
-		{name: "legacy sandbox flag", flag: "--sandbox"},
+		{name: "legacy sandbox id flag", flag: "--sandbox-id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			legacyOut, legacyErr, _, legacyCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, tc.flag, "session-reuse", "--keep-running", "reviewer", "--prompt", "check this")
@@ -1747,7 +1747,7 @@ agents:
 		"Run: run-detached",
 		"Sandbox: sandbox-detached",
 		"Status: pending",
-		"Logs: agent-compose --host " + server.URL + " --file " + composePath + " logs --run-id run-detached --follow",
+		"Logs: agent-compose --host " + server.URL + " --file " + composePath + " logs --run run-detached --follow",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("run -d stdout %q does not contain %q", stdout, want)
@@ -1802,7 +1802,7 @@ agents:
 	if decoded.ID != "run-detached-json" || decoded.SandboxID != "sandbox-json" || decoded.Status != "running" {
 		t.Fatalf("run -d JSON decoded = %#v", decoded)
 	}
-	if !strings.Contains(decoded.LogsCommand, "logs --run-id run-detached-json --follow") || len(decoded.Warnings) != 2 {
+	if !strings.Contains(decoded.LogsCommand, "logs --run run-detached-json --follow") || len(decoded.Warnings) != 2 {
 		t.Fatalf("run -d JSON logs/warnings = %#v", decoded)
 	}
 }
@@ -1871,7 +1871,7 @@ agents:
 	if exitCode != 0 || stderr != "" {
 		t.Fatalf("run -d --command code/stderr = %d / %q", exitCode, stderr)
 	}
-	logOut, logErr, _, logCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", "run-detached-logs", "--follow", "--tail", "3")
+	logOut, logErr, _, logCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run", "run-detached-logs", "--follow", "--tail", "3")
 	runPrefix := "reviewer-run-detached-log | "
 	wantLogOut := expectedLogSeparator(runPrefix, ">") +
 		"reviewer-run-detached-log | test prompt\n" +
@@ -2364,9 +2364,9 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommandWithInput("", "run", "--host", server.URL, "--file", composePath, "--rm", "--sandbox-id", "sandbox-existing", "reviewer", "-i", "--prompt", "first")
+	stdout, stderr, _, exitCode := executeCLICommandWithInput("", "run", "--host", server.URL, "--file", composePath, "--rm", "--sandbox", "sandbox-existing", "reviewer", "-i", "--prompt", "first")
 	if exitCode != 0 || stdout != "" || stderr != "" {
-		t.Fatalf("run -i --rm --sandbox-id code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+		t.Fatalf("run -i --rm --sandbox code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
 	}
 }
 
@@ -2592,7 +2592,7 @@ agents:
           cron: "0 2 * * *"
           prompt: review nightly
 `)
-	var sawRequest bool
+	var requestedSandboxIDs []string
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		project: projectServiceStub{
 			getProject: func(ctx context.Context, req *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error) {
@@ -2601,7 +2601,7 @@ agents:
 		},
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
-				sawRequest = true
+				requestedSandboxIDs = append(requestedSandboxIDs, req.Msg.GetSandboxId())
 				if req.Msg.GetAgentName() != "reviewer" || !identity.IsID(req.Msg.GetTriggerId()) || req.Msg.GetPrompt() != "" || req.Msg.GetCommand() != "" {
 					t.Fatalf("RunAgentStream scheduler trigger request = %#v", req.Msg)
 				}
@@ -2624,12 +2624,25 @@ agents:
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommand("scheduler", "trigger", "--host", server.URL, "--file", composePath, "reviewer", "nightly")
-	if exitCode != 0 || stdout != "" || stderr != "" {
-		t.Fatalf("scheduler trigger code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+	for _, tc := range []struct {
+		name      string
+		extraArgs []string
+	}{
+		{name: "creates sandbox"},
+		{name: "reuses sandbox", extraArgs: []string{"--sandbox", "sandbox-existing"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{"scheduler", "trigger", "--host", server.URL, "--file", composePath}
+			args = append(args, tc.extraArgs...)
+			args = append(args, "reviewer", "nightly")
+			stdout, stderr, _, exitCode := executeCLICommand(args...)
+			if exitCode != 0 || stdout != "" || stderr != "" {
+				t.Fatalf("scheduler trigger code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+			}
+		})
 	}
-	if !sawRequest {
-		t.Fatal("RunAgentStream was not called")
+	if !reflect.DeepEqual(requestedSandboxIDs, []string{"", "sandbox-existing"}) {
+		t.Fatalf("scheduler trigger sandbox IDs = %#v", requestedSandboxIDs)
 	}
 }
 
@@ -2743,9 +2756,9 @@ agents:
 			want: "unknown flag: --trigger",
 		},
 		{
-			name: "legacy sandbox flag unsupported",
-			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--sandbox", "sandbox-1", "--prompt", "check"},
-			want: "unknown flag: --sandbox",
+			name: "legacy sandbox id flag unsupported",
+			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--sandbox-id", "sandbox-1", "--prompt", "check"},
+			want: "unknown flag: --sandbox-id",
 		},
 		{
 			name: "legacy session flag unsupported",
@@ -2759,8 +2772,8 @@ agents:
 		},
 		{
 			name: "driver with sandbox id",
-			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--sandbox-id", "sandbox-1", "--driver", "docker", "--prompt", "check"},
-			want: "run --driver cannot be combined with --sandbox-id",
+			args: []string{"run", "--host", server.URL, "--file", composePath, "reviewer", "--sandbox", "sandbox-1", "--driver", "docker", "--prompt", "check"},
+			want: "run --driver cannot be combined with --sandbox",
 		},
 		{
 			name: "command and prompt flags",
@@ -3145,14 +3158,14 @@ agents:
 		t.Fatalf("logs --session-id code/stdout/stderr = %d / %q / %q", legacyCode, legacyOut, legacyErr)
 	}
 
-	runOut, runErr, _, runCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", identity.ShortID(runID))
+	runOut, runErr, _, runCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run", identity.ShortID(runID))
 	runPrefix := "reviewer-run-" + identity.ShortID(runID) + " | "
 	wantRunOut := expectedLogSeparator(runPrefix, ">") +
 		"reviewer-run-" + identity.ShortID(runID) + " | test prompt\n" +
 		expectedLogSeparator(runPrefix, "<") +
 		"reviewer-run-" + identity.ShortID(runID) + " | stored log output\n"
 	if runCode != 0 || runErr != "" || runOut != wantRunOut {
-		t.Fatalf("logs --run-id code/stdout/stderr = %d / %q / %q", runCode, runOut, runErr)
+		t.Fatalf("logs --run code/stdout/stderr = %d / %q / %q", runCode, runOut, runErr)
 	}
 }
 
@@ -3203,13 +3216,13 @@ agents:
 		t.Fatalf("logs --tail JSON = %#v", decoded)
 	}
 
-	runOut, runErr, _, runCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", "run-tail", "-n", "1")
+	runOut, runErr, _, runCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run", "run-tail", "-n", "1")
 	wantRunTail := expectedLogSeparator(tailPrefix, ">") +
 		"reviewer-run-tail | test prompt\n" +
 		expectedLogSeparator(tailPrefix, "<") +
 		"reviewer-run-tail | three\n"
 	if runCode != 0 || runErr != "" || runOut != wantRunTail {
-		t.Fatalf("logs --run-id --tail code/stdout/stderr = %d / %q / %q", runCode, runOut, runErr)
+		t.Fatalf("logs --run --tail code/stdout/stderr = %d / %q / %q", runCode, runOut, runErr)
 	}
 }
 
@@ -4320,8 +4333,8 @@ agents:
 	if _, stderr, _, exitCode := executeCLICommand("inspect", "--host", server.URL, "--file", composePath, "--json", "run", runShort); exitCode != 0 || stderr != "" {
 		t.Fatalf("inspect run short id code/stderr = %d / %q", exitCode, stderr)
 	}
-	if _, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--sandbox-id", sandboxShort, "reviewer", "--prompt", "hello"); exitCode != 0 || stderr != "" {
-		t.Fatalf("run --sandbox-id short code/stderr = %d / %q", exitCode, stderr)
+	if _, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "--sandbox", sandboxShort, "reviewer", "--prompt", "hello"); exitCode != 0 || stderr != "" {
+		t.Fatalf("run --sandbox short code/stderr = %d / %q", exitCode, stderr)
 	}
 	if !reflect.DeepEqual(stopped, []string{sandboxID}) || !reflect.DeepEqual(resumed, []string{sandboxID}) || execSandbox != sandboxID || inspectedRun != runID || runSandbox != sandboxID {
 		t.Fatalf("resolved ids stopped=%#v resumed=%#v exec=%q inspect=%q run=%q", stopped, resumed, execSandbox, inspectedRun, runSandbox)
@@ -7906,7 +7919,7 @@ agents:
 		if exitCode != 42 || stdout != "" || !strings.Contains(stderr, "exec-failed") || !strings.Contains(stderr, "boom") {
 			t.Fatalf("exec failed code/stdout/stderr = %d/%q/%q", exitCode, stdout, stderr)
 		}
-		stdout, stderr, _, exitCode = executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--run-id", "run-stream-error", "--command", "true")
+		stdout, stderr, _, exitCode = executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--run", "run-stream-error", "--command", "true")
 		if exitCode != exitCodeUnavailable || stdout != "" || !strings.Contains(stderr, "exec stream down") {
 			t.Fatalf("exec stream error code/stdout/stderr = %d/%q/%q", exitCode, stdout, stderr)
 		}
@@ -7914,7 +7927,7 @@ agents:
 			args []string
 			want string
 		}{
-			{args: []string{"exec", "--file", composePath, "--run-id", "", "--command", "true"}, want: "requires a value"},
+			{args: []string{"exec", "--file", composePath, "--run", "", "--command", "true"}, want: "requires a value"},
 			{args: []string{"exec", "--file", composePath, "--agent", "", "true"}, want: "unknown flag: --agent"},
 		} {
 			stdout, stderr, _, exitCode := executeCLICommand(tc.args...)
@@ -7960,7 +7973,7 @@ agents:
 		if exitCode != exitCodeUnavailable || stdout != "" || !strings.Contains(stderr, "list unavailable") {
 			t.Fatalf("logs list error code/stdout/stderr = %d/%q/%q", exitCode, stdout, stderr)
 		}
-		stdout, stderr, _, exitCode = executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", "missing")
+		stdout, stderr, _, exitCode = executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run", "missing")
 		if exitCode != exitCodeUsage || stdout != "" || !strings.Contains(stderr, "run missing") {
 			t.Fatalf("logs get error code/stdout/stderr = %d/%q/%q", exitCode, stdout, stderr)
 		}
