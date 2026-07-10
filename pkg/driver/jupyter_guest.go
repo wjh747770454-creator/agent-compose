@@ -201,9 +201,11 @@ func jupyterLaunchCommandWithBootstrap(config *appconfig.Config, proxyState Prox
 		"echo \"[agent-compose] python3=$(command -v python3 2>/dev/null || echo missing)\" >> \"" + logPath + "\"",
 		"echo \"[agent-compose] node=$(command -v node 2>/dev/null || echo missing)\" >> \"" + logPath + "\"",
 		"echo \"[agent-compose] workspace=" + config.GuestWorkspacePath + "\" >> \"" + logPath + "\"",
-		"python3 -c \"import jupyterlab; print('[agent-compose] jupyterlab=' + getattr(jupyterlab, '__version__', 'unknown'))\" >> \"" + logPath + "\" 2>&1",
-		launch,
 	}
+	if !background {
+		commands = append(commands, "python3 -c \"import jupyterlab; print('[agent-compose] jupyterlab=' + getattr(jupyterlab, '__version__', 'unknown'))\" >> \""+logPath+"\" 2>&1")
+	}
+	commands = append(commands, launch)
 	if includeDirectoryOnlyBootstrap {
 		commands = append(commands[:1], append([]string{directoryOnlyGuestSessionBootstrapCommand(config)}, commands[1:]...)...)
 	}
