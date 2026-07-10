@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,26 +21,26 @@ func TestAgentExecutorExecuteAgentRequestPersistsCellAndEvents(t *testing.T) {
 	root := t.TempDir()
 	config := &appconfig.Config{
 		DataRoot:             root,
-		SessionRoot:          filepath.Join(root, "sessions"),
+		SandboxRoot:          filepath.Join(root, "sandboxes"),
 		RuntimeDriver:        driverpkg.RuntimeDriverBoxlite,
 		DefaultImage:         "guest:latest",
 		GuestWorkspacePath:   "/workspace",
 		GuestStateRoot:       "/data/state",
 		GuestHomePath:        "/root",
 		JupyterProxyBasePath: "/agent-compose/session",
-		SessionStartTimeout:  2 * time.Second,
+		SandboxStartTimeout:  2 * time.Second,
 		AgentTimeout:         2 * time.Second,
 	}
 	store, err := sessionstore.NewWithConfig(config)
 	if err != nil {
 		t.Fatalf("NewWithConfig returned error: %v", err)
 	}
-	session, err := store.CreateSession(ctx, "agent executor session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SessionTypeManual, nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "agent executor session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SandboxTypeManual, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := store.UpdateSession(ctx, session); err != nil {
+	if err := store.UpdateSandbox(ctx, session); err != nil {
 		t.Fatalf("UpdateSession returned error: %v", err)
 	}
 	runtime := &fakeAgentRuntime{}
@@ -53,7 +54,7 @@ func TestAgentExecutorExecuteAgentRequestPersistsCellAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteAgentRequest returned error: %v", err)
 	}
-	if !cell.Success || cell.Type != execution.CellTypeAgent || cell.AgentSessionID != "agent-session-1" {
+	if !cell.Success || cell.Type != execution.CellTypeAgent || cell.AgentThreadID != "agent-thread-1" {
 		t.Fatalf("cell = %#v", cell)
 	}
 	if userEvent.Type != "agent.user" || assistantEvent.Type != "agent.assistant" {
@@ -65,6 +66,17 @@ func TestAgentExecutorExecuteAgentRequestPersistsCellAndEvents(t *testing.T) {
 	}
 	if len(cells) == 0 || cells[len(cells)-1].ID != cell.ID || !cells[len(cells)-1].Success {
 		t.Fatalf("stored cells = %#v", cells)
+	}
+	threadArtifactPath := filepath.Join(execution.HostSandboxDir(session), "state", "cells", cell.ID, "agent-thread.json")
+	threadArtifact, err := os.ReadFile(threadArtifactPath)
+	if err != nil {
+		t.Fatalf("read agent thread artifact: %v", err)
+	}
+	if !strings.Contains(string(threadArtifact), `"thread_id": "agent-thread-1"`) || !strings.Contains(string(threadArtifact), `"thread_manifest_path":`) {
+		t.Fatalf("agent thread artifact = %s", string(threadArtifact))
+	}
+	if _, err := os.Stat(filepath.Join(execution.HostSandboxDir(session), "state", "cells", cell.ID, "agent-session.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("agent-session.json exists or stat failed unexpectedly: %v", err)
 	}
 	events, err := store.ListEvents(ctx, session.Summary.ID)
 	if err != nil {
@@ -80,29 +92,29 @@ func TestAgentExecutorStreamsOnlyHumanVisibleAgentOutput(t *testing.T) {
 	root := t.TempDir()
 	config := &appconfig.Config{
 		DataRoot:             root,
-		SessionRoot:          filepath.Join(root, "sessions"),
+		SandboxRoot:          filepath.Join(root, "sandboxes"),
 		RuntimeDriver:        driverpkg.RuntimeDriverBoxlite,
 		DefaultImage:         "guest:latest",
 		GuestWorkspacePath:   "/workspace",
 		GuestStateRoot:       "/data/state",
 		GuestHomePath:        "/root",
 		JupyterProxyBasePath: "/agent-compose/session",
-		SessionStartTimeout:  2 * time.Second,
+		SandboxStartTimeout:  2 * time.Second,
 		AgentTimeout:         2 * time.Second,
 	}
 	store, err := sessionstore.NewWithConfig(config)
 	if err != nil {
 		t.Fatalf("NewWithConfig returned error: %v", err)
 	}
-	session, err := store.CreateSession(ctx, "agent stream session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SessionTypeManual, nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "agent stream session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SandboxTypeManual, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := store.UpdateSession(ctx, session); err != nil {
+	if err := store.UpdateSandbox(ctx, session); err != nil {
 		t.Fatalf("UpdateSession returned error: %v", err)
 	}
-	payload := execution.AgentResultPrefix + `{"provider":"codex","sessionId":"agent-session-1","finalText":"done","transcript":"loader agent transcript","stopReason":"completed"}`
+	payload := execution.AgentResultPrefix + `{"provider":"codex","threadId":"agent-thread-1","finalText":"done","transcript":"loader agent transcript","stopReason":"completed"}`
 	runtime := &fakeAgentRuntime{
 		streamChunks: []domain.ExecChunk{
 			{Text: payload},
@@ -155,26 +167,26 @@ func TestAgentExecutorPersistsFailedCellWhenStreamCallbackFails(t *testing.T) {
 	root := t.TempDir()
 	config := &appconfig.Config{
 		DataRoot:             root,
-		SessionRoot:          filepath.Join(root, "sessions"),
+		SandboxRoot:          filepath.Join(root, "sandboxes"),
 		RuntimeDriver:        driverpkg.RuntimeDriverBoxlite,
 		DefaultImage:         "guest:latest",
 		GuestWorkspacePath:   "/workspace",
 		GuestStateRoot:       "/data/state",
 		GuestHomePath:        "/root",
 		JupyterProxyBasePath: "/agent-compose/session",
-		SessionStartTimeout:  2 * time.Second,
+		SandboxStartTimeout:  2 * time.Second,
 		AgentTimeout:         2 * time.Second,
 	}
 	store, err := sessionstore.NewWithConfig(config)
 	if err != nil {
 		t.Fatalf("NewWithConfig returned error: %v", err)
 	}
-	session, err := store.CreateSession(ctx, "agent failed stream session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SessionTypeManual, nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "agent failed stream session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SandboxTypeManual, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := store.UpdateSession(ctx, session); err != nil {
+	if err := store.UpdateSandbox(ctx, session); err != nil {
 		t.Fatalf("UpdateSession returned error: %v", err)
 	}
 

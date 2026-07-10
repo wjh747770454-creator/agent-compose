@@ -28,7 +28,7 @@ export interface RuntimeAgentOptions<S extends RuntimeAgentOutputSchema = Runtim
 
 export interface RuntimeAgentResult<T = unknown> {
   provider: string;
-  sessionId: string;
+  threadId: string;
   stopReason: string;
   finalText: string;
   json: T | null;
@@ -75,7 +75,7 @@ export async function agent<T = unknown>(prompt: string, options: RuntimeAgentOp
     const finalText = parsed.finalText ?? "";
     return {
       provider: parsed.provider ?? provider,
-      sessionId: parsed.sessionId ?? "",
+      threadId: parsed.threadId ?? "",
       stopReason: parsed.stopReason ?? "",
       finalText,
       json: schemaFile ? parseJsonOutput<T>(finalText, validator, "agent finalText") : null,

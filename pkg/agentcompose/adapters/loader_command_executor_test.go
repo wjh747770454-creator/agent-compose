@@ -18,19 +18,19 @@ import (
 
 type fakeLoaderCommandRuntime struct{}
 
-func (r fakeLoaderCommandRuntime) EnsureSession(context.Context, *domain.Session, domain.VMState, domain.ProxyState) (domain.SessionVMInfo, error) {
-	return domain.SessionVMInfo{}, nil
+func (r fakeLoaderCommandRuntime) EnsureSandbox(context.Context, *domain.Sandbox, domain.VMState, domain.ProxyState) (domain.SandboxVMInfo, error) {
+	return domain.SandboxVMInfo{}, nil
 }
 
-func (r fakeLoaderCommandRuntime) StopSession(context.Context, *domain.Session, domain.VMState) (bool, error) {
+func (r fakeLoaderCommandRuntime) StopSandbox(context.Context, *domain.Sandbox, domain.VMState) (bool, error) {
 	return false, nil
 }
 
-func (r fakeLoaderCommandRuntime) Exec(context.Context, *domain.Session, domain.VMState, domain.ExecSpec) (domain.ExecResult, error) {
+func (r fakeLoaderCommandRuntime) Exec(context.Context, *domain.Sandbox, domain.VMState, domain.ExecSpec) (domain.ExecResult, error) {
 	return domain.ExecResult{}, nil
 }
 
-func (r fakeLoaderCommandRuntime) ExecStream(_ context.Context, _ *domain.Session, _ domain.VMState, _ domain.ExecSpec, stream domain.ExecStreamWriter) (domain.ExecResult, error) {
+func (r fakeLoaderCommandRuntime) ExecStream(_ context.Context, _ *domain.Sandbox, _ domain.VMState, _ domain.ExecSpec, stream domain.ExecStreamWriter) (domain.ExecResult, error) {
 	commandResult := domain.RuntimeCommandResult{
 		Stdout:   "loader stdout\n",
 		Stderr:   "loader stderr\n",
@@ -59,25 +59,25 @@ func TestLoaderCommandExecutorFiltersCommandPayloadFromStreamingCellOutput(t *te
 	root := t.TempDir()
 	config := &appconfig.Config{
 		DataRoot:             root,
-		SessionRoot:          filepath.Join(root, "sessions"),
+		SandboxRoot:          filepath.Join(root, "sandboxes"),
 		RuntimeDriver:        driverpkg.RuntimeDriverBoxlite,
 		DefaultImage:         "guest:latest",
 		GuestWorkspacePath:   "/workspace",
 		GuestStateRoot:       "/data/state",
 		GuestHomePath:        "/root",
 		JupyterProxyBasePath: "/agent-compose/session",
-		SessionStartTimeout:  2 * time.Second,
+		SandboxStartTimeout:  2 * time.Second,
 	}
 	store, err := sessionstore.NewWithConfig(config)
 	if err != nil {
 		t.Fatalf("NewWithConfig returned error: %v", err)
 	}
-	session, err := store.CreateSession(ctx, "loader command session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SessionTypeScript, nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "loader command sandbox", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SandboxTypeScript, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := store.UpdateSession(ctx, session); err != nil {
+	if err := store.UpdateSandbox(ctx, session); err != nil {
 		t.Fatalf("UpdateSession returned error: %v", err)
 	}
 	streams := sessions.NewStreamBrokerForTest()

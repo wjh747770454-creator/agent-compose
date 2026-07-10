@@ -28,16 +28,16 @@ func TestCommandAndEventHelperWorkflows(t *testing.T) {
 			t.Fatalf("expected validation error for %#v", req)
 		}
 	}
-	loader := domain.Loader{Summary: domain.LoaderSummary{SessionPolicy: domain.LoaderSessionPolicyReuse}}
+	loader := domain.Loader{Summary: domain.LoaderSummary{SandboxPolicy: domain.LoaderSandboxPolicyReuse}}
 	if CommandRequestRequiresCleanup(loader, domain.LoaderCommandRequest{}) {
 		t.Fatalf("reuse policy without overrides should not require cleanup")
 	}
-	if !CommandRequestRequiresCleanup(loader, domain.LoaderCommandRequest{SessionPolicy: domain.LoaderSessionPolicyNew}) {
+	if !CommandRequestRequiresCleanup(loader, domain.LoaderCommandRequest{SandboxPolicy: domain.LoaderSandboxPolicyNew}) {
 		t.Fatalf("new policy should require cleanup")
 	}
-	if !CommandRequestOverridesSession(domain.LoaderCommandRequest{Driver: "docker"}) ||
-		!CommandRequestOverridesSession(domain.LoaderCommandRequest{SessionEnv: []domain.SessionEnvVar{{Name: "A", Value: "B"}}}) {
-		t.Fatalf("expected session override detection")
+	if !CommandRequestOverridesSandbox(domain.LoaderCommandRequest{Driver: "docker"}) ||
+		!CommandRequestOverridesSandbox(domain.LoaderCommandRequest{SandboxEnv: []domain.SandboxEnvVar{{Name: "A", Value: "B"}}}) {
+		t.Fatalf("expected sandbox override detection")
 	}
 
 	published, err := NewPublishedTopicEvent("runtime.demo", `{"correlation_id":"corr","parentEventId":"parent","provider":"test","ok":true}`, TriggerEventMetadata{EventID: "trigger-event"}, "loader-1", "run-1")

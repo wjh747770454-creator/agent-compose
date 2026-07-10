@@ -13,8 +13,8 @@ import (
 
 const OverviewPageSize = 20
 
-type SessionStore interface {
-	ListSessions(context.Context, domain.SessionListOptions) (domain.SessionListResult, error)
+type SandboxStore interface {
+	ListSandboxes(context.Context, domain.SandboxListOptions) (domain.SandboxListResult, error)
 }
 
 type LoaderRunStore interface {
@@ -22,12 +22,12 @@ type LoaderRunStore interface {
 }
 
 type Aggregator struct {
-	store    SessionStore
+	store    SandboxStore
 	configDB LoaderRunStore
 	clock    func() time.Time
 }
 
-func NewAggregator(store SessionStore, configDB LoaderRunStore) *Aggregator {
+func NewAggregator(store SandboxStore, configDB LoaderRunStore) *Aggregator {
 	return &Aggregator{
 		store:    store,
 		configDB: configDB,
@@ -43,7 +43,7 @@ func (a *Aggregator) SetClock(clock func() time.Time) {
 }
 
 func (a *Aggregator) Build(ctx context.Context) (*agentcomposev1.DashboardOverview, error) {
-	sessions, err := a.store.ListSessions(ctx, domain.SessionListOptions{Limit: OverviewPageSize})
+	sessions, err := a.store.ListSandboxes(ctx, domain.SandboxListOptions{Limit: OverviewPageSize})
 	if err != nil {
 		return nil, err
 	}
@@ -60,8 +60,8 @@ func (a *Aggregator) Build(ctx context.Context) (*agentcomposev1.DashboardOvervi
 		Runs:      &agentcomposev1.RunOverview{},
 		UpdatedAt: now().Format(time.RFC3339Nano),
 	}
-	overview.Runs.RecentCount = uint32(len(sessions.Sessions) + len(runs))
-	for _, session := range sessions.Sessions {
+	overview.Runs.RecentCount = uint32(len(sessions.Sandboxes) + len(runs))
+	for _, session := range sessions.Sandboxes {
 		status := ""
 		if session != nil {
 			status = session.Summary.VMStatus

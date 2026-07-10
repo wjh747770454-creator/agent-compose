@@ -42,8 +42,8 @@ func ProviderKeyName(name string) bool {
 	return driverpkg.LLMProviderKeyName(name)
 }
 
-func FilterPersistedRuntimeEnv(items []domain.SessionEnvVar) []domain.SessionEnvVar {
-	result := make([]domain.SessionEnvVar, 0, len(items))
+func FilterPersistedRuntimeEnv(items []domain.SandboxEnvVar) []domain.SandboxEnvVar {
+	result := make([]domain.SandboxEnvVar, 0, len(items))
 	for _, item := range domain.NormalizeEnvItems(items) {
 		if ProviderKeyName(item.Name) || strings.EqualFold(strings.TrimSpace(item.Name), RuntimeBaseURLEnvName) {
 			continue
@@ -56,7 +56,7 @@ func FilterPersistedRuntimeEnv(items []domain.SessionEnvVar) []domain.SessionEnv
 	return result
 }
 
-func RuntimeEnvMap(items []domain.SessionEnvVar) map[string]string {
+func RuntimeEnvMap(items []domain.SandboxEnvVar) map[string]string {
 	env := make(map[string]string, len(items))
 	for _, item := range domain.NormalizeEnvItems(items) {
 		name := strings.TrimSpace(item.Name)
@@ -71,7 +71,7 @@ func RuntimeEnvMap(items []domain.SessionEnvVar) map[string]string {
 	return env
 }
 
-func ManagedRuntimeEnvMap(items []domain.SessionEnvVar) map[string]string {
+func ManagedRuntimeEnvMap(items []domain.SandboxEnvVar) map[string]string {
 	env := make(map[string]string, len(items))
 	for _, item := range domain.NormalizeEnvItems(items) {
 		name := strings.TrimSpace(item.Name)

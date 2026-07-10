@@ -6,12 +6,12 @@ import (
 	domain "agent-compose/pkg/model"
 )
 
-func SessionTopicPayload(session *domain.Session, source string) map[string]any {
+func SessionTopicPayload(session *domain.Sandbox, source string) map[string]any {
 	if session == nil {
 		return nil
 	}
 	return map[string]any{
-		"sessionId":     session.Summary.ID,
+		"sandboxId":     session.Summary.ID,
 		"title":         session.Summary.Title,
 		"driver":        session.Summary.Driver,
 		"vmStatus":      session.Summary.VMStatus,
@@ -23,15 +23,15 @@ func SessionTopicPayload(session *domain.Session, source string) map[string]any 
 
 func CellTopicPayload(sessionID string, cell domain.NotebookCell, source string) map[string]any {
 	return map[string]any{
-		"sessionId":      sessionID,
-		"cellId":         cell.ID,
-		"cellType":       cell.Type,
-		"success":        cell.Success,
-		"exitCode":       cell.ExitCode,
-		"agent":          cell.Agent,
-		"agentSessionId": cell.AgentSessionID,
-		"stopReason":     cell.StopReason,
-		"source":         source,
+		"sandboxId":     sessionID,
+		"cellId":        cell.ID,
+		"cellType":      cell.Type,
+		"success":       cell.Success,
+		"exitCode":      cell.ExitCode,
+		"agent":         cell.Agent,
+		"agentThreadId": cell.AgentThreadID,
+		"stopReason":    cell.StopReason,
+		"source":        source,
 	}
 }
 
@@ -45,7 +45,7 @@ func CommandEventPayload(request domain.LoaderCommandRequest, result domain.Load
 		"success":         result.Success,
 		"stdoutTruncated": result.StdoutTruncated,
 		"stderrTruncated": result.StderrTruncated,
-		"sessionId":       result.SessionID,
+		"sandboxId":       result.SandboxID,
 		"cellId":          result.CellID,
 	}
 	if payload["mode"] == "shell" {

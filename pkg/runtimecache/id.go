@@ -104,7 +104,6 @@ func cacheIDIdentity(item Item) string {
 		item.ImageID,
 		item.ResolvedRef,
 		item.ImageRef,
-		item.SessionID,
 		item.SandboxID,
 	} {
 		candidate = strings.TrimSpace(candidate)

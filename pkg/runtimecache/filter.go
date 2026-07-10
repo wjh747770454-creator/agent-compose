@@ -36,8 +36,8 @@ func NormalizeDomain(domain Domain) (Domain, bool) {
 		return DomainMaterializedImageCache, true
 	case DomainRuntimeDerivedCache:
 		return DomainRuntimeDerivedCache, true
-	case DomainSessionEphemeralState:
-		return DomainSessionEphemeralState, true
+	case DomainSandboxEphemeralState:
+		return DomainSandboxEphemeralState, true
 	default:
 		return "", false
 	}
@@ -53,8 +53,8 @@ func NormalizeType(cacheType CacheType) (CacheType, bool) {
 		return CacheTypeMaterialized, true
 	case CacheTypeRuntime:
 		return CacheTypeRuntime, true
-	case CacheTypeSession:
-		return CacheTypeSession, true
+	case CacheTypeSandbox:
+		return CacheTypeSandbox, true
 	default:
 		return "", false
 	}
@@ -89,8 +89,8 @@ func DomainType(domain Domain) (CacheType, bool) {
 		return CacheTypeMaterialized, true
 	case DomainRuntimeDerivedCache:
 		return CacheTypeRuntime, true
-	case DomainSessionEphemeralState:
-		return CacheTypeSession, true
+	case DomainSandboxEphemeralState:
+		return CacheTypeSandbox, true
 	default:
 		return "", false
 	}
@@ -104,8 +104,8 @@ func TypeDomain(cacheType CacheType) (Domain, bool) {
 		return DomainMaterializedImageCache, true
 	case CacheTypeRuntime:
 		return DomainRuntimeDerivedCache, true
-	case CacheTypeSession:
-		return DomainSessionEphemeralState, true
+	case CacheTypeSandbox:
+		return DomainSandboxEphemeralState, true
 	default:
 		return "", false
 	}

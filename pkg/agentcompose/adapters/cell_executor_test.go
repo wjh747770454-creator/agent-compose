@@ -18,19 +18,19 @@ type fakeCellRuntime struct {
 	result domain.ExecResult
 }
 
-func (r fakeCellRuntime) EnsureSession(context.Context, *domain.Session, domain.VMState, domain.ProxyState) (domain.SessionVMInfo, error) {
-	return domain.SessionVMInfo{}, nil
+func (r fakeCellRuntime) EnsureSandbox(context.Context, *domain.Sandbox, domain.VMState, domain.ProxyState) (domain.SandboxVMInfo, error) {
+	return domain.SandboxVMInfo{}, nil
 }
 
-func (r fakeCellRuntime) StopSession(context.Context, *domain.Session, domain.VMState) (bool, error) {
+func (r fakeCellRuntime) StopSandbox(context.Context, *domain.Sandbox, domain.VMState) (bool, error) {
 	return false, nil
 }
 
-func (r fakeCellRuntime) Exec(context.Context, *domain.Session, domain.VMState, domain.ExecSpec) (domain.ExecResult, error) {
+func (r fakeCellRuntime) Exec(context.Context, *domain.Sandbox, domain.VMState, domain.ExecSpec) (domain.ExecResult, error) {
 	return r.result, nil
 }
 
-func (r fakeCellRuntime) ExecStream(_ context.Context, _ *domain.Session, _ domain.VMState, _ domain.ExecSpec, stream domain.ExecStreamWriter) (domain.ExecResult, error) {
+func (r fakeCellRuntime) ExecStream(_ context.Context, _ *domain.Sandbox, _ domain.VMState, _ domain.ExecSpec, stream domain.ExecStreamWriter) (domain.ExecResult, error) {
 	if stream != nil {
 		stream(domain.ExecChunk{Text: r.result.Stdout})
 	}
@@ -42,24 +42,24 @@ func TestCellExecutorExecuteCellPersistsCellAndEvent(t *testing.T) {
 	root := t.TempDir()
 	config := &appconfig.Config{
 		DataRoot:             root,
-		SessionRoot:          filepath.Join(root, "sessions"),
+		SandboxRoot:          filepath.Join(root, "sandboxes"),
 		RuntimeDriver:        driverpkg.RuntimeDriverBoxlite,
 		DefaultImage:         "guest:latest",
 		GuestWorkspacePath:   "/workspace",
 		GuestStateRoot:       "/state",
 		JupyterProxyBasePath: "/agent-compose/session",
-		SessionStartTimeout:  2 * time.Second,
+		SandboxStartTimeout:  2 * time.Second,
 	}
 	store, err := sessionstore.NewWithConfig(config)
 	if err != nil {
 		t.Fatalf("NewWithConfig returned error: %v", err)
 	}
-	session, err := store.CreateSession(ctx, "cell session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SessionTypeManual, nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "cell session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SandboxTypeManual, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := store.UpdateSession(ctx, session); err != nil {
+	if err := store.UpdateSandbox(ctx, session); err != nil {
 		t.Fatalf("UpdateSession returned error: %v", err)
 	}
 	executor := NewCellExecutor(config, store, fakeRuntimeProvider{runtime: fakeCellRuntime{result: domain.ExecResult{

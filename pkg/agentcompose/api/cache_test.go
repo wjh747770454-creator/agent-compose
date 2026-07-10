@@ -21,8 +21,8 @@ func TestCacheHandlerListCachesMapsFilterAndResponse(t *testing.T) {
 
 	resp, err := handler.ListCaches(context.Background(), connect.NewRequest(&agentcomposev2.ListCachesRequest{Filter: &agentcomposev2.CacheFilter{
 		Driver:           runtimecache.DriverMicrosandbox,
-		Domain:           agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE,
-		Type:             string(runtimecache.CacheTypeSession),
+		Domain:           agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE,
+		Type:             string(runtimecache.CacheTypeSandbox),
 		Status:           agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED,
 		OlderThanSeconds: 7,
 		CacheId:          item.CacheID,
@@ -31,8 +31,8 @@ func TestCacheHandlerListCachesMapsFilterAndResponse(t *testing.T) {
 		t.Fatalf("ListCaches: %v", err)
 	}
 	if controller.listReq.Filter.Driver != runtimecache.DriverMicrosandbox ||
-		controller.listReq.Filter.Domain != runtimecache.DomainSessionEphemeralState ||
-		controller.listReq.Filter.Type != runtimecache.CacheTypeSession ||
+		controller.listReq.Filter.Domain != runtimecache.DomainSandboxEphemeralState ||
+		controller.listReq.Filter.Type != runtimecache.CacheTypeSandbox ||
 		controller.listReq.Filter.Status != runtimecache.StatusOrphaned ||
 		controller.listReq.Filter.OlderThan != 7*time.Second ||
 		controller.listReq.Filter.CacheID != item.CacheID {
@@ -43,7 +43,7 @@ func TestCacheHandlerListCachesMapsFilterAndResponse(t *testing.T) {
 	}
 	got := resp.Msg.GetCaches()[0]
 	if got.GetCacheId() != item.CacheID ||
-		got.GetDomain() != agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE ||
+		got.GetDomain() != agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE ||
 		got.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED ||
 		got.GetLastUsedAt() == "" ||
 		len(got.GetReferences()) != 1 ||
@@ -277,20 +277,20 @@ func (f *fakeCacheController) RemoveCache(_ context.Context, req runtimecache.Re
 func testRuntimeCacheItem(t *testing.T, status runtimecache.Status) runtimecache.Item {
 	t.Helper()
 	item := runtimecache.EvaluateProtection(runtimecache.Item{
-		Domain:         runtimecache.DomainSessionEphemeralState,
+		Domain:         runtimecache.DomainSandboxEphemeralState,
 		Driver:         runtimecache.DriverMicrosandbox,
 		Kind:           "microsandbox-docker-disk",
-		Path:           "/tmp/microsandbox/docker-disks/session.raw",
+		Path:           "/tmp/microsandbox/docker-disks/sandbox.raw",
 		SizeBytes:      12,
-		SessionID:      "session",
+		SandboxID:      "sandbox",
 		Status:         status,
 		LastUsedAt:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
 		LastUsedSource: "mtime",
 		References: []runtimecache.Reference{{
-			Type:        "session",
-			ID:          "session",
-			Name:        "Session",
-			Path:        "/tmp/session.json",
+			Type:        "sandbox",
+			ID:          "sandbox",
+			Name:        "Sandbox",
+			Path:        "/tmp/sandbox.json",
 			Status:      string(status),
 			Description: "test reference",
 		}},

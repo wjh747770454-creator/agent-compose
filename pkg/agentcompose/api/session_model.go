@@ -9,7 +9,7 @@ import (
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 )
 
-func SessionDetailToProto(session *domain.Session) *agentcomposev1.SessionDetail {
+func SessionDetailToProto(session *domain.Sandbox) *agentcomposev1.SessionDetail {
 	resp := &agentcomposev1.SessionDetail{
 		Summary:     SessionSummaryToProto(&session.Summary),
 		WorkspaceId: session.WorkspaceID,
@@ -25,7 +25,7 @@ func SessionDetailToProto(session *domain.Session) *agentcomposev1.SessionDetail
 	return resp
 }
 
-func SessionSummaryToProto(summary *domain.SessionSummary) *agentcomposev1.SessionSummary {
+func SessionSummaryToProto(summary *domain.SandboxSummary) *agentcomposev1.SessionSummary {
 	resp := &agentcomposev1.SessionSummary{
 		SessionId:     summary.ID,
 		Title:         summary.Title,
@@ -46,7 +46,7 @@ func SessionSummaryToProto(summary *domain.SessionSummary) *agentcomposev1.Sessi
 	return resp
 }
 
-func GlobalEnvConfigToProto(items []domain.SessionEnvVar) *agentcomposev1.GlobalEnvConfigResponse {
+func GlobalEnvConfigToProto(items []domain.SandboxEnvVar) *agentcomposev1.GlobalEnvConfigResponse {
 	resp := &agentcomposev1.GlobalEnvConfigResponse{}
 	for _, item := range items {
 		value := item.Value
@@ -58,7 +58,7 @@ func GlobalEnvConfigToProto(items []domain.SessionEnvVar) *agentcomposev1.Global
 	return resp
 }
 
-func SessionWorkspaceToProto(item *domain.SessionWorkspace) *agentcomposev1.SessionWorkspaceSnapshot {
+func SessionWorkspaceToProto(item *domain.SandboxWorkspace) *agentcomposev1.SessionWorkspaceSnapshot {
 	if item == nil {
 		return nil
 	}
@@ -94,7 +94,7 @@ func CellToProto(cell domain.NotebookCell) *agentcomposev1.NotebookCell {
 		Type:           CellTypeToProto(cell.Type),
 		ExitCode:       int32(cell.ExitCode),
 		Agent:          cell.Agent,
-		AgentSessionId: cell.AgentSessionID,
+		AgentSessionId: cell.AgentThreadID,
 		StopReason:     cell.StopReason,
 		Running:        cell.Running,
 	}
@@ -109,7 +109,7 @@ func AgentRunToProto(cell domain.NotebookCell) *agentcomposev1.AgentRun {
 		ExitCode:       int32(cell.ExitCode),
 		Success:        cell.Success,
 		CreatedAt:      cell.CreatedAt.Format(time.RFC3339Nano),
-		AgentSessionId: cell.AgentSessionID,
+		AgentSessionId: cell.AgentThreadID,
 		StopReason:     cell.StopReason,
 		Running:        cell.Running,
 	}
@@ -137,10 +137,10 @@ func WatchSessionResponseToProto(event sessions.WatchEvent) *agentcomposev1.Watc
 		CellId:   event.CellID,
 	}
 	switch event.EventType {
-	case sessions.WatchEventTypeSessionUpdated:
+	case sessions.WatchEventTypeSandboxUpdated:
 		resp.EventType = agentcomposev1.WatchSessionEventType_WATCH_SESSION_EVENT_TYPE_SESSION_UPDATED
-		if event.Session != nil {
-			resp.Session = SessionSummaryToProto(event.Session)
+		if event.Sandbox != nil {
+			resp.Session = SessionSummaryToProto(event.Sandbox)
 		}
 	case sessions.WatchEventTypeCellStarted:
 		resp.EventType = agentcomposev1.WatchSessionEventType_WATCH_SESSION_EVENT_TYPE_CELL_STARTED
@@ -182,7 +182,7 @@ func CellTypeToProto(cellType string) agentcomposev1.CellType {
 	}
 }
 
-func SessionEventToProto(event domain.SessionEvent) *agentcomposev1.SessionEvent {
+func SessionEventToProto(event domain.SandboxEvent) *agentcomposev1.SessionEvent {
 	return &agentcomposev1.SessionEvent{
 		Id:        event.ID,
 		Type:      event.Type,

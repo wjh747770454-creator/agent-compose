@@ -15,7 +15,7 @@ type WatchEventType int
 
 const (
 	WatchEventTypeUnspecified WatchEventType = iota
-	WatchEventTypeSessionUpdated
+	WatchEventTypeSandboxUpdated
 	WatchEventTypeCellStarted
 	WatchEventTypeCellOutput
 	WatchEventTypeCellCompleted
@@ -23,11 +23,11 @@ const (
 )
 
 type WatchEvent struct {
-	SessionID string
+	SandboxID string
 	EventType WatchEventType
-	Session   *domain.SessionSummary
+	Sandbox   *domain.SandboxSummary
 	Cell      *domain.NotebookCell
-	Event     *domain.SessionEvent
+	Event     *domain.SandboxEvent
 	CellID    string
 	Chunk     string
 	Stream    domain.StdioStream
@@ -47,25 +47,25 @@ func NewStreamBrokerForTest() *StreamBroker {
 	return &StreamBroker{subscribers: map[string]map[int]chan WatchEvent{}}
 }
 
-func (b *StreamBroker) Subscribe(sessionID string) (<-chan WatchEvent, func()) {
-	sessionID = strings.TrimSpace(sessionID)
+func (b *StreamBroker) Subscribe(sandboxID string) (<-chan WatchEvent, func()) {
+	sandboxID = strings.TrimSpace(sandboxID)
 	ch := make(chan WatchEvent, streamBufferSize)
-	if b == nil || sessionID == "" {
+	if b == nil || sandboxID == "" {
 		close(ch)
 		return ch, func() {}
 	}
 	b.mu.Lock()
 	b.nextID++
 	id := b.nextID
-	if b.subscribers[sessionID] == nil {
-		b.subscribers[sessionID] = map[int]chan WatchEvent{}
+	if b.subscribers[sandboxID] == nil {
+		b.subscribers[sandboxID] = map[int]chan WatchEvent{}
 	}
-	b.subscribers[sessionID][id] = ch
+	b.subscribers[sandboxID][id] = ch
 	b.mu.Unlock()
 	return ch, func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		items := b.subscribers[sessionID]
+		items := b.subscribers[sandboxID]
 		if items == nil {
 			return
 		}
@@ -76,33 +76,33 @@ func (b *StreamBroker) Subscribe(sessionID string) (<-chan WatchEvent, func()) {
 		delete(items, id)
 		close(item)
 		if len(items) == 0 {
-			delete(b.subscribers, sessionID)
+			delete(b.subscribers, sandboxID)
 		}
 	}
 }
 
-func (b *StreamBroker) PublishSessionUpdated(summary *domain.SessionSummary) {
+func (b *StreamBroker) PublishSandboxUpdated(summary *domain.SandboxSummary) {
 	if summary == nil {
 		return
 	}
 	b.publish(WatchEvent{
-		SessionID: summary.ID,
-		EventType: WatchEventTypeSessionUpdated,
-		Session:   cloneSessionSummary(summary),
+		SandboxID: summary.ID,
+		EventType: WatchEventTypeSandboxUpdated,
+		Sandbox:   cloneSandboxSummary(summary),
 	})
 }
 
-func (b *StreamBroker) PublishCellStarted(sessionID string, cell domain.NotebookCell) {
+func (b *StreamBroker) PublishCellStarted(sandboxID string, cell domain.NotebookCell) {
 	b.publish(WatchEvent{
-		SessionID: strings.TrimSpace(sessionID),
+		SandboxID: strings.TrimSpace(sandboxID),
 		EventType: WatchEventTypeCellStarted,
 		Cell:      cloneNotebookCell(&cell),
 	})
 }
 
-func (b *StreamBroker) PublishCellOutput(sessionID, cellID, chunk string, stream domain.StdioStream) {
+func (b *StreamBroker) PublishCellOutput(sandboxID, cellID, chunk string, stream domain.StdioStream) {
 	b.publish(WatchEvent{
-		SessionID: strings.TrimSpace(sessionID),
+		SandboxID: strings.TrimSpace(sandboxID),
 		EventType: WatchEventTypeCellOutput,
 		CellID:    strings.TrimSpace(cellID),
 		Chunk:     chunk,
@@ -110,29 +110,29 @@ func (b *StreamBroker) PublishCellOutput(sessionID, cellID, chunk string, stream
 	})
 }
 
-func (b *StreamBroker) PublishCellCompleted(sessionID string, cell domain.NotebookCell) {
+func (b *StreamBroker) PublishCellCompleted(sandboxID string, cell domain.NotebookCell) {
 	b.publish(WatchEvent{
-		SessionID: strings.TrimSpace(sessionID),
+		SandboxID: strings.TrimSpace(sandboxID),
 		EventType: WatchEventTypeCellCompleted,
 		Cell:      cloneNotebookCell(&cell),
 	})
 }
 
-func (b *StreamBroker) PublishEventAdded(sessionID string, event domain.SessionEvent) {
+func (b *StreamBroker) PublishEventAdded(sandboxID string, event domain.SandboxEvent) {
 	b.publish(WatchEvent{
-		SessionID: strings.TrimSpace(sessionID),
+		SandboxID: strings.TrimSpace(sandboxID),
 		EventType: WatchEventTypeEventAdded,
-		Event:     cloneSessionEvent(&event),
+		Event:     cloneSandboxEvent(&event),
 	})
 }
 
 func (b *StreamBroker) publish(event WatchEvent) {
-	if b == nil || strings.TrimSpace(event.SessionID) == "" {
+	if b == nil || strings.TrimSpace(event.SandboxID) == "" {
 		return
 	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	for _, ch := range b.subscribers[event.SessionID] {
+	for _, ch := range b.subscribers[event.SandboxID] {
 		select {
 		case ch <- event:
 		default:
@@ -140,13 +140,13 @@ func (b *StreamBroker) publish(event WatchEvent) {
 	}
 }
 
-func cloneSessionSummary(summary *domain.SessionSummary) *domain.SessionSummary {
+func cloneSandboxSummary(summary *domain.SandboxSummary) *domain.SandboxSummary {
 	if summary == nil {
 		return nil
 	}
 	cloned := *summary
 	if len(summary.Tags) > 0 {
-		cloned.Tags = append([]domain.SessionTag(nil), summary.Tags...)
+		cloned.Tags = append([]domain.SandboxTag(nil), summary.Tags...)
 	}
 	return &cloned
 }
@@ -158,15 +158,15 @@ func cloneNotebookCell(cell *domain.NotebookCell) *domain.NotebookCell {
 	cloned := *cell
 	if cell.AgentResume != nil {
 		resume := *cell.AgentResume
-		if len(cell.AgentResume.SessionJSONLPaths) > 0 {
-			resume.SessionJSONLPaths = append([]string(nil), cell.AgentResume.SessionJSONLPaths...)
+		if len(cell.AgentResume.ProviderLogPaths) > 0 {
+			resume.ProviderLogPaths = append([]string(nil), cell.AgentResume.ProviderLogPaths...)
 		}
 		cloned.AgentResume = &resume
 	}
 	return &cloned
 }
 
-func cloneSessionEvent(event *domain.SessionEvent) *domain.SessionEvent {
+func cloneSandboxEvent(event *domain.SandboxEvent) *domain.SandboxEvent {
 	if event == nil {
 		return nil
 	}

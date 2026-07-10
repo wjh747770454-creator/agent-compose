@@ -26,53 +26,55 @@ import (
 )
 
 type LoaderVolumeResolver interface {
-	ResolveMounts(ctx context.Context, specs []domain.VolumeMountSpec, options volumes.ResolveOptions) ([]domain.SessionVolumeMount, []string, error)
+	ResolveMounts(ctx context.Context, specs []domain.VolumeMountSpec, options volumes.ResolveOptions) ([]domain.SandboxVolumeMount, []string, error)
 }
 
-type LoaderSessionRunner struct {
+type LoaderSandboxRunner struct {
 	Config    *appconfig.Config
 	Store     *sessionstore.Store
 	ConfigDB  *configstore.ConfigStore
-	Driver    sessions.SessionDriver
+	Driver    sessions.SandboxDriver
 	Cap       capabilities.Provider
 	Volumes   LoaderVolumeResolver
 	Streams   *sessions.StreamBroker
 	Publisher loaders.ControllerPublisher
+	CapTokens *CapabilitySandboxResolver
 }
 
-func NewLoaderSessionRunner(config *appconfig.Config, store *sessionstore.Store, configDB *configstore.ConfigStore, driver sessions.SessionDriver, cap capabilities.Provider, volumeResolver LoaderVolumeResolver, streams *sessions.StreamBroker, publisher loaders.ControllerPublisher) *LoaderSessionRunner {
-	return &LoaderSessionRunner{Config: config, Store: store, ConfigDB: configDB, Driver: driver, Cap: cap, Volumes: volumeResolver, Streams: streams, Publisher: publisher}
+func NewLoaderSandboxRunner(config *appconfig.Config, store *sessionstore.Store, configDB *configstore.ConfigStore, driver sessions.SandboxDriver, cap capabilities.Provider, volumeResolver LoaderVolumeResolver, streams *sessions.StreamBroker, publisher loaders.ControllerPublisher, capTokens *CapabilitySandboxResolver) *LoaderSandboxRunner {
+	return &LoaderSandboxRunner{Config: config, Store: store, ConfigDB: configDB, Driver: driver, Cap: cap, Volumes: volumeResolver, Streams: streams, Publisher: publisher, CapTokens: capTokens}
 }
 
-func (r *LoaderSessionRunner) Shutdown(ctx context.Context, sessionID string) error {
+func (r *LoaderSandboxRunner) Shutdown(ctx context.Context, sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return nil
 	}
 	stopCtx := context.WithoutCancel(ctx)
-	session, err := r.Store.GetSession(stopCtx, sessionID)
+	session, err := r.Store.GetSandbox(stopCtx, sessionID)
 	if err != nil {
 		return err
 	}
 	if session.Summary.VMStatus != domain.VMStatusRunning {
 		return nil
 	}
-	if err := r.Driver.StopSessionVM(stopCtx, session); err != nil {
+	if err := r.Driver.StopSandboxVM(stopCtx, session); err != nil {
 		return err
 	}
 	session.Summary.VMStatus = domain.VMStatusStopped
-	if err := r.Store.UpdateSession(stopCtx, session); err != nil {
+	if err := r.Store.UpdateSandbox(stopCtx, session); err != nil {
 		return err
 	}
 	if r.Streams != nil {
-		r.Streams.PublishSessionUpdated(&session.Summary)
+		r.Streams.PublishSandboxUpdated(&session.Summary)
 	}
-	event := domain.SessionEvent{ID: uuid.NewString(), Type: "session.stopped", Level: "info", Message: "session stopped", CreatedAt: time.Now().UTC()}
+	event := domain.SandboxEvent{ID: uuid.NewString(), Type: "sandbox.stopped", Level: "info", Message: "sandbox stopped", CreatedAt: time.Now().UTC()}
 	_ = r.Store.AddEvent(stopCtx, session.Summary.ID, event)
 	if r.Streams != nil {
 		r.Streams.PublishEventAdded(session.Summary.ID, event)
 	}
-	loaded, err := r.Store.GetSession(stopCtx, session.Summary.ID)
+	r.revokeCapabilitySandbox(session.Summary.ID)
+	loaded, err := r.Store.GetSandbox(stopCtx, session.Summary.ID)
 	if err != nil {
 		return err
 	}
@@ -80,26 +82,26 @@ func (r *LoaderSessionRunner) Shutdown(ctx context.Context, sessionID string) er
 	return nil
 }
 
-func (r *LoaderSessionRunner) Ensure(ctx context.Context, loader domain.Loader, request domain.LoaderAgentRequest, titleOverridesSession bool) (*domain.Session, string, error) {
+func (r *LoaderSandboxRunner) Ensure(ctx context.Context, loader domain.Loader, request domain.LoaderAgentRequest, titleOverridesSession bool) (*domain.Sandbox, string, error) {
 	agentDefinition, err := r.ResolveLoaderAgentDefinition(ctx, loader)
 	if err != nil {
 		return nil, "", err
 	}
-	effectivePolicy := domain.NormalizeLoaderSessionPolicy(loader.Summary.SessionPolicy)
-	if strings.TrimSpace(request.SessionPolicy) != "" {
-		effectivePolicy = domain.NormalizeLoaderSessionPolicy(request.SessionPolicy)
+	effectivePolicy := domain.NormalizeLoaderSandboxPolicy(loader.Summary.SandboxPolicy)
+	if strings.TrimSpace(domain.LoaderAgentSandboxPolicy(request)) != "" {
+		effectivePolicy = domain.NormalizeLoaderSandboxPolicy(domain.LoaderAgentSandboxPolicy(request))
 	}
 	hasOverrides := loaders.AgentRequestOverridesSession(request, titleOverridesSession)
-	forceNew := effectivePolicy == domain.LoaderSessionPolicyNew || hasOverrides
+	forceNew := effectivePolicy == domain.LoaderSandboxPolicyNew || hasOverrides
 	if !forceNew {
 		if binding, ok, err := r.ConfigDB.GetLoaderBinding(ctx, loader.Summary.ID); err != nil {
 			return nil, "", err
 		} else if ok {
-			session, eventType, err := r.LoadOrResume(ctx, binding.SessionID)
+			session, eventType, err := r.LoadOrResume(ctx, binding.SandboxID)
 			if err == nil {
 				return session, eventType, nil
 			}
-			slog.Warn("failed to reuse loader sticky session, creating a new one", "loader_id", loader.Summary.ID, "session_id", binding.SessionID, "error", err)
+			slog.Warn("failed to reuse loader sticky sandbox, creating a new one", "loader_id", loader.Summary.ID, "sandbox_id", binding.SandboxID, "error", err)
 		}
 	}
 
@@ -111,12 +113,12 @@ func (r *LoaderSessionRunner) Ensure(ctx context.Context, loader domain.Loader, 
 		envItems = domain.MergeEnvItems(envItems, agentDefinition.EnvItems)
 	}
 	envItems = domain.MergeEnvItems(envItems, loader.EnvItems)
-	envItems = domain.MergeEnvItems(envItems, request.SessionEnv)
+	envItems = domain.MergeEnvItems(envItems, domain.LoaderAgentSandboxEnv(request))
 	providerEnvItems := envItems
 	envItems = llms.FilterPersistedRuntimeEnv(envItems)
-	capabilityVars, capabilityTags := capabilities.BuildGatewaySessionVars(capabilities.ProxyTarget(r.Cap), loader.Summary.CapsetIDs)
+	capabilityVars, capabilityTags := capabilities.BuildGatewaySandboxVars(capabilities.ProxyTarget(r.Cap), loader.Summary.CapsetIDs)
 	envItems = domain.MergeEnvItems(envItems, capabilityVars)
-	tags := []domain.SessionTag{{Name: "origin", Value: "loader"}, {Name: "loader_id", Value: loader.Summary.ID}, {Name: "loader_name", Value: loader.Summary.Name}}
+	tags := []domain.SandboxTag{{Name: "origin", Value: "loader"}, {Name: "loader_id", Value: loader.Summary.ID}, {Name: "loader_name", Value: loader.Summary.Name}}
 	tags = append(tags, capabilityTags...)
 
 	workspaceID := r.workspaceID(loader, request, agentDefinition)
@@ -137,7 +139,7 @@ func (r *LoaderSessionRunner) Ensure(ctx context.Context, loader domain.Loader, 
 	if err != nil {
 		return nil, "", err
 	}
-	session, err := r.Store.CreateSessionWithOptions(ctx, title, "", driver, guestImage, workspaceID, domain.SessionTypeScript+":"+loader.Summary.ID, workspaceSnapshot, envItems, tags, sessionstore.CreateSessionOptions{
+	session, err := r.Store.CreateSandboxWithOptions(ctx, title, "", driver, guestImage, workspaceID, domain.SandboxTypeScript+":"+loader.Summary.ID, workspaceSnapshot, envItems, tags, sessionstore.CreateSandboxOptions{
 		JupyterEnabled: request.JupyterEnabled,
 		VolumeMounts:   volumeMounts,
 	})
@@ -147,59 +149,60 @@ func (r *LoaderSessionRunner) Ensure(ctx context.Context, loader domain.Loader, 
 	session.ProviderEnvItems = providerEnvItems
 	if request.PullPolicy != "" {
 		session.Summary.PullPolicy = request.PullPolicy
-		if err := r.Store.UpdateSession(ctx, session); err != nil {
-			return nil, "", fmt.Errorf("persist session pull policy: %w", err)
+		if err := r.Store.UpdateSandbox(ctx, session); err != nil {
+			return nil, "", fmt.Errorf("persist sandbox pull policy: %w", err)
 		}
 	}
 	r.recordVolumeWarnings(ctx, session.Summary.ID, volumeWarnings)
 	if err := workspaces.PrepareSessionWorkspace(ctx, r.Config, r.ConfigDB, session); err != nil {
 		session.Summary.VMStatus = domain.VMStatusFailed
-		_ = r.Store.UpdateSession(ctx, session)
+		_ = r.Store.UpdateSandbox(ctx, session)
 		return nil, "", err
 	}
 	writeCapabilityGuide(ctx, r.Cap, r.Store, r.Streams, session, loader.Summary.CapsetIDs)
-	if err := r.Driver.StartSessionVM(ctx, session); err != nil {
+	if err := r.Driver.StartSandboxVM(ctx, session); err != nil {
 		session.Summary.VMStatus = domain.VMStatusFailed
-		_ = r.Store.UpdateSession(ctx, session)
+		_ = r.Store.UpdateSandbox(ctx, session)
 		return nil, "", err
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := r.Store.UpdateSession(ctx, session); err != nil {
+	if err := r.Store.UpdateSandbox(ctx, session); err != nil {
 		return nil, "", err
 	}
 	if r.Streams != nil {
-		r.Streams.PublishSessionUpdated(&session.Summary)
+		r.Streams.PublishSandboxUpdated(&session.Summary)
 	}
-	event := domain.SessionEvent{ID: uuid.NewString(), Type: "session.created", Level: "info", Message: fmt.Sprintf("session started with %s driver using guest image %s", session.Summary.Driver, session.Summary.GuestImage), CreatedAt: time.Now().UTC()}
+	event := domain.SandboxEvent{ID: uuid.NewString(), Type: "sandbox.created", Level: "info", Message: fmt.Sprintf("sandbox started with %s driver using guest image %s", session.Summary.Driver, session.Summary.GuestImage), CreatedAt: time.Now().UTC()}
 	_ = r.Store.AddEvent(ctx, session.Summary.ID, event)
 	if r.Streams != nil {
 		r.Streams.PublishEventAdded(session.Summary.ID, event)
 	}
-	if effectivePolicy == domain.LoaderSessionPolicySticky {
-		_ = r.ConfigDB.UpsertLoaderBinding(ctx, domain.LoaderBinding{LoaderID: loader.Summary.ID, SessionID: session.Summary.ID})
+	if effectivePolicy == domain.LoaderSandboxPolicySticky {
+		_ = r.ConfigDB.UpsertLoaderBinding(ctx, domain.LoaderBinding{LoaderID: loader.Summary.ID, SandboxID: session.Summary.ID})
 	}
-	loaded, err := r.Store.GetSession(ctx, session.Summary.ID)
+	loaded, err := r.Store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		return nil, "", err
 	}
-	domain.RestoreSessionTransientFields(loaded, session)
+	domain.RestoreSandboxTransientFields(loaded, session)
+	r.indexCapabilitySandbox(loaded)
 	r.publish("agent-compose.session.created", map[string]any{
-		"sessionId":     loaded.Summary.ID,
+		"sandboxId":     loaded.Summary.ID,
 		"title":         loaded.Summary.Title,
 		"driver":        loaded.Summary.Driver,
 		"triggerSource": loaded.Summary.TriggerSource,
 		"source":        "loader",
 		"loaderId":      loader.Summary.ID,
 	})
-	return loaded, "loader.session.created", nil
+	return loaded, "loader.sandbox.created", nil
 }
 
-func (r *LoaderSessionRunner) Load(ctx context.Context, sessionID string) (*domain.Session, error) {
-	return r.Store.GetSession(ctx, sessionID)
+func (r *LoaderSandboxRunner) Load(ctx context.Context, sessionID string) (*domain.Sandbox, error) {
+	return r.Store.GetSandbox(ctx, sessionID)
 }
 
-func (r *LoaderSessionRunner) LoadOrResume(ctx context.Context, sessionID string) (*domain.Session, string, error) {
-	session, err := r.Store.GetSession(ctx, sessionID)
+func (r *LoaderSandboxRunner) LoadOrResume(ctx context.Context, sessionID string) (*domain.Sandbox, string, error) {
+	session, err := r.Store.GetSandbox(ctx, sessionID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -209,37 +212,50 @@ func (r *LoaderSessionRunner) LoadOrResume(ctx context.Context, sessionID string
 	if err := workspaces.PrepareSessionWorkspace(ctx, r.Config, r.ConfigDB, session); err != nil {
 		return nil, "", err
 	}
-	writeCapabilityGuide(ctx, r.Cap, r.Store, r.Streams, session, capabilities.SessionCapsets(session))
-	if err := r.Driver.StartSessionVM(ctx, session); err != nil {
+	writeCapabilityGuide(ctx, r.Cap, r.Store, r.Streams, session, capabilities.SandboxCapsets(session))
+	if err := r.Driver.StartSandboxVM(ctx, session); err != nil {
 		return nil, "", err
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := r.Store.UpdateSession(ctx, session); err != nil {
+	if err := r.Store.UpdateSandbox(ctx, session); err != nil {
 		return nil, "", err
 	}
 	if r.Streams != nil {
-		r.Streams.PublishSessionUpdated(&session.Summary)
+		r.Streams.PublishSandboxUpdated(&session.Summary)
 	}
-	event := domain.SessionEvent{ID: uuid.NewString(), Type: "session.resumed", Level: "info", Message: fmt.Sprintf("session resumed with %s driver using guest image %s", session.Summary.Driver, session.Summary.GuestImage), CreatedAt: time.Now().UTC()}
+	event := domain.SandboxEvent{ID: uuid.NewString(), Type: "sandbox.resumed", Level: "info", Message: fmt.Sprintf("sandbox resumed with %s driver using guest image %s", session.Summary.Driver, session.Summary.GuestImage), CreatedAt: time.Now().UTC()}
 	_ = r.Store.AddEvent(ctx, session.Summary.ID, event)
 	if r.Streams != nil {
 		r.Streams.PublishEventAdded(session.Summary.ID, event)
 	}
-	loaded, err := r.Store.GetSession(ctx, session.Summary.ID)
+	loaded, err := r.Store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		return nil, "", err
 	}
-	domain.RestoreSessionTransientFields(loaded, session)
+	domain.RestoreSandboxTransientFields(loaded, session)
+	r.indexCapabilitySandbox(loaded)
 	r.publish("agent-compose.session.resumed", map[string]any{
-		"sessionId": loaded.Summary.ID,
+		"sandboxId": loaded.Summary.ID,
 		"title":     loaded.Summary.Title,
 		"driver":    loaded.Summary.Driver,
 		"source":    "loader",
 	})
-	return loaded, "loader.session.resumed", nil
+	return loaded, "loader.sandbox.resumed", nil
 }
 
-func (r *LoaderSessionRunner) ResolveLoaderAgentDefinition(ctx context.Context, loader domain.Loader) (*domain.AgentDefinition, error) {
+func (r *LoaderSandboxRunner) indexCapabilitySandbox(session *domain.Sandbox) {
+	if r != nil && r.CapTokens != nil {
+		r.CapTokens.IndexSandbox(session)
+	}
+}
+
+func (r *LoaderSandboxRunner) revokeCapabilitySandbox(sandboxID string) {
+	if r != nil && r.CapTokens != nil {
+		r.CapTokens.RevokeSandbox(sandboxID)
+	}
+}
+
+func (r *LoaderSandboxRunner) ResolveLoaderAgentDefinition(ctx context.Context, loader domain.Loader) (*domain.AgentDefinition, error) {
 	agentID := strings.TrimSpace(loader.Summary.AgentID)
 	if agentID == "" {
 		return nil, nil
@@ -254,7 +270,7 @@ func (r *LoaderSessionRunner) ResolveLoaderAgentDefinition(ctx context.Context, 
 	return &agent, nil
 }
 
-func (r *LoaderSessionRunner) workspaceID(loader domain.Loader, request domain.LoaderAgentRequest, agentDefinition *domain.AgentDefinition) string {
+func (r *LoaderSandboxRunner) workspaceID(loader domain.Loader, request domain.LoaderAgentRequest, agentDefinition *domain.AgentDefinition) string {
 	workspaceID := firstNonEmpty(strings.TrimSpace(request.WorkspaceID), strings.TrimSpace(loader.Summary.WorkspaceID))
 	if agentDefinition != nil {
 		workspaceID = firstNonEmpty(strings.TrimSpace(request.WorkspaceID), strings.TrimSpace(loader.Summary.WorkspaceID), strings.TrimSpace(agentDefinition.WorkspaceID))
@@ -262,7 +278,7 @@ func (r *LoaderSessionRunner) workspaceID(loader domain.Loader, request domain.L
 	return workspaceID
 }
 
-func (r *LoaderSessionRunner) workspaceSnapshot(ctx context.Context, workspaceID string) (*domain.SessionWorkspace, error) {
+func (r *LoaderSandboxRunner) workspaceSnapshot(ctx context.Context, workspaceID string) (*domain.SandboxWorkspace, error) {
 	if workspaceID == "" {
 		return nil, nil
 	}
@@ -270,26 +286,26 @@ func (r *LoaderSessionRunner) workspaceSnapshot(ctx context.Context, workspaceID
 	if err != nil {
 		return nil, err
 	}
-	return toSessionWorkspaceSnapshot(workspaceConfig), nil
+	return toSandboxWorkspaceSnapshot(workspaceConfig), nil
 }
 
-func (r *LoaderSessionRunner) driver(request domain.LoaderAgentRequest, loader domain.Loader, agentDefinition *domain.AgentDefinition) (string, error) {
+func (r *LoaderSandboxRunner) driver(request domain.LoaderAgentRequest, loader domain.Loader, agentDefinition *domain.AgentDefinition) (string, error) {
 	driverValue := firstNonEmpty(strings.TrimSpace(request.Driver), strings.TrimSpace(loader.Summary.Driver))
 	if agentDefinition != nil {
 		driverValue = firstNonEmpty(strings.TrimSpace(request.Driver), strings.TrimSpace(loader.Summary.Driver), strings.TrimSpace(agentDefinition.Driver))
 	}
-	return driverpkg.ResolveSessionRuntimeDriver(driverValue, r.Config.RuntimeDriver)
+	return driverpkg.ResolveSandboxRuntimeDriver(driverValue, r.Config.RuntimeDriver)
 }
 
-func (r *LoaderSessionRunner) guestImage(request domain.LoaderAgentRequest, loader domain.Loader, agentDefinition *domain.AgentDefinition, driver string) string {
+func (r *LoaderSandboxRunner) guestImage(request domain.LoaderAgentRequest, loader domain.Loader, agentDefinition *domain.AgentDefinition, driver string) string {
 	agentGuestImage := ""
 	if agentDefinition != nil {
 		agentGuestImage = agentDefinition.GuestImage
 	}
-	return driverpkg.ResolveSessionGuestImage(request.GuestImage, loader.Summary.GuestImage, agentGuestImage, driverpkg.DefaultGuestImageForDriver(r.Config, driver))
+	return driverpkg.ResolveSandboxGuestImage(request.GuestImage, loader.Summary.GuestImage, agentGuestImage, driverpkg.DefaultGuestImageForDriver(r.Config, driver))
 }
 
-func (r *LoaderSessionRunner) resolveVolumeMounts(ctx context.Context, loader domain.Loader, request domain.LoaderAgentRequest, agentDefinition *domain.AgentDefinition) ([]domain.SessionVolumeMount, []string, error) {
+func (r *LoaderSandboxRunner) resolveVolumeMounts(ctx context.Context, loader domain.Loader, request domain.LoaderAgentRequest, agentDefinition *domain.AgentDefinition) ([]domain.SandboxVolumeMount, []string, error) {
 	specs, err := mergeLoaderVolumeMountSpecs(agentDefinitionVolumes(agentDefinition), loader.Volumes, request.Volumes)
 	if err != nil {
 		return nil, nil, err
@@ -314,7 +330,7 @@ func (r *LoaderSessionRunner) resolveVolumeMounts(ctx context.Context, loader do
 	})
 }
 
-func (r *LoaderSessionRunner) loaderProjectVolumes(ctx context.Context, loader domain.Loader) (map[string]domain.VolumeRecord, error) {
+func (r *LoaderSandboxRunner) loaderProjectVolumes(ctx context.Context, loader domain.Loader) (map[string]domain.VolumeRecord, error) {
 	projectID := strings.TrimSpace(loader.Summary.ManagedProjectID)
 	if projectID == "" {
 		return nil, nil
@@ -329,7 +345,7 @@ func (r *LoaderSessionRunner) loaderProjectVolumes(ctx context.Context, loader d
 	return projectVolumes, nil
 }
 
-func (r *LoaderSessionRunner) loaderProjectRoot(ctx context.Context, loader domain.Loader) (string, error) {
+func (r *LoaderSandboxRunner) loaderProjectRoot(ctx context.Context, loader domain.Loader) (string, error) {
 	projectID := strings.TrimSpace(loader.Summary.ManagedProjectID)
 	if projectID == "" {
 		return "", nil
@@ -384,12 +400,12 @@ func agentDefinitionVolumes(agentDefinition *domain.AgentDefinition) []domain.Vo
 	return agentDefinition.Volumes
 }
 
-func (r *LoaderSessionRunner) recordVolumeWarnings(ctx context.Context, sessionID string, warnings []string) {
+func (r *LoaderSandboxRunner) recordVolumeWarnings(ctx context.Context, sessionID string, warnings []string) {
 	if r == nil || r.Store == nil || len(warnings) == 0 {
 		return
 	}
 	for _, warning := range warnings {
-		event := domain.SessionEvent{ID: uuid.NewString(), Type: "session.volume.warning", Level: "warn", Message: warning, CreatedAt: time.Now().UTC()}
+		event := domain.SandboxEvent{ID: uuid.NewString(), Type: "sandbox.volume.warning", Level: "warn", Message: warning, CreatedAt: time.Now().UTC()}
 		_ = r.Store.AddEvent(ctx, sessionID, event)
 		if r.Streams != nil {
 			r.Streams.PublishEventAdded(sessionID, event)
@@ -397,7 +413,7 @@ func (r *LoaderSessionRunner) recordVolumeWarnings(ctx context.Context, sessionI
 	}
 }
 
-func (r *LoaderSessionRunner) publish(topic string, payload map[string]any) {
+func (r *LoaderSandboxRunner) publish(topic string, payload map[string]any) {
 	if r.Publisher != nil {
 		_ = r.Publisher.Publish(domain.LoaderTopicEvent{
 			Topic:     strings.TrimSpace(topic),

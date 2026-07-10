@@ -115,10 +115,10 @@ func TestAppRunControllerHelperCoverage(t *testing.T) {
 		TriggerId:        "trigger-1",
 		ClientRequestId:  "request-1",
 		Env:              []*agentcomposev2.EnvVarSpec{{Name: "A", Value: "B"}},
-		SessionId:        "session-1",
+		SandboxId:        "session-1",
 		Driver:           "docker",
 		OutputSchemaJson: `{"type":"object"}`,
-		CleanupPolicy:    agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING,
+		CleanupPolicy:    agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING,
 		Jupyter:          &agentcomposev2.RunJupyterSpec{Enabled: true},
 	}
 	req := runAgentRequestFromProto(msg)
@@ -153,34 +153,34 @@ func TestAppRunControllerHelperCoverage(t *testing.T) {
 	}
 }
 
-func TestStopProjectSessionCoverage(t *testing.T) {
+func TestStopProjectSandboxCoverage(t *testing.T) {
 	ctx := context.Background()
-	if err := stopProjectSession(ctx, nil, nil, nil, nil); err != nil {
-		t.Fatalf("stopProjectSession nil session err=%v", err)
+	if err := stopProjectSandbox(ctx, nil, nil, nil, nil); err != nil {
+		t.Fatalf("stopProjectSandbox nil sandbox err=%v", err)
 	}
-	session := &domain.Session{Summary: domain.SessionSummary{ID: "session-1"}}
-	if err := stopProjectSession(ctx, nil, nil, nil, session); err == nil {
-		t.Fatalf("stopProjectSession nil store returned nil error")
+	session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-1"}}
+	if err := stopProjectSandbox(ctx, nil, nil, nil, session); err == nil {
+		t.Fatalf("stopProjectSandbox nil store returned nil error")
 	}
-	store := &projectSessionStoreFake{session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusStopped}}}
-	if err := stopProjectSession(ctx, store, nil, nil, session); err != nil || store.updated {
-		t.Fatalf("stopProjectSession stopped err=%v updated=%v", err, store.updated)
+	store := &projectSessionStoreFake{session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-1", VMStatus: domain.VMStatusStopped}}}
+	if err := stopProjectSandbox(ctx, store, nil, nil, session); err != nil || store.updated {
+		t.Fatalf("stopProjectSandbox stopped err=%v updated=%v", err, store.updated)
 	}
 	store.session.Summary.VMStatus = domain.VMStatusRunning
-	if err := stopProjectSession(ctx, store, nil, nil, session); err == nil {
-		t.Fatalf("stopProjectSession nil driver returned nil error")
+	if err := stopProjectSandbox(ctx, store, nil, nil, session); err == nil {
+		t.Fatalf("stopProjectSandbox nil driver returned nil error")
 	}
-	driver := &projectSessionDriverFake{err: errors.New("stop failed")}
-	if err := stopProjectSession(ctx, store, driver, nil, session); err == nil {
-		t.Fatalf("stopProjectSession driver error returned nil error")
+	driver := &projectSandboxDriverFake{err: errors.New("stop failed")}
+	if err := stopProjectSandbox(ctx, store, driver, nil, session); err == nil {
+		t.Fatalf("stopProjectSandbox driver error returned nil error")
 	}
 	driver.err = nil
 	streams := &projectSessionStreamsFake{}
-	if err := stopProjectSession(ctx, store, driver, streams, session); err != nil {
-		t.Fatalf("stopProjectSession running err=%v", err)
+	if err := stopProjectSandbox(ctx, store, driver, streams, session); err != nil {
+		t.Fatalf("stopProjectSandbox running err=%v", err)
 	}
 	if !store.updated || store.session.Summary.VMStatus != domain.VMStatusStopped || len(store.events) != 1 || streams.updated == 0 || streams.events == 0 {
-		t.Fatalf("stopProjectSession store=%#v streams=%#v", store, streams)
+		t.Fatalf("stopProjectSandbox store=%#v streams=%#v", store, streams)
 	}
 }
 
@@ -213,7 +213,7 @@ func TestReserveLoaderEventQueueSlotsCoverage(t *testing.T) {
 func TestIntegrationAppControllerHelperCoverage(t *testing.T) {
 	TestAppProjectControllerHelperCoverage(t)
 	TestAppRunControllerHelperCoverage(t)
-	TestStopProjectSessionCoverage(t)
+	TestStopProjectSandboxCoverage(t)
 	TestReserveLoaderEventQueueSlotsCoverage(t)
 }
 
@@ -222,12 +222,12 @@ func TestE2EAppControllerHelperCoverage(t *testing.T) {
 }
 
 type projectSessionStoreFake struct {
-	session *domain.Session
+	session *domain.Sandbox
 	updated bool
-	events  []domain.SessionEvent
+	events  []domain.SandboxEvent
 }
 
-func (s *projectSessionStoreFake) GetSession(context.Context, string) (*domain.Session, error) {
+func (s *projectSessionStoreFake) GetSandbox(context.Context, string) (*domain.Sandbox, error) {
 	if s.session == nil {
 		return nil, sql.ErrNoRows
 	}
@@ -235,23 +235,23 @@ func (s *projectSessionStoreFake) GetSession(context.Context, string) (*domain.S
 	return &copy, nil
 }
 
-func (s *projectSessionStoreFake) UpdateSession(_ context.Context, session *domain.Session) error {
+func (s *projectSessionStoreFake) UpdateSandbox(_ context.Context, session *domain.Sandbox) error {
 	s.updated = true
 	copy := *session
 	s.session = &copy
 	return nil
 }
 
-func (s *projectSessionStoreFake) AddEvent(_ context.Context, _ string, event domain.SessionEvent) error {
+func (s *projectSessionStoreFake) AddEvent(_ context.Context, _ string, event domain.SandboxEvent) error {
 	s.events = append(s.events, event)
 	return nil
 }
 
-type projectSessionDriverFake struct {
+type projectSandboxDriverFake struct {
 	err error
 }
 
-func (d *projectSessionDriverFake) StopSessionVM(context.Context, *domain.Session) error {
+func (d *projectSandboxDriverFake) StopSandboxVM(context.Context, *domain.Sandbox) error {
 	return d.err
 }
 
@@ -260,15 +260,15 @@ type projectSessionStreamsFake struct {
 	events  int
 }
 
-func (s *projectSessionStreamsFake) PublishSessionUpdated(*domain.SessionSummary) {
+func (s *projectSessionStreamsFake) PublishSandboxUpdated(*domain.SandboxSummary) {
 	s.updated++
 }
 
-func (s *projectSessionStreamsFake) PublishEventAdded(string, domain.SessionEvent) {
+func (s *projectSessionStreamsFake) PublishEventAdded(string, domain.SandboxEvent) {
 	s.events++
 }
 
-var _ projectSessionStore = (*projectSessionStoreFake)(nil)
-var _ projectSessionDriver = (*projectSessionDriverFake)(nil)
-var _ projectSessionStreams = (*projectSessionStreamsFake)(nil)
+var _ projectSandboxStore = (*projectSessionStoreFake)(nil)
+var _ projectSandboxDriver = (*projectSandboxDriverFake)(nil)
+var _ projectSandboxStreams = (*projectSessionStreamsFake)(nil)
 var _ = agentcomposev1.SessionResponse{}

@@ -36,15 +36,15 @@ const (
 )
 
 type (
-	SessionTag         = domain.SessionTag
-	SessionEnvVar      = domain.SessionEnvVar
-	SessionSummary     = domain.SessionSummary
-	SessionListOptions = domain.SessionListOptions
-	SessionListResult  = domain.SessionListResult
-	SessionWorkspace   = domain.SessionWorkspace
-	Session            = domain.Session
+	SandboxTag         = domain.SandboxTag
+	SandboxEnvVar      = domain.SandboxEnvVar
+	SandboxSummary     = domain.SandboxSummary
+	SandboxListOptions = domain.SandboxListOptions
+	SandboxListResult  = domain.SandboxListResult
+	SandboxWorkspace   = domain.SandboxWorkspace
+	Sandbox            = domain.Sandbox
 	NotebookCell       = domain.NotebookCell
-	SessionEvent       = domain.SessionEvent
+	SandboxEvent       = domain.SandboxEvent
 	AgentRun           = domain.AgentRun
 	VMState            = domain.VMState
 	ProxyState         = domain.ProxyState
@@ -52,7 +52,7 @@ type (
 
 type Store struct {
 	config       *appconfig.Config
-	sessionLocks sync.Map
+	sandboxLocks sync.Map
 }
 
 func NewStore(di do.Injector) (*Store, error) {
@@ -61,8 +61,8 @@ func NewStore(di do.Injector) (*Store, error) {
 }
 
 func NewWithConfig(config *appconfig.Config) (*Store, error) {
-	if err := os.MkdirAll(config.SessionRoot, 0o755); err != nil {
-		return nil, fmt.Errorf("create session root: %w", err)
+	if err := os.MkdirAll(config.SandboxRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("create sandbox root: %w", err)
 	}
 	return &Store{config: config}, nil
 }
@@ -71,7 +71,7 @@ func FromConfig(config *appconfig.Config) *Store {
 	return &Store{config: config}
 }
 
-func cloneSessionWorkspace(item *SessionWorkspace) *SessionWorkspace {
+func cloneSandboxWorkspace(item *SandboxWorkspace) *SandboxWorkspace {
 	if item == nil {
 		return nil
 	}
@@ -79,52 +79,52 @@ func cloneSessionWorkspace(item *SessionWorkspace) *SessionWorkspace {
 	return &copy
 }
 
-type CreateSessionOptions struct {
+type CreateSandboxOptions struct {
 	JupyterEnabled   bool
 	JupyterGuestPort int
 	JupyterExpose    bool
-	VolumeMounts     []domain.SessionVolumeMount
+	VolumeMounts     []domain.SandboxVolumeMount
 }
 
-func (s *Store) CreateSession(ctx context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SessionWorkspace, envItems []SessionEnvVar, tags []SessionTag) (*Session, error) {
-	return s.CreateSessionWithOptions(ctx, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource, workspace, envItems, tags, CreateSessionOptions{})
+func (s *Store) CreateSandbox(ctx context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SandboxWorkspace, envItems []SandboxEnvVar, tags []SandboxTag) (*Sandbox, error) {
+	return s.CreateSandboxWithOptions(ctx, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource, workspace, envItems, tags, CreateSandboxOptions{})
 }
 
-func (s *Store) CreateSessionWithOptions(_ context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SessionWorkspace, envItems []SessionEnvVar, tags []SessionTag, options CreateSessionOptions) (*Session, error) {
+func (s *Store) CreateSandboxWithOptions(_ context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SandboxWorkspace, envItems []SandboxEnvVar, tags []SandboxTag, options CreateSandboxOptions) (*Sandbox, error) {
 	now := time.Now().UTC()
 	id := identity.NewRandomID(identity.ResourceSandbox)
 	shortID := identity.ShortID(id)
-	sessionDir := s.sessionDir(id)
-	workspaceDir := filepath.Join(sessionDir, "workspace")
+	sandboxDir := s.sandboxDir(id)
+	workspaceDir := filepath.Join(sandboxDir, "workspace")
 	proxyPath := strings.TrimRight(s.config.JupyterProxyBasePath, "/") + "/" + id + "/lab"
-	driver, err := driverpkg.ResolveSessionRuntimeDriver(driver, s.config.RuntimeDriver)
+	driver, err := driverpkg.ResolveSandboxRuntimeDriver(driver, s.config.RuntimeDriver)
 	if err != nil {
 		return nil, err
 	}
-	guestImage = driverpkg.ResolveSessionGuestImage(guestImage, "", driverpkg.DefaultGuestImageForDriver(s.config, driver))
+	guestImage = driverpkg.ResolveSandboxGuestImage(guestImage, "", driverpkg.DefaultGuestImageForDriver(s.config, driver))
 
 	for _, dir := range []string{
-		sessionDir,
-		filepath.Join(sessionDir, "context"),
-		filepath.Join(sessionDir, "home"),
-		filepath.Join(sessionDir, "runtime"),
-		filepath.Join(sessionDir, "workspace"),
-		filepath.Join(sessionDir, "state"),
-		filepath.Join(sessionDir, "logs"),
-		filepath.Join(sessionDir, "vm"),
-		filepath.Join(sessionDir, "proxy"),
+		sandboxDir,
+		filepath.Join(sandboxDir, "context"),
+		filepath.Join(sandboxDir, "home"),
+		filepath.Join(sandboxDir, "runtime"),
+		filepath.Join(sandboxDir, "workspace"),
+		filepath.Join(sandboxDir, "state"),
+		filepath.Join(sandboxDir, "logs"),
+		filepath.Join(sandboxDir, "vm"),
+		filepath.Join(sandboxDir, "proxy"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("create session dir %s: %w", dir, err)
+			return nil, fmt.Errorf("create sandbox dir %s: %w", dir, err)
 		}
 	}
 
-	session := &Session{
-		Summary: SessionSummary{
+	session := &Sandbox{
+		Summary: SandboxSummary{
 			ID:            id,
 			ShortID:       shortID,
 			Title:         strings.TrimSpace(title),
-			TriggerSource: domain.NormalizeSessionTriggerSource(triggerSource, tags),
+			TriggerSource: domain.NormalizeSandboxTriggerSource(triggerSource, tags),
 			Driver:        driver,
 			VMStatus:      VMStatusPending,
 			GuestImage:    guestImage,
@@ -133,17 +133,17 @@ func (s *Store) CreateSessionWithOptions(_ context.Context, title, baseWorkspace
 			ProxyPath:     proxyPath,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-			Tags:          append([]SessionTag(nil), tags...),
+			Tags:          append([]SandboxTag(nil), tags...),
 		},
 		BaseWorkspace: strings.TrimSpace(baseWorkspace),
 		WorkspaceID:   strings.TrimSpace(workspaceID),
-		Workspace:     cloneSessionWorkspace(workspace),
-		EnvItems:      append([]SessionEnvVar(nil), envItems...),
-		VolumeMounts:  domain.NormalizeSessionVolumeMounts(options.VolumeMounts),
+		Workspace:     cloneSandboxWorkspace(workspace),
+		EnvItems:      append([]SandboxEnvVar(nil), envItems...),
+		VolumeMounts:  domain.NormalizeSandboxVolumeMounts(options.VolumeMounts),
 	}
 
 	if session.Summary.Title == "" {
-		session.Summary.Title = "agent-compose Session " + now.Format("2006-01-02 15:04")
+		session.Summary.Title = "agent-compose Sandbox " + now.Format("2006-01-02 15:04")
 	}
 
 	vmState := VMState{
@@ -182,7 +182,7 @@ func (s *Store) CreateSessionWithOptions(_ context.Context, title, baseWorkspace
 	if err := s.SaveProxyState(session.Summary.ID, proxyState); err != nil {
 		return nil, err
 	}
-	if err := s.saveSession(session); err != nil {
+	if err := s.saveSandbox(session); err != nil {
 		return nil, err
 	}
 	if err := s.saveCells(id, nil); err != nil {
@@ -195,31 +195,31 @@ func (s *Store) CreateSessionWithOptions(_ context.Context, title, baseWorkspace
 	return session, nil
 }
 
-func (s *Store) GetSession(_ context.Context, id string) (*Session, error) {
-	session, err := s.loadSession(strings.TrimSpace(id))
+func (s *Store) GetSandbox(_ context.Context, id string) (*Sandbox, error) {
+	session, err := s.loadSandbox(strings.TrimSpace(id))
 	if err != nil {
 		return nil, err
 	}
-	s.hydrateSessionGuestImage(session)
+	s.hydrateSandboxGuestImage(session)
 	return session, nil
 }
 
-func (s *Store) ListSessions(_ context.Context, options SessionListOptions) (SessionListResult, error) {
-	entries, err := os.ReadDir(s.config.SessionRoot)
+func (s *Store) ListSandboxes(_ context.Context, options SandboxListOptions) (SandboxListResult, error) {
+	entries, err := os.ReadDir(s.config.SandboxRoot)
 	if err != nil {
-		return SessionListResult{}, fmt.Errorf("read session root: %w", err)
+		return SandboxListResult{}, fmt.Errorf("read sandbox root: %w", err)
 	}
-	var sessions []*Session
+	var sessions []*Sandbox
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		session, err := s.loadSession(entry.Name())
+		session, err := s.loadSandbox(entry.Name())
 		if err != nil {
 			continue
 		}
-		s.hydrateSessionGuestImage(session)
-		if !domain.SessionMatchesListOptions(session, options) {
+		s.hydrateSandboxGuestImage(session)
+		if !domain.SandboxMatchesListOptions(session, options) {
 			continue
 		}
 		sessions = append(sessions, session)
@@ -228,10 +228,10 @@ func (s *Store) ListSessions(_ context.Context, options SessionListOptions) (Ses
 		return sessions[i].Summary.UpdatedAt.After(sessions[j].Summary.UpdatedAt)
 	})
 	totalCount := len(sessions)
-	offset, limit := domain.NormalizeSessionListBounds(options.Offset, options.Limit)
-	page := domain.PaginateSessions(sessions, offset, limit)
-	result := SessionListResult{
-		Sessions:   page,
+	offset, limit := domain.NormalizeSandboxListBounds(options.Offset, options.Limit)
+	page := domain.PaginateSandboxes(sessions, offset, limit)
+	result := SandboxListResult{
+		Sandboxes:  page,
 		TotalCount: totalCount,
 		HasMore:    offset+len(page) < totalCount,
 		NextOffset: offset + len(page),
@@ -242,38 +242,38 @@ func (s *Store) ListSessions(_ context.Context, options SessionListOptions) (Ses
 	return result, nil
 }
 
-func (s *Store) UpdateSession(_ context.Context, session *Session) error {
-	s.hydrateSessionGuestImage(session)
+func (s *Store) UpdateSandbox(_ context.Context, session *Sandbox) error {
+	s.hydrateSandboxGuestImage(session)
 	session.Summary.UpdatedAt = time.Now().UTC()
-	unlock := s.lockSession(session.Summary.ID)
+	unlock := s.lockSandbox(session.Summary.ID)
 	defer unlock()
-	return s.saveSessionPreservingCounts(session)
+	return s.saveSandboxPreservingCounts(session)
 }
 
-func (s *Store) RemoveSession(_ context.Context, id string) error {
+func (s *Store) RemoveSandbox(_ context.Context, id string) error {
 	id = strings.TrimSpace(id)
-	if err := validateSessionIDForRemove(id); err != nil {
+	if err := validateSandboxIDForRemove(id); err != nil {
 		return err
 	}
-	path := s.sessionDir(id)
+	path := s.sandboxDir(id)
 	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("stat session dir %s: %w", id, err)
+		return fmt.Errorf("stat sandbox dir %s: %w", id, err)
 	}
 
-	unlock := s.lockSession(id)
+	unlock := s.lockSandbox(id)
 	defer unlock()
 
 	if err := driverpkg.CleanupBoxliteVolumeBridgeMounts(path); err != nil {
 		return fmt.Errorf("cleanup session mounts %s: %w", id, err)
 	}
 	if err := os.RemoveAll(path); err != nil {
-		return fmt.Errorf("remove session dir %s: %w", id, err)
+		return fmt.Errorf("remove sandbox dir %s: %w", id, err)
 	}
-	s.sessionLocks.Delete(sessionLockKey(id))
+	s.sandboxLocks.Delete(sandboxLockKey(id))
 	return nil
 }
 
-func (s *Store) AddCell(_ context.Context, session *Session, cell NotebookCell) error {
+func (s *Store) AddCell(_ context.Context, session *Sandbox, cell NotebookCell) error {
 	cells, err := s.loadCells(session.Summary.ID)
 	if err != nil {
 		return err
@@ -300,7 +300,7 @@ func (s *Store) AddCell(_ context.Context, session *Session, cell NotebookCell) 
 		return err
 	}
 	session.Summary.CellCount = len(timelineCells)
-	return s.UpdateSession(context.Background(), session)
+	return s.UpdateSandbox(context.Background(), session)
 }
 
 func (s *Store) ListCells(_ context.Context, id string) ([]NotebookCell, error) {
@@ -309,38 +309,38 @@ func (s *Store) ListCells(_ context.Context, id string) ([]NotebookCell, error) 
 
 func (s *Store) AddAgentRun(_ context.Context, sessionID string, run AgentRun) error {
 	cell := NotebookCell{
-		ID:             run.ID,
-		Type:           CellTypeAgent,
-		Source:         run.Message,
-		Output:         run.Output,
-		ExitCode:       run.ExitCode,
-		Success:        run.Success,
-		Running:        run.Running,
-		CreatedAt:      run.CreatedAt,
-		Agent:          run.Agent,
-		AgentSessionID: run.AgentSessionID,
-		StopReason:     run.StopReason,
+		ID:            run.ID,
+		Type:          CellTypeAgent,
+		Source:        run.Message,
+		Output:        run.Output,
+		ExitCode:      run.ExitCode,
+		Success:       run.Success,
+		Running:       run.Running,
+		CreatedAt:     run.CreatedAt,
+		Agent:         run.Agent,
+		AgentThreadID: run.AgentThreadID,
+		StopReason:    run.StopReason,
 	}
-	session, err := s.loadSession(sessionID)
+	session, err := s.loadSandbox(sessionID)
 	if err != nil {
 		return err
 	}
 	if err := s.AddCell(context.Background(), session, cell); err != nil {
 		return err
 	}
-	session, err = s.loadSession(sessionID)
+	session, err = s.loadSandbox(sessionID)
 	if err == nil {
 		timelineCells, loadErr := s.loadCells(sessionID)
 		if loadErr == nil {
 			session.Summary.CellCount = len(timelineCells)
 		}
-		_ = s.UpdateSession(context.Background(), session)
+		_ = s.UpdateSandbox(context.Background(), session)
 	}
 	return nil
 }
 
-func (s *Store) AddEvent(_ context.Context, sessionID string, event SessionEvent) error {
-	unlock := s.lockSession(sessionID)
+func (s *Store) AddEvent(_ context.Context, sessionID string, event SandboxEvent) error {
+	unlock := s.lockSandbox(sessionID)
 	defer unlock()
 
 	jsonlExisted, err := s.eventsJSONLExists(sessionID)
@@ -360,63 +360,63 @@ func (s *Store) AddEvent(_ context.Context, sessionID string, event SessionEvent
 		return err
 	}
 
-	session, err := s.loadSession(sessionID)
+	session, err := s.loadSandbox(sessionID)
 	if err == nil {
 		nextCount := session.Summary.EventCount + 1
 		if !jsonlExisted && legacyCount >= session.Summary.EventCount {
 			nextCount = legacyCount + 1
 		}
 		session.Summary.EventCount = nextCount
-		s.hydrateSessionGuestImage(session)
+		s.hydrateSandboxGuestImage(session)
 		session.Summary.UpdatedAt = time.Now().UTC()
-		_ = s.saveSessionPreservingCounts(session)
+		_ = s.saveSandboxPreservingCounts(session)
 	}
 	return nil
 }
 
-func (s *Store) ListEvents(_ context.Context, id string) ([]SessionEvent, error) {
-	unlock := s.lockSession(id)
+func (s *Store) ListEvents(_ context.Context, id string) ([]SandboxEvent, error) {
+	unlock := s.lockSandbox(id)
 	defer unlock()
 	return s.loadEvents(id)
 }
 
-func (s *Store) sessionDir(id string) string {
-	return filepath.Join(s.config.SessionRoot, sessionDirName(id))
+func (s *Store) sandboxDir(id string) string {
+	return filepath.Join(s.config.SandboxRoot, sandboxDirName(id))
 }
 
-func (s *Store) SessionDir(id string) string {
-	return s.sessionDir(id)
+func (s *Store) SandboxDir(id string) string {
+	return s.sandboxDir(id)
 }
 
-func validateSessionIDForRemove(id string) error {
+func validateSandboxIDForRemove(id string) error {
 	if id == "" {
-		return fmt.Errorf("session id is required")
+		return fmt.Errorf("sandbox id is required")
 	}
 	if id == "." || id == ".." || filepath.Base(id) != id {
-		return fmt.Errorf("invalid session id %q", id)
+		return fmt.Errorf("invalid sandbox id %q", id)
 	}
 	return nil
 }
 
-func sessionDirName(id string) string {
+func sandboxDirName(id string) string {
 	if hash, err := identity.Hash(id); err == nil {
 		return hash
 	}
 	return id
 }
 
-func (s *Store) lockSession(id string) func() {
-	value, _ := s.sessionLocks.LoadOrStore(sessionLockKey(id), &sync.Mutex{})
+func (s *Store) lockSandbox(id string) func() {
+	value, _ := s.sandboxLocks.LoadOrStore(sandboxLockKey(id), &sync.Mutex{})
 	mu := value.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
 }
 
-func sessionLockKey(id string) string {
-	return sessionDirName(id)
+func sandboxLockKey(id string) string {
+	return sandboxDirName(id)
 }
 
-func (s *Store) hydrateSessionGuestImage(session *Session) {
+func (s *Store) hydrateSandboxGuestImage(session *Sandbox) {
 	if session == nil {
 		return
 	}
@@ -424,14 +424,14 @@ func (s *Store) hydrateSessionGuestImage(session *Session) {
 		return
 	}
 	if vmState, err := s.GetVMState(session.Summary.ID); err == nil {
-		session.Summary.GuestImage = driverpkg.ResolveSessionGuestImage("", vmState.Image, driverpkg.DefaultGuestImageForDriver(s.config, session.Summary.Driver))
+		session.Summary.GuestImage = driverpkg.ResolveSandboxGuestImage("", vmState.Image, driverpkg.DefaultGuestImageForDriver(s.config, session.Summary.Driver))
 		return
 	}
-	session.Summary.GuestImage = driverpkg.ResolveSessionGuestImage("", "", driverpkg.DefaultGuestImageForDriver(s.config, session.Summary.Driver))
+	session.Summary.GuestImage = driverpkg.ResolveSandboxGuestImage("", "", driverpkg.DefaultGuestImageForDriver(s.config, session.Summary.Driver))
 }
 
 func (s *Store) vmStatePath(id string) string {
-	return filepath.Join(s.sessionDir(id), "vm", "runtime.json")
+	return filepath.Join(s.sandboxDir(id), "vm", "runtime.json")
 }
 
 func (s *Store) VMStatePath(id string) string {
@@ -439,7 +439,7 @@ func (s *Store) VMStatePath(id string) string {
 }
 
 func (s *Store) legacyVMStatePath(id string) string {
-	return filepath.Join(s.sessionDir(id), "vm", "boxlite.json")
+	return filepath.Join(s.sandboxDir(id), "vm", "boxlite.json")
 }
 
 func (s *Store) LegacyVMStatePath(id string) string {
@@ -447,28 +447,28 @@ func (s *Store) LegacyVMStatePath(id string) string {
 }
 
 func (s *Store) proxyStatePath(id string) string {
-	return filepath.Join(s.sessionDir(id), "proxy", "jupyter.json")
+	return filepath.Join(s.sandboxDir(id), "proxy", "jupyter.json")
 }
 
 func (s *Store) ProxyStatePath(id string) string {
 	return s.proxyStatePath(id)
 }
 
-func (s *Store) loadSession(id string) (*Session, error) {
-	path := filepath.Join(s.sessionDir(id), "metadata.json")
+func (s *Store) loadSandbox(id string) (*Sandbox, error) {
+	path := filepath.Join(s.sandboxDir(id), "metadata.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read session metadata %s: %w", id, err)
 	}
-	var session Session
+	var session Sandbox
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("decode session metadata %s: %w", id, err)
 	}
-	session.Summary.TriggerSource = domain.NormalizeSessionTriggerSource(session.Summary.TriggerSource, session.Summary.Tags)
+	session.Summary.TriggerSource = domain.NormalizeSandboxTriggerSource(session.Summary.TriggerSource, session.Summary.Tags)
 	if strings.TrimSpace(session.Summary.ShortID) == "" {
 		session.Summary.ShortID = identity.ShortID(session.Summary.ID)
 	}
-	driver, err := driverpkg.ResolveSessionRuntimeDriver(session.Summary.Driver, s.config.RuntimeDriver)
+	driver, err := driverpkg.ResolveSandboxRuntimeDriver(session.Summary.Driver, s.config.RuntimeDriver)
 	if err != nil {
 		return nil, fmt.Errorf("session metadata %s has invalid driver: %w", id, err)
 	}
@@ -476,23 +476,23 @@ func (s *Store) loadSession(id string) (*Session, error) {
 	return &session, nil
 }
 
-func (s *Store) LoadSession(id string) (*Session, error) {
-	return s.loadSession(id)
+func (s *Store) LoadSandbox(id string) (*Sandbox, error) {
+	return s.loadSandbox(id)
 }
 
-func (s *Store) saveSession(session *Session) error {
+func (s *Store) saveSandbox(session *Sandbox) error {
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode session metadata: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(s.sessionDir(session.Summary.ID), "metadata.json"), append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(s.sandboxDir(session.Summary.ID), "metadata.json"), append(data, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write session metadata: %w", err)
 	}
 	return nil
 }
 
-func (s *Store) saveSessionPreservingCounts(session *Session) error {
-	existing, err := s.loadSessionCounts(session.Summary.ID)
+func (s *Store) saveSandboxPreservingCounts(session *Sandbox) error {
+	existing, err := s.loadSandboxCounts(session.Summary.ID)
 	if err != nil {
 		return err
 	}
@@ -502,44 +502,44 @@ func (s *Store) saveSessionPreservingCounts(session *Session) error {
 	if existing.EventCount > session.Summary.EventCount {
 		session.Summary.EventCount = existing.EventCount
 	}
-	return s.saveSession(session)
+	return s.saveSandbox(session)
 }
 
-func (s *Store) loadSessionCounts(id string) (SessionSummary, error) {
-	path := filepath.Join(s.sessionDir(id), "metadata.json")
+func (s *Store) loadSandboxCounts(id string) (SandboxSummary, error) {
+	path := filepath.Join(s.sandboxDir(id), "metadata.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return SessionSummary{}, nil
+			return SandboxSummary{}, nil
 		}
-		return SessionSummary{}, fmt.Errorf("read session metadata %s: %w", id, err)
+		return SandboxSummary{}, fmt.Errorf("read session metadata %s: %w", id, err)
 	}
-	var session Session
+	var session Sandbox
 	if err := json.Unmarshal(data, &session); err != nil {
-		return SessionSummary{}, fmt.Errorf("decode session metadata %s: %w", id, err)
+		return SandboxSummary{}, fmt.Errorf("decode session metadata %s: %w", id, err)
 	}
 	return session.Summary, nil
 }
 
 func (s *Store) saveEventCount(id string, eventCount int) error {
-	session, err := s.loadSession(id)
+	session, err := s.loadSandbox(id)
 	if err != nil {
 		return err
 	}
 	session.Summary.EventCount = eventCount
-	s.hydrateSessionGuestImage(session)
+	s.hydrateSandboxGuestImage(session)
 	session.Summary.UpdatedAt = time.Now().UTC()
-	return s.saveSession(session)
+	return s.saveSandbox(session)
 }
 
-func (s *Store) SaveSession(session *Session) error {
-	unlock := s.lockSession(session.Summary.ID)
+func (s *Store) SaveSandbox(session *Sandbox) error {
+	unlock := s.lockSandbox(session.Summary.ID)
 	defer unlock()
-	return s.saveSessionPreservingCounts(session)
+	return s.saveSandboxPreservingCounts(session)
 }
 
 func (s *Store) loadCells(id string) ([]NotebookCell, error) {
-	path := filepath.Join(s.sessionDir(id), "state", "cells.json")
+	path := filepath.Join(s.sandboxDir(id), "state", "cells.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -564,7 +564,7 @@ func (s *Store) loadCells(id string) ([]NotebookCell, error) {
 		}
 	}
 	for index := range migrated {
-		migrated[index] = hydrateRunningCellArtifacts(filepath.Join(s.sessionDir(id), "state", "cells", migrated[index].ID), migrated[index])
+		migrated[index] = hydrateRunningCellArtifacts(filepath.Join(s.sandboxDir(id), "state", "cells", migrated[index].ID), migrated[index])
 	}
 	return migrated, nil
 }
@@ -595,7 +595,7 @@ func (s *Store) saveCells(id string, cells []NotebookCell) error {
 	if err != nil {
 		return fmt.Errorf("encode cells: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(s.sessionDir(id), "state", "cells.json"), append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(s.sandboxDir(id), "state", "cells.json"), append(data, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write cells: %w", err)
 	}
 	return nil
@@ -606,7 +606,7 @@ func (s *Store) SaveCells(id string, cells []NotebookCell) error {
 }
 
 func (s *Store) loadAgentRuns(id string) ([]AgentRun, error) {
-	path := filepath.Join(s.sessionDir(id), "state", "agent_runs.json")
+	path := filepath.Join(s.sandboxDir(id), "state", "agent_runs.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -649,16 +649,16 @@ func (s *Store) mergeLegacyAgentRuns(id string, cells []NotebookCell) ([]Noteboo
 			continue
 		}
 		merged = append(merged, NotebookCell{
-			ID:             run.ID,
-			Type:           CellTypeAgent,
-			Source:         run.Message,
-			Output:         run.Output,
-			ExitCode:       run.ExitCode,
-			Success:        run.Success,
-			CreatedAt:      run.CreatedAt,
-			Agent:          run.Agent,
-			AgentSessionID: run.AgentSessionID,
-			StopReason:     run.StopReason,
+			ID:            run.ID,
+			Type:          CellTypeAgent,
+			Source:        run.Message,
+			Output:        run.Output,
+			ExitCode:      run.ExitCode,
+			Success:       run.Success,
+			CreatedAt:     run.CreatedAt,
+			Agent:         run.Agent,
+			AgentThreadID: run.AgentThreadID,
+			StopReason:    run.StopReason,
 		})
 		changed = true
 	}
@@ -671,7 +671,7 @@ func (s *Store) mergeLegacyAgentRuns(id string, cells []NotebookCell) ([]Noteboo
 	return merged, changed, nil
 }
 
-func (s *Store) loadEvents(id string) ([]SessionEvent, error) {
+func (s *Store) loadEvents(id string) ([]SandboxEvent, error) {
 	events, err := s.loadLegacyEvents(id)
 	if err != nil {
 		return nil, err
@@ -684,11 +684,11 @@ func (s *Store) loadEvents(id string) ([]SessionEvent, error) {
 }
 
 func (s *Store) eventsJSONPath(id string) string {
-	return filepath.Join(s.sessionDir(id), "state", "events.json")
+	return filepath.Join(s.sandboxDir(id), "state", "events.json")
 }
 
 func (s *Store) eventsJSONLPath(id string) string {
-	return filepath.Join(s.sessionDir(id), "state", "events.jsonl")
+	return filepath.Join(s.sandboxDir(id), "state", "events.jsonl")
 }
 
 func (s *Store) eventsJSONLExists(id string) (bool, error) {
@@ -702,7 +702,7 @@ func (s *Store) eventsJSONLExists(id string) (bool, error) {
 	return false, fmt.Errorf("stat events jsonl: %w", err)
 }
 
-func (s *Store) loadLegacyEvents(id string) ([]SessionEvent, error) {
+func (s *Store) loadLegacyEvents(id string) ([]SandboxEvent, error) {
 	path := s.eventsJSONPath(id)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -711,7 +711,7 @@ func (s *Store) loadLegacyEvents(id string) ([]SessionEvent, error) {
 		}
 		return nil, fmt.Errorf("read events: %w", err)
 	}
-	var events []SessionEvent
+	var events []SandboxEvent
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -721,7 +721,7 @@ func (s *Store) loadLegacyEvents(id string) ([]SessionEvent, error) {
 	return events, nil
 }
 
-func (s *Store) loadJSONLEvents(id string) ([]SessionEvent, error) {
+func (s *Store) loadJSONLEvents(id string) ([]SandboxEvent, error) {
 	path := s.eventsJSONLPath(id)
 	file, err := os.Open(path)
 	if err != nil {
@@ -733,7 +733,7 @@ func (s *Store) loadJSONLEvents(id string) ([]SessionEvent, error) {
 	defer func() { _ = file.Close() }()
 
 	reader := bufio.NewReader(file)
-	var events []SessionEvent
+	var events []SandboxEvent
 	lineNumber := 0
 	for {
 		line, readErr := reader.ReadBytes('\n')
@@ -741,7 +741,7 @@ func (s *Store) loadJSONLEvents(id string) ([]SessionEvent, error) {
 			lineNumber++
 			line = bytes.TrimSpace(line)
 			if len(line) > 0 {
-				var event SessionEvent
+				var event SandboxEvent
 				if err := json.Unmarshal(line, &event); err != nil {
 					return nil, fmt.Errorf("decode events %s line %d: %w", path, lineNumber, err)
 				}
@@ -759,7 +759,7 @@ func (s *Store) loadJSONLEvents(id string) ([]SessionEvent, error) {
 	return events, nil
 }
 
-func (s *Store) appendEvent(id string, event SessionEvent) error {
+func (s *Store) appendEvent(id string, event SandboxEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("encode event: %w", err)
@@ -783,7 +783,7 @@ func (s *Store) appendEvent(id string, event SessionEvent) error {
 	return nil
 }
 
-func (s *Store) saveEvents(id string, events []SessionEvent) error {
+func (s *Store) saveEvents(id string, events []SandboxEvent) error {
 	file, err := os.OpenFile(s.eventsJSONLPath(id), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("write events jsonl: %w", err)
@@ -812,8 +812,8 @@ func (s *Store) saveEvents(id string, events []SessionEvent) error {
 	return nil
 }
 
-func (s *Store) SaveEvents(id string, events []SessionEvent) error {
-	unlock := s.lockSession(id)
+func (s *Store) SaveEvents(id string, events []SandboxEvent) error {
+	unlock := s.lockSandbox(id)
 	defer unlock()
 	if err := s.saveEvents(id, events); err != nil {
 		return err
@@ -846,7 +846,7 @@ func (s *Store) SaveVMState(id string, state VMState) error {
 }
 
 func (s *Store) saveVMState(id string, state VMState) error {
-	driver, err := driverpkg.ResolveSessionRuntimeDriver(state.Driver, s.config.RuntimeDriver)
+	driver, err := driverpkg.ResolveSandboxRuntimeDriver(state.Driver, s.config.RuntimeDriver)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -36,9 +35,9 @@ func NewRunController(di do.Injector) (*runs.Controller, error) {
 		Config:   do.MustInvoke[*appconfig.Config](di),
 		Store:    do.MustInvoke[*sessionstore.Store](di),
 		ConfigDB: do.MustInvoke[*configstore.ConfigStore](di),
-		Driver:   do.MustInvoke[*adapters.SessionDriver](di),
+		Driver:   do.MustInvoke[*adapters.SandboxDriver](di),
 		Executor: do.MustInvoke[*adapters.AgentExecutor](di),
-		Runtime: func(session *domain.Session) (runs.Runtime, error) {
+		Runtime: func(session *domain.Sandbox) (runs.Runtime, error) {
 			return runtimeProvider.ForSession(session)
 		},
 		Images:       imageBackends.Auto,
@@ -48,6 +47,7 @@ func NewRunController(di do.Injector) (*runs.Controller, error) {
 		Streams:      do.MustInvoke[*sessions.StreamBroker](di),
 		Bus:          do.MustInvoke[*loaders.Bus](di),
 		Dashboard:    dashboardHub,
+		CapTokens:    do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
 	}), nil
 }
 
@@ -142,22 +142,12 @@ func runAgentRequestFromProto(msg *agentcomposev2.RunAgentRequest) runs.RunAgent
 		ClientRequestID:  msg.GetClientRequestId(),
 		Env:              msg.GetEnv(),
 		SandboxID:        msg.GetSandboxId(),
-		SessionID:        firstNonEmpty(msg.GetSandboxId(), msg.GetSessionId()),
 		Driver:           msg.GetDriver(),
 		OutputSchemaJSON: msg.GetOutputSchemaJson(),
 		CleanupPolicy:    msg.GetCleanupPolicy(),
 		Jupyter:          msg.GetJupyter(),
 		Volumes:          volumeMountSpecsFromProto(msg.GetVolumes()),
 	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func volumeMountSpecsFromProto(values []*agentcomposev2.VolumeMountSpec) []domain.VolumeMountSpec {

@@ -40,7 +40,7 @@ func TestLifecycleReconcileRuntimeStateMicrosandboxLost(t *testing.T) {
 	if store.updated != 1 || store.events != 1 || revoker.revoked != "session-lost" {
 		t.Fatalf("updated/events/revoked = %d/%d/%q", store.updated, store.events, revoker.revoked)
 	}
-	if notifier.updated != 1 || notifier.dashboard != "session_updated" || notifier.events != 1 {
+	if notifier.updated != 1 || notifier.dashboard != "sandbox_updated" || notifier.events != 1 {
 		t.Fatalf("notifier = %#v", notifier)
 	}
 }
@@ -64,7 +64,7 @@ func TestLifecycleEnsureProxyReadyBranches(t *testing.T) {
 	t.Run("proxy disabled", func(t *testing.T) {
 		session := lifecycleTestSession("session-disabled", driverpkg.RuntimeDriverDocker, domain.VMStatusStopped)
 		lifecycle := Lifecycle{
-			Config: &appconfig.Config{SessionStartTimeout: time.Second},
+			Config: &appconfig.Config{SandboxStartTimeout: time.Second},
 			Store:  &fakeLifecycleStore{session: session, proxyState: domain.ProxyState{}},
 		}
 		_, _, err := lifecycle.EnsureProxyReady(context.Background(), session.Summary.ID)
@@ -77,9 +77,9 @@ func TestLifecycleEnsureProxyReadyBranches(t *testing.T) {
 		session := lifecycleTestSession("session-start-fail", driverpkg.RuntimeDriverDocker, domain.VMStatusStopped)
 		store := &fakeLifecycleStore{session: session, proxyState: domain.ProxyState{Enabled: true, HostPort: unusedTCPPort(t), GuestPort: 8888}}
 		lifecycle := Lifecycle{
-			Config: &appconfig.Config{SessionStartTimeout: time.Second},
+			Config: &appconfig.Config{SandboxStartTimeout: time.Second},
 			Store:  store,
-			Driver: fakeSessionDriver{startErr: errors.New("start failed")},
+			Driver: fakeSandboxDriver{startErr: errors.New("start failed")},
 		}
 		_, _, err := lifecycle.EnsureProxyReady(context.Background(), session.Summary.ID)
 		if err == nil || !stringsContains(err.Error(), "start failed") || store.session.Summary.VMStatus != domain.VMStatusFailed {
@@ -91,9 +91,9 @@ func TestLifecycleEnsureProxyReadyBranches(t *testing.T) {
 		session := lifecycleTestSession("session-start", driverpkg.RuntimeDriverDocker, domain.VMStatusStopped)
 		proxyState := domain.ProxyState{Enabled: true, HostPort: unusedTCPPort(t), GuestPort: 8888, ProxyPath: "/lab"}
 		store := &fakeLifecycleStore{session: session, proxyState: proxyState}
-		driver := &recordingSessionDriver{}
+		driver := &recordingSandboxDriver{}
 		lifecycle := Lifecycle{
-			Config: &appconfig.Config{SessionStartTimeout: time.Second},
+			Config: &appconfig.Config{SandboxStartTimeout: time.Second},
 			Store:  store,
 			Driver: driver,
 		}
@@ -131,9 +131,9 @@ func TestJupyterTargetReachableCoverage(t *testing.T) {
 	<-accepted
 }
 
-func lifecycleTestSession(id, driver, status string) *domain.Session {
-	return &domain.Session{
-		Summary: domain.SessionSummary{
+func lifecycleTestSession(id, driver, status string) *domain.Sandbox {
+	return &domain.Sandbox{
+		Summary: domain.SandboxSummary{
 			ID:            id,
 			Driver:        driver,
 			VMStatus:      status,
@@ -143,7 +143,7 @@ func lifecycleTestSession(id, driver, status string) *domain.Session {
 }
 
 type fakeLifecycleStore struct {
-	session    *domain.Session
+	session    *domain.Sandbox
 	vmState    domain.VMState
 	savedVM    domain.VMState
 	proxyState domain.ProxyState
@@ -151,11 +151,11 @@ type fakeLifecycleStore struct {
 	events     int
 }
 
-func (s *fakeLifecycleStore) GetSession(context.Context, string) (*domain.Session, error) {
+func (s *fakeLifecycleStore) GetSandbox(context.Context, string) (*domain.Sandbox, error) {
 	return s.session, nil
 }
 
-func (s *fakeLifecycleStore) UpdateSession(_ context.Context, session *domain.Session) error {
+func (s *fakeLifecycleStore) UpdateSandbox(_ context.Context, session *domain.Sandbox) error {
 	s.updated++
 	s.session = session
 	return nil
@@ -174,7 +174,7 @@ func (s *fakeLifecycleStore) GetProxyState(string) (domain.ProxyState, error) {
 	return s.proxyState, nil
 }
 
-func (s *fakeLifecycleStore) AddEvent(context.Context, string, domain.SessionEvent) error {
+func (s *fakeLifecycleStore) AddEvent(context.Context, string, domain.SandboxEvent) error {
 	s.events++
 	return nil
 }
@@ -185,7 +185,7 @@ type fakeRuntimeLiveness struct {
 	err   error
 }
 
-func (l fakeRuntimeLiveness) IsSessionAlive(context.Context, string, *domain.Session, domain.VMState) (bool, bool, error) {
+func (l fakeRuntimeLiveness) IsSandboxAlive(context.Context, string, *domain.Sandbox, domain.VMState) (bool, bool, error) {
 	return l.alive, l.ok, l.err
 }
 
@@ -193,7 +193,7 @@ type fakeFacadeTokenRevoker struct {
 	revoked string
 }
 
-func (r *fakeFacadeTokenRevoker) RevokeLLMFacadeTokensForSession(_ context.Context, sessionID string) error {
+func (r *fakeFacadeTokenRevoker) RevokeLLMFacadeTokensForSandbox(_ context.Context, sessionID string) error {
 	r.revoked = sessionID
 	return nil
 }
@@ -204,11 +204,11 @@ type fakeLifecycleNotifier struct {
 	dashboard string
 }
 
-func (n *fakeLifecycleNotifier) PublishSessionUpdated(*domain.SessionSummary) {
+func (n *fakeLifecycleNotifier) PublishSandboxUpdated(*domain.SandboxSummary) {
 	n.updated++
 }
 
-func (n *fakeLifecycleNotifier) PublishEventAdded(string, domain.SessionEvent) {
+func (n *fakeLifecycleNotifier) PublishEventAdded(string, domain.SandboxEvent) {
 	n.events++
 }
 
@@ -216,29 +216,29 @@ func (n *fakeLifecycleNotifier) NotifyDashboard(event string) {
 	n.dashboard = event
 }
 
-type fakeSessionDriver struct {
+type fakeSandboxDriver struct {
 	startErr error
 	stopErr  error
 }
 
-func (d fakeSessionDriver) StartSessionVM(context.Context, *domain.Session) error {
+func (d fakeSandboxDriver) StartSandboxVM(context.Context, *domain.Sandbox) error {
 	return d.startErr
 }
 
-func (d fakeSessionDriver) StopSessionVM(context.Context, *domain.Session) error {
+func (d fakeSandboxDriver) StopSandboxVM(context.Context, *domain.Sandbox) error {
 	return d.stopErr
 }
 
-type recordingSessionDriver struct {
+type recordingSandboxDriver struct {
 	started bool
 }
 
-func (d *recordingSessionDriver) StartSessionVM(context.Context, *domain.Session) error {
+func (d *recordingSandboxDriver) StartSandboxVM(context.Context, *domain.Sandbox) error {
 	d.started = true
 	return nil
 }
 
-func (d *recordingSessionDriver) StopSessionVM(context.Context, *domain.Session) error {
+func (d *recordingSandboxDriver) StopSandboxVM(context.Context, *domain.Sandbox) error {
 	return nil
 }
 

@@ -36,7 +36,7 @@ func MergeManagedExecEnv(base map[string]string, managed map[string]string) map[
 	return result
 }
 
-func EnvItemsFromMap(values map[string]string, secret bool) []domain.SessionEnvVar {
+func EnvItemsFromMap(values map[string]string, secret bool) []domain.SandboxEnvVar {
 	if len(values) == 0 {
 		return nil
 	}
@@ -45,9 +45,9 @@ func EnvItemsFromMap(values map[string]string, secret bool) []domain.SessionEnvV
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	items := make([]domain.SessionEnvVar, 0, len(keys))
+	items := make([]domain.SandboxEnvVar, 0, len(keys))
 	for _, key := range keys {
-		items = append(items, domain.SessionEnvVar{Name: key, Value: values[key], Secret: secret})
+		items = append(items, domain.SandboxEnvVar{Name: key, Value: values[key], Secret: secret})
 	}
 	return items
 }

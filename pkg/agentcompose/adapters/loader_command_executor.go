@@ -34,7 +34,7 @@ func NewLoaderCommandExecutor(config *appconfig.Config, store *sessionstore.Stor
 	return &LoaderCommandExecutor{Config: config, Store: store, ConfigDB: configDB, Runtimes: runtimes, Streams: streams}
 }
 
-func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, session *domain.Session, request domain.LoaderCommandRequest) (domain.LoaderCommandResult, error) {
+func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, session *domain.Sandbox, request domain.LoaderCommandRequest) (domain.LoaderCommandResult, error) {
 	appconfig.ApplyDefaultGuestPaths(e.Config)
 	if session.Summary.VMStatus != domain.VMStatusRunning {
 		return domain.LoaderCommandResult{}, fmt.Errorf("session is not running")
@@ -49,7 +49,7 @@ func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, sessio
 	defer execCancel()
 
 	cellID := uuid.NewString()
-	hostCellDir := filepath.Join(execution.HostSessionDir(session), "state", "cells", cellID)
+	hostCellDir := filepath.Join(execution.HostSandboxDir(session), "state", "cells", cellID)
 	if err := os.MkdirAll(hostCellDir, 0o755); err != nil {
 		return domain.LoaderCommandResult{}, fmt.Errorf("create loader command cell state dir: %w", err)
 	}
@@ -90,7 +90,7 @@ func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, sessio
 			Output:    result.Output,
 			ExitCode:  result.ExitCode,
 			Success:   result.Success,
-			SessionID: session.Summary.ID,
+			SandboxID: session.Summary.ID,
 			CellID:    cellID,
 			Artifacts: artifacts,
 		}
@@ -135,7 +135,7 @@ func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, sessio
 			return buildLoaderCommandResult(recovered), err
 		}
 		e.Streams.PublishCellCompleted(session.Summary.ID, failedCell)
-		event := domain.SessionEvent{
+		event := domain.SandboxEvent{
 			ID:        uuid.NewString(),
 			Type:      "kernel.cell.failed",
 			Level:     "error",
@@ -221,7 +221,7 @@ func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, sessio
 		eventType = "kernel.cell.failed"
 		eventMessage = firstNonEmpty(commandResult.Stderr, fmt.Sprintf("loader command failed with exit code %d", commandResult.ExitCode))
 	}
-	event := domain.SessionEvent{
+	event := domain.SandboxEvent{
 		ID:        uuid.NewString(),
 		Type:      eventType,
 		Level:     eventLevel,
@@ -240,13 +240,13 @@ func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, sessio
 		StdoutTruncated: commandResult.StdoutTruncated,
 		StderrTruncated: commandResult.StderrTruncated,
 		OutputTruncated: commandResult.OutputTruncated,
-		SessionID:       session.Summary.ID,
+		SandboxID:       session.Summary.ID,
 		CellID:          cellID,
 		Artifacts:       artifacts,
 	}, nil
 }
 
-func (e *LoaderCommandExecutor) prepareLoaderCommandLLMFacadeEnv(ctx context.Context, session *domain.Session, request domain.LoaderCommandRequest, runID string) (*domain.Session, string, error) {
+func (e *LoaderCommandExecutor) prepareLoaderCommandLLMFacadeEnv(ctx context.Context, session *domain.Sandbox, request domain.LoaderCommandRequest, runID string) (*domain.Sandbox, string, error) {
 	if e == nil || e.Config == nil || e.ConfigDB == nil || session == nil {
 		return session, "", nil
 	}
@@ -256,16 +256,16 @@ func (e *LoaderCommandExecutor) prepareLoaderCommandLLMFacadeEnv(ctx context.Con
 	}
 
 	execSession := *session
-	execSession.EnvItems = append([]domain.SessionEnvVar(nil), session.EnvItems...)
-	execSession.RuntimeEnvItems = append([]domain.SessionEnvVar(nil), session.RuntimeEnvItems...)
-	execSession.ProviderEnvItems = append([]domain.SessionEnvVar(nil), session.ProviderEnvItems...)
+	execSession.EnvItems = append([]domain.SandboxEnvVar(nil), session.EnvItems...)
+	execSession.RuntimeEnvItems = append([]domain.SandboxEnvVar(nil), session.RuntimeEnvItems...)
+	execSession.ProviderEnvItems = append([]domain.SandboxEnvVar(nil), session.ProviderEnvItems...)
 	if len(execSession.ProviderEnvItems) == 0 {
 		globalEnv, err := e.ConfigDB.ListGlobalEnv(ctx)
 		if err != nil {
 			return nil, "", err
 		}
 		providerEnv := domain.MergeEnvItems(globalEnv, session.EnvItems)
-		providerEnv = domain.MergeEnvItems(providerEnv, request.SessionEnv)
+		providerEnv = domain.MergeEnvItems(providerEnv, domain.LoaderCommandSandboxEnv(request))
 		execSession.ProviderEnvItems = providerEnv
 	}
 
@@ -276,5 +276,5 @@ func (e *LoaderCommandExecutor) prepareLoaderCommandLLMFacadeEnv(ctx context.Con
 	if len(managedEnv) > 0 {
 		execSession.RuntimeEnvItems = domain.MergeEnvItems(execSession.RuntimeEnvItems, llms.EnvItemsFromMap(managedEnv, false))
 	}
-	return &execSession, managedEnv["AGENT_COMPOSE_SESSION_TOKEN"], nil
+	return &execSession, managedEnv["AGENT_COMPOSE_SANDBOX_TOKEN"], nil
 }

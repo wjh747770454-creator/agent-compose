@@ -15,12 +15,12 @@ import (
 
 func TestRuntimeConfigAndEnvHelperWorkflows(t *testing.T) {
 	root := t.TempDir()
-	session := &domain.Session{Summary: domain.SessionSummary{ID: "session-1", WorkspacePath: filepath.Join(root, "workspace")}}
+	session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", WorkspacePath: filepath.Join(root, "workspace")}}
 	if err := WriteCodexRuntimeConfig(session, "gpt", "http://runtime/openai/v1/", APIProtocolChatCompletions); err != nil {
 		t.Fatalf("WriteCodexRuntimeConfig returned error: %v", err)
 	}
-	codexConfig, err := os.ReadFile(filepath.Join(execution.HostSessionHome(session), ".codex", "config.toml"))
-	if err != nil || !strings.Contains(string(codexConfig), `wire_api = "chat_completions"`) {
+	codexConfig, err := os.ReadFile(filepath.Join(execution.HostSandboxHome(session), ".codex", "config.toml"))
+	if err != nil || !strings.Contains(string(codexConfig), `wire_api = "chat_completions"`) || !strings.Contains(string(codexConfig), `AGENT_COMPOSE_SANDBOX_TOKEN`) {
 		t.Fatalf("codex config=%q err=%v", string(codexConfig), err)
 	}
 	if err := WriteOpenCodeRuntimeConfig(session, "custom", "gpt-custom", "http://runtime/openai/v1/"); err != nil {
@@ -29,8 +29,8 @@ func TestRuntimeConfigAndEnvHelperWorkflows(t *testing.T) {
 	if err := WriteOpenCodeAnthropicRuntimeConfig(session, "claude", "http://runtime/anthropic/"); err != nil {
 		t.Fatalf("WriteOpenCodeAnthropicRuntimeConfig returned error: %v", err)
 	}
-	openCodeConfig, err := os.ReadFile(filepath.Join(execution.HostSessionHome(session), ".config", "opencode", "opencode.json"))
-	if err != nil || !strings.Contains(string(openCodeConfig), "@ai-sdk/anthropic") {
+	openCodeConfig, err := os.ReadFile(filepath.Join(execution.HostSandboxHome(session), ".config", "opencode", "opencode.json"))
+	if err != nil || !strings.Contains(string(openCodeConfig), "@ai-sdk/anthropic") || !strings.Contains(string(openCodeConfig), "AGENT_COMPOSE_SANDBOX_TOKEN") {
 		t.Fatalf("opencode config=%q err=%v", string(openCodeConfig), err)
 	}
 	if err := WriteCodexRuntimeConfig(nil, "gpt", "http://runtime", ""); err != nil {
@@ -42,7 +42,7 @@ func TestRuntimeConfigAndEnvHelperWorkflows(t *testing.T) {
 	if base := GuestRuntimeBaseURL(&appconfig.Config{RuntimeBaseURL: " http://configured/ "}, session); base != "http://configured" {
 		t.Fatalf("configured base = %q", base)
 	}
-	session.ProviderEnvItems = []domain.SessionEnvVar{{Name: "AGENT_COMPOSE_RUNTIME_BASE_URL", Value: "http://provider"}}
+	session.ProviderEnvItems = []domain.SandboxEnvVar{{Name: "AGENT_COMPOSE_RUNTIME_BASE_URL", Value: "http://provider"}}
 	if base := GuestRuntimeBaseURL(&appconfig.Config{RuntimeBaseURL: "http://configured"}, session); base != "http://configured" {
 		t.Fatalf("configured base with provider override = %q", base)
 	}
@@ -64,14 +64,14 @@ func TestRuntimeConfigAndEnvHelperWorkflows(t *testing.T) {
 	if provider, model := LoaderCommandFacadeAgentModel(map[string]string{"AGENT_PROVIDER": "opencode"}); provider != "" || model != "" {
 		t.Fatalf("opencode missing model provider=%q model=%q", provider, model)
 	}
-	filtered := FilterPersistedRuntimeEnv([]domain.SessionEnvVar{{Name: "OPENAI_API_KEY", Value: "secret"}, {Name: "AGENT_COMPOSE_RUNTIME_BASE_URL", Value: "http://runtime"}, {Name: "VISIBLE", Value: "1"}})
+	filtered := FilterPersistedRuntimeEnv([]domain.SandboxEnvVar{{Name: "OPENAI_API_KEY", Value: "secret"}, {Name: "AGENT_COMPOSE_RUNTIME_BASE_URL", Value: "http://runtime"}, {Name: "VISIBLE", Value: "1"}})
 	if len(filtered) != 1 || filtered[0].Name != "VISIBLE" {
 		t.Fatalf("filtered = %#v", filtered)
 	}
-	if env := RuntimeEnvMap([]domain.SessionEnvVar{{Name: "OPENAI_API_KEY", Value: "secret"}, {Name: "VISIBLE", Value: "1"}}); env["VISIBLE"] != "1" || env["OPENAI_API_KEY"] != "" {
+	if env := RuntimeEnvMap([]domain.SandboxEnvVar{{Name: "OPENAI_API_KEY", Value: "secret"}, {Name: "VISIBLE", Value: "1"}}); env["VISIBLE"] != "1" || env["OPENAI_API_KEY"] != "" {
 		t.Fatalf("runtime env = %#v", env)
 	}
-	if env := ManagedRuntimeEnvMap([]domain.SessionEnvVar{{Name: "OPENAI_API_KEY", Value: "secret"}}); env["OPENAI_API_KEY"] != "secret" {
+	if env := ManagedRuntimeEnvMap([]domain.SandboxEnvVar{{Name: "OPENAI_API_KEY", Value: "secret"}}); env["OPENAI_API_KEY"] != "secret" {
 		t.Fatalf("managed env = %#v", env)
 	}
 	if provider, model, err := SplitOpenCodeModel(" custom/gpt "); err != nil || provider != "custom" || model != "gpt" {
@@ -214,7 +214,7 @@ func TestConfigHelperEdgeBranches(t *testing.T) {
 
 func TestClientConfigAndSelectionWorkflows(t *testing.T) {
 	ctx := context.Background()
-	store := llmCoverageEnvStore{items: []domain.SessionEnvVar{{Name: "LLM_API_ENDPOINT", Value: "https://example.test"}, {Name: "LLM_API_PROTOCOL", Value: "chat"}}}
+	store := llmCoverageEnvStore{items: []domain.SandboxEnvVar{{Name: "LLM_API_ENDPOINT", Value: "https://example.test"}, {Name: "LLM_API_PROTOCOL", Value: "chat"}}}
 	if got := ResolveProtocol(ctx, store, ClientConfig{}); got != APIProtocolChatCompletions {
 		t.Fatalf("ResolveProtocol = %q", got)
 	}
@@ -248,10 +248,10 @@ func TestE2EClientConfigAndSelectionWorkflows(t *testing.T) {
 }
 
 type llmCoverageEnvStore struct {
-	items []domain.SessionEnvVar
+	items []domain.SandboxEnvVar
 }
 
-func (s llmCoverageEnvStore) ListGlobalEnv(context.Context) ([]domain.SessionEnvVar, error) {
+func (s llmCoverageEnvStore) ListGlobalEnv(context.Context) ([]domain.SandboxEnvVar, error) {
 	return s.items, nil
 }
 

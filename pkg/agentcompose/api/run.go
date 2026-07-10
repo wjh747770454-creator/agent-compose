@@ -26,9 +26,6 @@ func ProjectRunDetailToProto(run domain.ProjectRunRecord) *agentcomposev2.RunDet
 
 func ProjectRunSummaryToProto(run domain.ProjectRunRecord) *agentcomposev2.RunSummary {
 	sandboxID := run.SandboxID
-	if sandboxID == "" {
-		sandboxID = run.SessionID
-	}
 	return &agentcomposev2.RunSummary{
 		RunId:           run.RunID,
 		ProjectId:       run.ProjectID,
@@ -40,7 +37,6 @@ func ProjectRunSummaryToProto(run domain.ProjectRunRecord) *agentcomposev2.RunSu
 		SchedulerId:     run.SchedulerID,
 		TriggerId:       run.TriggerID,
 		Status:          ProjectRunStatusToProto(run.Status),
-		SessionId:       "",
 		SandboxId:       sandboxID,
 		RunShortId:      identity.ShortID(run.RunID),
 		SandboxShortId:  identity.ShortID(sandboxID),

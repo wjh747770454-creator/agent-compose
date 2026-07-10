@@ -6,18 +6,18 @@ import (
 	"github.com/samber/do/v2"
 )
 
-func NewBoxRuntime(di do.Injector) (BoxRuntime, error) {
-	return newBoxRuntime(do.MustInvoke[*appconfig.Config](di))
+func NewSandboxRuntime(di do.Injector) (SandboxRuntime, error) {
+	return newSandboxRuntime(do.MustInvoke[*appconfig.Config](di))
 }
 
-func NewBoxliteRuntime(config *appconfig.Config) (BoxRuntime, error) {
-	return newBoxRuntime(config)
+func NewBoxliteRuntime(config *appconfig.Config) (SandboxRuntime, error) {
+	return newSandboxRuntime(config)
 }
 
-func NewDockerRuntime(config *appconfig.Config) (BoxRuntime, error) {
+func NewDockerRuntime(config *appconfig.Config) (SandboxRuntime, error) {
 	return newDockerRuntime(config)
 }
 
-func NewMicrosandboxRuntime(config *appconfig.Config) (BoxRuntime, error) {
+func NewMicrosandboxRuntime(config *appconfig.Config) (SandboxRuntime, error) {
 	return newMicrosandboxRuntime(config)
 }

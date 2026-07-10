@@ -18,7 +18,7 @@ func TestRunExecutorLifecycleWorkflows(t *testing.T) {
 	loader := domain.Loader{Summary: domain.LoaderSummary{ID: "loader-1", Runtime: domain.LoaderRuntimeScheduler}, Script: "script"}
 	trigger := domain.LoaderTrigger{ID: "trigger-1", Kind: domain.LoaderTriggerKindEvent}
 	store := &runStoreFake{}
-	engine := &loaderEngineFake{result: loaders.LoaderExecutionResult{ResultJSON: `{"ok":true}`}}
+	engine := &loaderEngineFake{result: loaders.LoaderExecutionResult{ResultJSON: `{"ok":true}`, Warnings: []string{"scheduler.session.getSession is deprecated; use scheduler.sandbox.getSandbox"}}}
 	var events []string
 	var deliveries []domain.LoaderRunSummary
 	var notifications []string
@@ -69,7 +69,7 @@ func TestRunExecutorLifecycleWorkflows(t *testing.T) {
 	if len(store.created) != 1 || len(store.updated) != 1 || store.lastError[loader.Summary.ID] != "" {
 		t.Fatalf("store state = %#v/%#v/%#v", store.created, store.updated, store.lastError)
 	}
-	if !containsString(events, "loader.run.started") || !containsString(events, "loader.run.completed") {
+	if !containsString(events, "loader.run.started") || !containsString(events, "loader.run.completed") || !containsString(events, "loader.deprecated_alias.warning") {
 		t.Fatalf("events = %#v", events)
 	}
 	if len(deliveries) != 2 || len(notifications) != 2 || refreshes != 1 || len(leaves) != 1 {

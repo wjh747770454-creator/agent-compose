@@ -16,15 +16,16 @@ function buildDailyPrompt(context) {
 function runDailySummary(context) {
   const reply = scheduler.agent(buildDailyPrompt(context), {
     agent: "codex",
-    sessionPolicy: "new",
+    sandboxPolicy: "new",
   });
 
   const result = {
     ok: reply.success,
     ranAt: new Date().toISOString(),
-    sessionId: reply.sessionId,
+    sandboxId: reply.sandboxId,
     cellId: reply.cellId,
     agent: reply.agent,
+    agentThreadId: reply.agentThreadId,
     text: reply.finalText ?? reply.text ?? reply.output ?? "",
     stopReason: reply.stopReason,
     previousRun: readDailyState(),
@@ -33,7 +34,7 @@ function runDailySummary(context) {
 
   scheduler.state.set("daily-summary:last-run", {
     ranAt: result.ranAt,
-    sessionId: result.sessionId,
+    sandboxId: result.sandboxId,
     cellId: result.cellId,
   });
 

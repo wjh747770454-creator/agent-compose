@@ -13,16 +13,16 @@ import (
 
 const AgentSystemPromptFileName = "system-prompt.txt"
 
-func HostAgentSystemPromptPath(session *domain.Session) string {
+func HostAgentSystemPromptPath(session *domain.Sandbox) string {
 	if session == nil || strings.TrimSpace(session.Summary.WorkspacePath) == "" {
 		return ""
 	}
-	return filepath.Join(HostSessionDir(session), "state", "agents", "system-prompts", AgentSystemPromptFileName)
+	return filepath.Join(HostSandboxDir(session), "state", "agents", "system-prompts", AgentSystemPromptFileName)
 }
 
-func WriteAgentPromptFile(config *appconfig.Config, session *domain.Session, agent, message string) (string, error) {
-	hostSessionDir := filepath.Dir(session.Summary.WorkspacePath)
-	promptDir := filepath.Join(hostSessionDir, "state", "agents", "prompts")
+func WriteAgentPromptFile(config *appconfig.Config, session *domain.Sandbox, agent, message string) (string, error) {
+	hostSandboxDir := filepath.Dir(session.Summary.WorkspacePath)
+	promptDir := filepath.Join(hostSandboxDir, "state", "agents", "prompts")
 	if err := os.MkdirAll(promptDir, 0o755); err != nil {
 		return "", fmt.Errorf("create agent prompt dir: %w", err)
 	}
@@ -35,15 +35,15 @@ func WriteAgentPromptFile(config *appconfig.Config, session *domain.Session, age
 }
 
 // WriteAgentSystemPromptFile materializes agent identity for the guest runtime at a
-// fixed convention path under the session state tree.
-func WriteAgentSystemPromptFile(session *domain.Session, systemPrompt string) error {
+// fixed convention path under the sandbox state tree.
+func WriteAgentSystemPromptFile(session *domain.Sandbox, systemPrompt string) error {
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	hostPath := HostAgentSystemPromptPath(session)
 	if hostPath == "" {
 		if systemPrompt == "" {
 			return nil
 		}
-		return fmt.Errorf("session workspace path is required to write agent system prompt")
+		return fmt.Errorf("sandbox workspace path is required to write agent system prompt")
 	}
 	if systemPrompt == "" {
 		if err := os.Remove(hostPath); err != nil && !os.IsNotExist(err) {
@@ -60,7 +60,7 @@ func WriteAgentSystemPromptFile(session *domain.Session, systemPrompt string) er
 	return nil
 }
 
-func WriteAgentOutputSchemaFile(config *appconfig.Config, session *domain.Session, agent, schemaJSON string) (string, error) {
+func WriteAgentOutputSchemaFile(config *appconfig.Config, session *domain.Sandbox, agent, schemaJSON string) (string, error) {
 	schemaJSON = strings.TrimSpace(schemaJSON)
 	if schemaJSON == "" {
 		return "", nil
@@ -72,8 +72,8 @@ func WriteAgentOutputSchemaFile(config *appconfig.Config, session *domain.Sessio
 	if _, ok := decoded.(map[string]any); !ok {
 		return "", fmt.Errorf("agent output schema must be a JSON object")
 	}
-	hostSessionDir := filepath.Dir(session.Summary.WorkspacePath)
-	schemaDir := filepath.Join(hostSessionDir, "state", "agents", "schemas")
+	hostSandboxDir := filepath.Dir(session.Summary.WorkspacePath)
+	schemaDir := filepath.Join(hostSandboxDir, "state", "agents", "schemas")
 	if err := os.MkdirAll(schemaDir, 0o755); err != nil {
 		return "", fmt.Errorf("create agent schema dir: %w", err)
 	}

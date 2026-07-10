@@ -42,7 +42,7 @@ type microsandboxExecCollector struct {
 	output bytes.Buffer
 }
 
-func newMicrosandboxRuntime(config *appconfig.Config) (BoxRuntime, error) {
+func newMicrosandboxRuntime(config *appconfig.Config) (SandboxRuntime, error) {
 	return &microsandboxRuntime{config: config, lifecycleHandles: map[string]*microsandbox.Sandbox{}}, nil
 }
 
@@ -73,20 +73,20 @@ func (c *microsandboxExecCollector) appendChunk(chunk ExecChunk) {
 	c.stdout.WriteString(chunk.Text)
 }
 
-func (r *microsandboxRuntime) EnsureSession(ctx context.Context, session *Session, vmState VMState, proxyState ProxyState) (SessionVMInfo, error) {
+func (r *microsandboxRuntime) EnsureSandbox(ctx context.Context, session *Sandbox, vmState VMState, proxyState ProxyState) (SandboxVMInfo, error) {
 	name := r.sandboxName(session, vmState)
 	if err := r.ensureReady(ctx); err != nil {
-		return SessionVMInfo{}, err
+		return SandboxVMInfo{}, err
 	}
 
 	sandbox, created, restarted, err := r.getOrCreateSandbox(ctx, session, vmState, proxyState)
 	if err != nil {
-		return SessionVMInfo{}, err
+		return SandboxVMInfo{}, err
 	}
 	defer r.releaseSandboxHandle(name, sandbox)
 
-	if err := r.ensureDirectoryOnlyGuestSessionBootstrap(ctx, sandbox, session, name); err != nil {
-		return SessionVMInfo{}, err
+	if err := r.ensureDirectoryOnlyGuestSandboxBootstrap(ctx, sandbox, session, name); err != nil {
+		return SandboxVMInfo{}, err
 	}
 
 	needLaunch := created || restarted
@@ -98,7 +98,7 @@ func (r *microsandboxRuntime) EnsureSession(ctx context.Context, session *Sessio
 	}
 	if jupyterEnabled(proxyState) && needLaunch {
 		if err := r.launchJupyter(ctx, sandbox, proxyState); err != nil {
-			return SessionVMInfo{}, err
+			return SandboxVMInfo{}, err
 		}
 	}
 	if jupyterEnabled(proxyState) {
@@ -106,22 +106,22 @@ func (r *microsandboxRuntime) EnsureSession(ctx context.Context, session *Sessio
 		readyErr := waitForJupyterProxy(readyCtx, proxyState)
 		cancel()
 		if readyErr != nil {
-			if logText := readSessionJupyterLog(session); jupyterLogIndicatesReady(logText) {
-				slog.Warn("microsandbox jupyter probe timed out after guest reported ready", "session_id", session.Summary.ID, "error", readyErr)
+			if logText := readSandboxJupyterLog(session); jupyterLogIndicatesReady(logText) {
+				slog.Warn("microsandbox jupyter probe timed out after guest reported ready", "sandbox_id", session.Summary.ID, "error", readyErr)
 			} else if logText != "" {
-				return SessionVMInfo{}, fmt.Errorf("%w\nGuest log:\n%s", readyErr, logText)
+				return SandboxVMInfo{}, fmt.Errorf("%w\nGuest log:\n%s", readyErr, logText)
 			} else {
-				return SessionVMInfo{}, readyErr
+				return SandboxVMInfo{}, readyErr
 			}
 		}
 	}
-	return SessionVMInfo{
+	return SandboxVMInfo{
 		BoxID:      name,
 		JupyterURL: jupyterDirectURL(proxyState),
 	}, nil
 }
 
-func (r *microsandboxRuntime) StopSession(ctx context.Context, session *Session, vmState VMState) (bool, error) {
+func (r *microsandboxRuntime) StopSandbox(ctx context.Context, session *Sandbox, vmState VMState) (bool, error) {
 	name := r.sandboxName(session, vmState)
 	if err := r.ensureReady(ctx); err != nil {
 		return false, err
@@ -187,7 +187,7 @@ func (r *microsandboxRuntime) StopSession(ctx context.Context, session *Session,
 	return false, nil
 }
 
-func (r *microsandboxRuntime) Exec(ctx context.Context, session *Session, vmState VMState, spec ExecSpec) (ExecResult, error) {
+func (r *microsandboxRuntime) Exec(ctx context.Context, session *Sandbox, vmState VMState, spec ExecSpec) (ExecResult, error) {
 	name := r.sandboxName(session, vmState)
 	if err := r.ensureReady(ctx); err != nil {
 		return ExecResult{}, err
@@ -200,7 +200,7 @@ func (r *microsandboxRuntime) Exec(ctx context.Context, session *Session, vmStat
 	defer r.releaseSandboxHandle(name, sandbox)
 	return executeUserCommandAfterBootstrap(
 		func() error {
-			return r.ensureDirectoryOnlyGuestSessionBootstrap(ctx, sandbox, session, name)
+			return r.ensureDirectoryOnlyGuestSandboxBootstrap(ctx, sandbox, session, name)
 		},
 		func() (ExecResult, error) {
 			output, err := sandbox.Exec(ctx, spec.Command, spec.Args, r.execOptions(ctx, spec)...)
@@ -218,7 +218,7 @@ func (r *microsandboxRuntime) Exec(ctx context.Context, session *Session, vmStat
 	)
 }
 
-func (r *microsandboxRuntime) ExecStream(ctx context.Context, session *Session, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
+func (r *microsandboxRuntime) ExecStream(ctx context.Context, session *Sandbox, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
 	name := r.sandboxName(session, vmState)
 	if err := r.ensureReady(ctx); err != nil {
 		return ExecResult{}, err
@@ -231,7 +231,7 @@ func (r *microsandboxRuntime) ExecStream(ctx context.Context, session *Session, 
 	defer r.releaseSandboxHandle(name, sandbox)
 	return executeUserCommandAfterBootstrap(
 		func() error {
-			return r.ensureDirectoryOnlyGuestSessionBootstrap(ctx, sandbox, session, name)
+			return r.ensureDirectoryOnlyGuestSandboxBootstrap(ctx, sandbox, session, name)
 		},
 		func() (ExecResult, error) {
 			handle, err := sandbox.ExecStream(ctx, spec.Command, spec.Args, r.execOptions(ctx, spec)...)
@@ -284,8 +284,8 @@ func (r *microsandboxRuntime) ExecStream(ctx context.Context, session *Session, 
 	)
 }
 
-func (r *microsandboxRuntime) ensureDirectoryOnlyGuestSessionBootstrap(ctx context.Context, sandbox *microsandbox.Sandbox, session *Session, sandboxName string) error {
-	spec := directoryOnlyGuestSessionBootstrapExecSpec(r.config)
+func (r *microsandboxRuntime) ensureDirectoryOnlyGuestSandboxBootstrap(ctx context.Context, sandbox *microsandbox.Sandbox, session *Sandbox, sandboxName string) error {
+	spec := directoryOnlyGuestSandboxBootstrapExecSpec(r.config)
 	output, err := sandbox.Exec(ctx, spec.Command, spec.Args, r.execOptions(ctx, spec)...)
 	result := ExecResult{}
 	if output != nil {
@@ -297,20 +297,20 @@ func (r *microsandboxRuntime) ensureDirectoryOnlyGuestSessionBootstrap(ctx conte
 			Success:  output.Success(),
 		}
 	}
-	sessionID := ""
+	sandboxID := ""
 	if session != nil {
-		sessionID = session.Summary.ID
+		sandboxID = session.Summary.ID
 	}
 	if err != nil {
-		return formatDirectoryOnlyGuestSessionBootstrapError(RuntimeDriverMicrosandbox, sessionID, sandboxName, result, err)
+		return formatDirectoryOnlyGuestSandboxBootstrapError(RuntimeDriverMicrosandbox, sandboxID, sandboxName, result, err)
 	}
 	if !result.Success {
-		return formatDirectoryOnlyGuestSessionBootstrapError(RuntimeDriverMicrosandbox, sessionID, sandboxName, result, nil)
+		return formatDirectoryOnlyGuestSandboxBootstrapError(RuntimeDriverMicrosandbox, sandboxID, sandboxName, result, nil)
 	}
 	return nil
 }
 
-func (r *microsandboxRuntime) Stats(ctx context.Context, session *Session, vmState VMState) (SandboxStats, error) {
+func (r *microsandboxRuntime) Stats(ctx context.Context, session *Sandbox, vmState VMState) (SandboxStats, error) {
 	if err := r.ensureReady(ctx); err != nil {
 		return SandboxStats{}, err
 	}
@@ -318,12 +318,12 @@ func (r *microsandboxRuntime) Stats(ctx context.Context, session *Session, vmSta
 	handle, err := microsandbox.GetSandbox(ctx, name)
 	if err != nil {
 		if microsandbox.IsKind(err, microsandbox.ErrSandboxNotFound) {
-			return SandboxStats{}, fmt.Errorf("session box is not initialized")
+			return SandboxStats{}, fmt.Errorf("sandbox box is not initialized")
 		}
 		return SandboxStats{}, err
 	}
 	if handle.Status() != microsandbox.SandboxStatusRunning && handle.Status() != microsandbox.SandboxStatusDraining {
-		return SandboxStats{}, fmt.Errorf("session box is not running")
+		return SandboxStats{}, fmt.Errorf("sandbox box is not running")
 	}
 	metrics, err := handle.Metrics(ctx)
 	if err != nil {
@@ -603,25 +603,40 @@ func (r *microsandboxRuntime) sandboxStateDir(name string) string {
 	return filepath.Join(r.config.MicrosandboxHome, "sandboxes", name)
 }
 
-func (r *microsandboxRuntime) dockerDiskPath(sessionID string) string {
-	return filepath.Join(r.config.MicrosandboxHome, "docker-disks", microsandboxDockerDiskName(sessionID)+".raw")
+func (r *microsandboxRuntime) dockerDiskPath(sandboxID string) string {
+	return filepath.Join(r.config.MicrosandboxHome, "docker-disks", microsandboxDockerDiskName(sandboxID)+".raw")
 }
 
-func microsandboxDockerDiskName(sessionID string) string {
-	if hash, err := identity.Hash(sessionID); err == nil {
+func (r *microsandboxRuntime) legacyDockerDiskPath(sandboxID string) string {
+	return filepath.Join(r.config.MicrosandboxHome, "docker-disks", sandboxID+".raw")
+}
+
+func microsandboxDockerDiskName(sandboxID string) string {
+	if hash, err := identity.Hash(sandboxID); err == nil {
 		return hash
 	}
-	return sessionID
+	return sandboxID
 }
 
-func (r *microsandboxRuntime) ensureDockerDisk(sessionID string) (string, error) {
-	path := r.dockerDiskPath(sessionID)
+func (r *microsandboxRuntime) ensureDockerDisk(sandboxID string) (string, error) {
+	path := r.dockerDiskPath(sandboxID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("create docker-disks directory: %w", err)
 	}
 	if _, err := os.Stat(path); err == nil {
-		// Disk already exists; reuse it (idempotent for session reconnects).
+		// Disk already exists; reuse it (idempotent for sandbox reconnects).
 		return path, nil
+	}
+	legacyPath := r.legacyDockerDiskPath(sandboxID)
+	if legacyPath != path {
+		if _, err := os.Stat(legacyPath); err == nil {
+			if err := os.Rename(legacyPath, path); err != nil {
+				return "", fmt.Errorf("migrate legacy docker disk image %s to %s: %w", legacyPath, path, err)
+			}
+			return path, nil
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("stat legacy docker disk image %s: %w", legacyPath, err)
+		}
 	}
 	// Create a sparse raw file then format it as ext4. Sized by
 	// BOX_DISK_SIZE_GB (shared with the boxlite driver; config default 6 GiB).
@@ -650,10 +665,15 @@ func (r *microsandboxRuntime) ensureDockerDisk(sessionID string) (string, error)
 	return path, nil
 }
 
-func (r *microsandboxRuntime) removeDockerDisk(sessionID string) {
-	path := r.dockerDiskPath(sessionID)
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		slog.Warn("agent-compose microsandbox: failed to remove docker disk image", "path", path, "error", err)
+func (r *microsandboxRuntime) removeDockerDisk(sandboxID string) {
+	paths := []string{r.dockerDiskPath(sandboxID)}
+	if legacyPath := r.legacyDockerDiskPath(sandboxID); legacyPath != paths[0] {
+		paths = append(paths, legacyPath)
+	}
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			slog.Warn("agent-compose microsandbox: failed to remove docker disk image", "path", path, "error", err)
+		}
 	}
 }
 
@@ -661,7 +681,7 @@ func (r *microsandboxRuntime) removeDockerDisk(sessionID string) {
 // microsandbox daemon so a later GetSandbox(name) returns ErrSandboxNotFound.
 // This matches the docker driver, which fully removes the container on stop:
 // without it, a restart would take the getOrCreateSandbox handle.Start() path
-// and remount the per-session docker disk that StopSession already deleted,
+// and remount the per-sandbox docker disk that StopSandbox already deleted,
 // failing with "host path not found". Best-effort — a purge failure must not
 // mask the stop result; the daemon's gc reclaims any residue on restart.
 func (r *microsandboxRuntime) removeSandboxState(ctx context.Context, name string) {
@@ -726,7 +746,7 @@ func (r *microsandboxRuntime) connectLiveSandbox(ctx context.Context, handle *mi
 	return nil, false, err
 }
 
-func (r *microsandboxRuntime) IsSessionAlive(ctx context.Context, session *Session, vmState VMState) (bool, error) {
+func (r *microsandboxRuntime) IsSandboxAlive(ctx context.Context, session *Sandbox, vmState VMState) (bool, error) {
 	if err := r.ensureReady(ctx); err != nil {
 		return false, err
 	}
@@ -757,7 +777,7 @@ func (r *microsandboxRuntime) IsSessionAlive(ctx context.Context, session *Sessi
 	return true, nil
 }
 
-func (r *microsandboxRuntime) getOrCreateSandbox(ctx context.Context, session *Session, vmState VMState, proxyState ProxyState) (*microsandbox.Sandbox, bool, bool, error) {
+func (r *microsandboxRuntime) getOrCreateSandbox(ctx context.Context, session *Sandbox, vmState VMState, proxyState ProxyState) (*microsandbox.Sandbox, bool, bool, error) {
 	name := r.sandboxName(session, vmState)
 	handle, err := microsandbox.GetSandbox(ctx, name)
 	if err != nil {
@@ -791,12 +811,12 @@ func (r *microsandboxRuntime) getOrCreateSandbox(ctx context.Context, session *S
 	return sandbox, false, true, err
 }
 
-func (r *microsandboxRuntime) connectSandbox(ctx context.Context, session *Session, vmState VMState, startIfStopped bool) (*microsandbox.Sandbox, error) {
+func (r *microsandboxRuntime) connectSandbox(ctx context.Context, session *Sandbox, vmState VMState, startIfStopped bool) (*microsandbox.Sandbox, error) {
 	name := r.sandboxName(session, vmState)
 	handle, err := microsandbox.GetSandbox(ctx, name)
 	if err != nil {
 		if microsandbox.IsKind(err, microsandbox.ErrSandboxNotFound) {
-			return nil, fmt.Errorf("session box is not initialized")
+			return nil, fmt.Errorf("sandbox box is not initialized")
 		}
 		return nil, err
 	}
@@ -806,12 +826,12 @@ func (r *microsandboxRuntime) connectSandbox(ctx context.Context, session *Sessi
 			return nil, err
 		}
 		if stale {
-			return nil, fmt.Errorf("session box is not initialized")
+			return nil, fmt.Errorf("sandbox box is not initialized")
 		}
 		return sandbox, nil
 	}
 	if !startIfStopped {
-		return nil, fmt.Errorf("session box is not running")
+		return nil, fmt.Errorf("sandbox box is not running")
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -825,7 +845,7 @@ func (r *microsandboxRuntime) connectSandbox(ctx context.Context, session *Sessi
 	return sandbox, startErr
 }
 
-func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Session, vmState VMState, proxyState ProxyState, name string) (*microsandbox.Sandbox, error) {
+func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sandbox, vmState VMState, proxyState ProxyState, name string) (*microsandbox.Sandbox, error) {
 	appconfig.ApplyDefaultGuestPaths(r.config)
 	manifest, err := loadDirectoryRuntimeMountManifest(session, RuntimeDriverMicrosandbox)
 	if err != nil {
@@ -838,15 +858,15 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sessio
 	// Give docker its own disk-backed ext4 volume. The guest root is virtiofs,
 	// on which the kernel rejects overlayfs (docker's default storage driver)
 	// with "invalid argument"; a disk-image mount keeps docker's overlay
-	// storage on a real block device. One disk image per session so concurrent
+	// storage on a real block device. One disk image per sandbox so concurrent
 	// VMs never share the same ext4 image. The image is provisioned on the
-	// host by agent-compose and removed when the session stops.
+	// host by agent-compose and removed when the sandbox stops.
 	rawPath, err := r.ensureDockerDisk(session.Summary.ID)
 	if err != nil {
 		return nil, fmt.Errorf("provision docker disk: %w", err)
 	}
 	// If the sandbox never comes up, remove the disk we just provisioned:
-	// StopSession is not guaranteed to run for a session that never started,
+	// StopSandbox is not guaranteed to run for a sandbox that never started,
 	// so without this the .raw would linger until explicit cache prune. On
 	// success the flag below disarms the cleanup.
 	sandboxCreated := false
@@ -857,15 +877,15 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sessio
 	}()
 	mounts["/var/lib/docker"] = microsandbox.Mount.Disk(rawPath, microsandbox.DiskOptions{Format: "raw", Fstype: "ext4"})
 	// /run must be a per-VM tmpfs (standard Linux boot semantics). The guest
-	// root is a shared, session-reused rootfs dir on virtiofs and the msb guest
+	// root is a shared, sandbox-reused rootfs dir on virtiofs and the msb guest
 	// init does not mount /run itself, so without this, runtime state written
 	// under /run (dockerd pid files, unix sockets) outlives the VM and leaks
-	// into every later session of the same image — a stale
+	// into every later sandbox of the same image — a stale
 	// /run/docker/containerd/containerd.pid then makes dockerd kill its own
 	// containerd and refuse to start. agentd recreates /run/microsandbox after
 	// user tmpfs mounts are applied, so shadowing /run here is safe.
 	mounts["/run"] = microsandbox.Mount.Tmpfs(microsandbox.TmpfsOptions{SizeMiB: 256})
-	imageRef := resolveSessionGuestImage(vmState.Image, session.Summary.GuestImage, defaultGuestImageForDriver(r.config, RuntimeDriverMicrosandbox))
+	imageRef := resolveSandboxGuestImage(vmState.Image, session.Summary.GuestImage, defaultGuestImageForDriver(r.config, RuntimeDriverMicrosandbox))
 	imagePullTimeout := r.config.ImagePullTimeout
 	if imagePullTimeout <= 0 {
 		imagePullTimeout = defaultImagePullTimeout
@@ -875,13 +895,13 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sessio
 	} else if ok {
 		imageRef = resolvedRef
 	}
-	env := sessionEnvMap(session.EnvItems, session.RuntimeEnvItems)
+	env := sandboxEnvMap(session.EnvItems, session.RuntimeEnvItems)
 	if env == nil {
 		env = map[string]string{}
 	}
 	env["GOPATH"] = "/usr/local/go"
 	env["PATH"] = "/root/.local/bin:/usr/local/go/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-	env["SESSION_ID"] = session.Summary.ID
+	env["SANDBOX_ID"] = session.Summary.ID
 	env["WORKSPACE"] = r.config.GuestWorkspacePath
 	env["STATE_ROOT"] = r.config.GuestStateRoot
 	env["RUNTIME_ROOT"] = r.config.GuestRuntimeRoot
@@ -978,7 +998,7 @@ func microsandboxPullPolicyForImageRef(imageRef string, perCallPolicy string) mi
 
 func (r *microsandboxRuntime) launchJupyter(ctx context.Context, sandbox *microsandbox.Sandbox, proxyState ProxyState) error {
 	// Use the launch command WITHOUT the directory-only bootstrap: the guest
-	// session bootstrap already ran unconditionally in ensureDirectoryOnlyGuestSessionBootstrap
+	// sandbox bootstrap already ran unconditionally in ensureDirectoryOnlyGuestSandboxBootstrap
 	// before this call, so re-running it here is redundant. Worse, the embedded
 	// bootstrap (~1.5s of symlink setup) can consume the entire observeCtx window
 	// below before the script reaches "nohup jupyterlab", so closing the exec
@@ -1061,11 +1081,11 @@ func (r *microsandboxRuntime) execOptions(ctx context.Context, spec ExecSpec) []
 	return options
 }
 
-func (r *microsandboxRuntime) sandboxName(session *Session, vmState VMState) string {
+func (r *microsandboxRuntime) sandboxName(session *Sandbox, vmState VMState) string {
 	return firstNonEmpty(strings.TrimSpace(vmState.BoxName), strings.TrimSpace(vmState.BoxID), strings.TrimSpace(session.Summary.RuntimeRef), "agent-compose-"+session.Summary.ID)
 }
 
-func microsandboxStatsFromMetrics(session *Session, vmState VMState, metrics *microsandbox.Metrics) SandboxStats {
+func microsandboxStatsFromMetrics(session *Sandbox, vmState VMState, metrics *microsandbox.Metrics) SandboxStats {
 	sandboxID := ""
 	driverName := RuntimeDriverMicrosandbox
 	if session != nil {

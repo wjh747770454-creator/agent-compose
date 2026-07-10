@@ -47,7 +47,7 @@ type RunExecutorDependencies struct {
 	WriteArtifact              func(dir, name, content string) error
 	EnterRun                   func(loader domain.Loader) bool
 	LeaveRun                   func(loaderID string)
-	AddLoaderEvent             func(ctx context.Context, loaderID, runID, triggerID, eventType, level, message string, payload any, linkedSessionID, linkedCellID, linkedAgentSessionID string) error
+	AddLoaderEvent             func(ctx context.Context, loaderID, runID, triggerID, eventType, level, message string, payload any, linkedSandboxID, linkedCellID, linkedAgentThreadID string) error
 	UpdateTriggerEventDelivery func(ctx context.Context, run domain.LoaderRunSummary)
 	Notify                     func(reason string)
 	Refresh                    func(ctx context.Context) error
@@ -158,6 +158,9 @@ func (e *RunExecutor) Execute(ctx context.Context, prepared PreparedRun) (domain
 	if host != nil {
 		host.CleanupCommandSessions(writeCtx)
 	}
+	for _, warning := range execution.Warnings {
+		_ = e.addLoaderEvent(writeCtx, prepared.Loader.Summary.ID, run.ID, run.TriggerID, "loader.deprecated_alias.warning", "warning", warning, nil, "", "", "")
+	}
 
 	completedAt := time.Now().UTC()
 	run.CompletedAt = completedAt
@@ -242,11 +245,11 @@ func (e *RunExecutor) leaveRun(loaderID string) {
 	}
 }
 
-func (e *RunExecutor) addLoaderEvent(ctx context.Context, loaderID, runID, triggerID, eventType, level, message string, payload any, linkedSessionID, linkedCellID, linkedAgentSessionID string) error {
+func (e *RunExecutor) addLoaderEvent(ctx context.Context, loaderID, runID, triggerID, eventType, level, message string, payload any, linkedSandboxID, linkedCellID, linkedAgentThreadID string) error {
 	if e.deps.AddLoaderEvent == nil {
 		return nil
 	}
-	return e.deps.AddLoaderEvent(ctx, loaderID, runID, triggerID, eventType, level, message, payload, linkedSessionID, linkedCellID, linkedAgentSessionID)
+	return e.deps.AddLoaderEvent(ctx, loaderID, runID, triggerID, eventType, level, message, payload, linkedSandboxID, linkedCellID, linkedAgentThreadID)
 }
 
 func (e *RunExecutor) updateTriggerEventDelivery(ctx context.Context, run domain.LoaderRunSummary) {

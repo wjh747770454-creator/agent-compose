@@ -49,7 +49,7 @@ func (c *Controller) resolveTriggerForManualRun(ctx context.Context, req RunAgen
 	if strings.TrimSpace(result.Request.OutputSchemaJSON) == "" {
 		result.Request.OutputSchemaJSON = captured.request.OutputSchema
 	}
-	result.Request.Env = append(result.Request.Env, envVarSpecsFromSessionEnv(captured.request.SessionEnv)...)
+	result.Request.Env = append(result.Request.Env, envVarSpecsFromSandboxEnv(domain.LoaderAgentSandboxEnv(captured.request))...)
 	result.Warnings = warnings
 	return result, nil
 }
@@ -156,7 +156,7 @@ func (h *manualTriggerCaptureHost) CallSessionRPC(context.Context, string, strin
 	return "", fmt.Errorf("scheduler.session is unavailable during manual trigger resolution")
 }
 
-func envVarSpecsFromSessionEnv(items []domain.SessionEnvVar) []*agentcomposev2.EnvVarSpec {
+func envVarSpecsFromSandboxEnv(items []domain.SandboxEnvVar) []*agentcomposev2.EnvVarSpec {
 	result := make([]*agentcomposev2.EnvVarSpec, 0, len(items))
 	for _, item := range items {
 		name := strings.TrimSpace(item.Name)

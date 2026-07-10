@@ -3,7 +3,7 @@ export type RuntimeJsonSchema = Record<string, unknown>;
 
 export interface AgentResult {
   provider: Provider;
-  sessionId: string;
+  threadId: string;
   stopReason: string;
   finalText: string;
   transcript: string;
@@ -21,8 +21,8 @@ export interface RunnerOptions {
   outputSchema?: RuntimeJsonSchema;
 }
 
-export interface StoredSession {
+export interface StoredThread {
   provider: string;
-  sessionId: string;
+  threadId: string;
   updatedAt?: string;
 }

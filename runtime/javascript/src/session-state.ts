@@ -1,36 +1,42 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ensureDir, readText } from "./fs.js";
-import type { Provider, StoredSession } from "./types.js";
+import type { Provider, StoredThread } from "./types.js";
 
-export function sessionStatePath(stateRoot: string, provider: Provider): string {
+export function providerStatePath(stateRoot: string, provider: Provider): string {
   return path.join(stateRoot, "agents", "providers", `${provider}.json`);
 }
 
-export async function readStoredSession(stateRoot: string, provider: Provider): Promise<StoredSession | null> {
+export async function readStoredThread(stateRoot: string, provider: Provider): Promise<StoredThread | null> {
   try {
-    const raw = await readText(sessionStatePath(stateRoot, provider));
+    const raw = await readText(providerStatePath(stateRoot, provider));
     const payload = JSON.parse(raw);
-    return typeof payload?.sessionId === "string" ? payload : null;
+    if (typeof payload?.threadId === "string") {
+      return payload;
+    }
+    if (typeof payload?.sessionId === "string") {
+      return { ...payload, threadId: payload.sessionId };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-export async function writeStoredSession(
+export async function writeStoredThread(
   stateRoot: string,
   provider: Provider,
-  sessionId: string,
+  threadId: string,
   now: Date = new Date(),
 ): Promise<void> {
-  if (!sessionId) {
+  if (!threadId) {
     return;
   }
-  const target = sessionStatePath(stateRoot, provider);
+  const target = providerStatePath(stateRoot, provider);
   await ensureDir(path.dirname(target));
   const payload = {
     provider,
-    sessionId,
+    threadId,
     updatedAt: now.toISOString(),
   };
   await fs.writeFile(target, `${JSON.stringify(payload, null, 2)}\n`, "utf8");

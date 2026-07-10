@@ -26,8 +26,8 @@ func TestEvaluateProtection(t *testing.T) {
 		{name: "unused", item: Item{Status: StatusUnused}, wantStatus: StatusUnused, wantRemovable: true},
 		{name: "orphaned", item: Item{Status: StatusOrphaned}, wantStatus: StatusOrphaned, wantRemovable: true},
 		{name: "expired", item: Item{Status: StatusExpired}, wantStatus: StatusExpired, wantRemovable: true},
-		{name: "expired referenced blocked", item: Item{Status: StatusExpired, References: []Reference{{Type: "session", ID: "s1"}}}, wantStatus: StatusExpired, wantBlocked: true},
-		{name: "expired referenced included", item: Item{Status: StatusExpired, References: []Reference{{Type: "session", ID: "s1"}}}, includeReferenced: true, wantStatus: StatusExpired, wantRemovable: true},
+		{name: "expired referenced blocked", item: Item{Status: StatusExpired, References: []Reference{{Type: "sandbox", ID: "s1"}}}, wantStatus: StatusExpired, wantBlocked: true},
+		{name: "expired referenced included", item: Item{Status: StatusExpired, References: []Reference{{Type: "sandbox", ID: "s1"}}}, includeReferenced: true, wantStatus: StatusExpired, wantRemovable: true},
 		{name: "future status fails closed", item: Item{Status: Status("future")}, wantStatus: StatusUnknown, wantBlocked: true},
 	}
 

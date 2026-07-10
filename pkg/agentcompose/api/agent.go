@@ -47,13 +47,13 @@ func AgentDefinitionToProto(item domain.AgentDefinition, workspace *domain.Works
 
 func AgentDefinitionTagsToProto(agent domain.AgentDefinition) []*agentcomposev1.SessionTag {
 	return []*agentcomposev1.SessionTag{
-		{Name: domain.AgentSessionTagSource, Value: domain.AgentSessionTagSourceVal},
-		{Name: domain.AgentSessionTagID, Value: agent.ID},
-		{Name: domain.AgentSessionTagName, Value: agent.Name},
+		{Name: domain.AgentSandboxTagSource, Value: domain.AgentSandboxTagSourceVal},
+		{Name: domain.AgentSandboxTagID, Value: agent.ID},
+		{Name: domain.AgentSandboxTagName, Value: agent.Name},
 	}
 }
 
-func EnvItemsToProto(items []domain.SessionEnvVar) []*agentcomposev1.SessionEnvVar {
+func EnvItemsToProto(items []domain.SandboxEnvVar) []*agentcomposev1.SessionEnvVar {
 	resp := make([]*agentcomposev1.SessionEnvVar, 0, len(items))
 	for _, item := range items {
 		resp = append(resp, &agentcomposev1.SessionEnvVar{Name: item.Name, Value: item.Value, Secret: item.Secret})
@@ -61,24 +61,24 @@ func EnvItemsToProto(items []domain.SessionEnvVar) []*agentcomposev1.SessionEnvV
 	return resp
 }
 
-func EnvItemsFromProto(items []*agentcomposev1.SessionEnvVar) []domain.SessionEnvVar {
-	result := make([]domain.SessionEnvVar, 0, len(items))
+func EnvItemsFromProto(items []*agentcomposev1.SessionEnvVar) []domain.SandboxEnvVar {
+	result := make([]domain.SandboxEnvVar, 0, len(items))
 	for _, item := range items {
-		result = append(result, domain.SessionEnvVar{Name: item.GetName(), Value: item.GetValue(), Secret: item.GetSecret()})
+		result = append(result, domain.SandboxEnvVar{Name: item.GetName(), Value: item.GetValue(), Secret: item.GetSecret()})
 	}
 	return result
 }
 
-func SessionTagsFromProto(items []*agentcomposev1.SessionTag) []domain.SessionTag {
+func SessionTagsFromProto(items []*agentcomposev1.SessionTag) []domain.SandboxTag {
 	if len(items) == 0 {
 		return nil
 	}
-	result := make([]domain.SessionTag, 0, len(items))
+	result := make([]domain.SandboxTag, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue
 		}
-		result = append(result, domain.SessionTag{Name: item.GetName(), Value: item.GetValue()})
+		result = append(result, domain.SandboxTag{Name: item.GetName(), Value: item.GetValue()})
 	}
 	return result
 }

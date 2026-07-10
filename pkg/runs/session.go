@@ -7,13 +7,13 @@ import (
 	domain "agent-compose/pkg/model"
 )
 
-type SessionResult struct {
-	Session  *domain.Session
+type SandboxResult struct {
+	Sandbox  *domain.Sandbox
 	Created  bool
 	Warnings []string
 }
 
-func SessionTitle(run domain.ProjectRunRecord) string {
+func SandboxTitle(run domain.ProjectRunRecord) string {
 	project := strings.TrimSpace(run.ProjectName)
 	if project == "" {
 		project = strings.TrimSpace(run.ProjectID)
@@ -25,21 +25,21 @@ func SessionTitle(run domain.ProjectRunRecord) string {
 	return strings.TrimSpace(fmt.Sprintf("%s/%s run", project, agent))
 }
 
-func SessionTags(run domain.ProjectRunRecord) []domain.SessionTag {
-	tags := []domain.SessionTag{
+func SandboxTags(run domain.ProjectRunRecord) []domain.SandboxTag {
+	tags := []domain.SandboxTag{
 		{Name: "project", Value: strings.TrimSpace(run.ProjectID)},
 		{Name: "agent", Value: strings.TrimSpace(run.AgentName)},
 		{Name: "run_id", Value: strings.TrimSpace(run.RunID)},
 		{Name: "source", Value: NormalizeSource(run.Source)},
 	}
 	if schedulerID := strings.TrimSpace(run.SchedulerID); schedulerID != "" {
-		tags = append(tags, domain.SessionTag{Name: "scheduler_id", Value: schedulerID})
+		tags = append(tags, domain.SandboxTag{Name: "scheduler_id", Value: schedulerID})
 	}
 	return tags
 }
 
-func MergeSessionTags(existing, additions []domain.SessionTag) []domain.SessionTag {
-	result := append([]domain.SessionTag(nil), existing...)
+func MergeSandboxTags(existing, additions []domain.SandboxTag) []domain.SandboxTag {
+	result := append([]domain.SandboxTag(nil), existing...)
 	for _, addition := range additions {
 		addition.Name = strings.TrimSpace(addition.Name)
 		addition.Value = strings.TrimSpace(addition.Value)

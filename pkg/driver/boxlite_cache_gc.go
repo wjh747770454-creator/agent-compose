@@ -34,7 +34,7 @@ type boxliteCacheGCState struct {
 	lastRun time.Time
 }
 
-func (r *cgoBoxRuntime) maybeRunCacheGC(currentImageID string) {
+func (r *cgoSandboxRuntime) maybeRunCacheGC(currentImageID string) {
 	if r == nil || r.config == nil {
 		return
 	}
@@ -57,7 +57,7 @@ func (r *cgoBoxRuntime) maybeRunCacheGC(currentImageID string) {
 	}
 }
 
-func (r *cgoBoxRuntime) cleanupLegacyBoxliteCaches() {
+func (r *cgoSandboxRuntime) cleanupLegacyBoxliteCaches() {
 	if r == nil || r.config == nil {
 		return
 	}

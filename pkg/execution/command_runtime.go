@@ -50,13 +50,13 @@ func RuntimeCommandRequestPayloadFromCommand(config *appconfig.Config, mode, com
 	}
 }
 
-func BuildLoaderCommandExecSpec(config *appconfig.Config, session *domain.Session, guestRequestPath, home string) domain.ExecSpec {
+func BuildLoaderCommandExecSpec(config *appconfig.Config, session *domain.Sandbox, guestRequestPath, home string) domain.ExecSpec {
 	return BuildRuntimeCommandExecSpec(config, session, guestRequestPath, home)
 }
 
-func BuildRuntimeCommandExecSpec(config *appconfig.Config, session *domain.Session, guestRequestPath, home string) domain.ExecSpec {
+func BuildRuntimeCommandExecSpec(config *appconfig.Config, session *domain.Sandbox, guestRequestPath, home string) domain.ExecSpec {
 	appconfig.ApplyDefaultGuestPaths(config)
-	env := BuildSessionExecEnv(config, session, home)
+	env := BuildSandboxExecEnv(config, session, home)
 	command := strings.Join([]string{
 		"set -e",
 		"cd " + ShellQuote(config.GuestWorkspacePath),
@@ -85,7 +85,7 @@ func RuntimeCommandResultToExecResult(result domain.RuntimeCommandResult) domain
 	}
 }
 
-func BuildSessionExecEnv(config *appconfig.Config, session *domain.Session, home string) map[string]string {
+func BuildSandboxExecEnv(config *appconfig.Config, session *domain.Sandbox, home string) map[string]string {
 	appconfig.ApplyDefaultGuestPaths(config)
 	env := runtimeEnvMap(session.EnvItems)
 	if env == nil {
@@ -99,7 +99,7 @@ func BuildSessionExecEnv(config *appconfig.Config, session *domain.Session, home
 	}
 	env["GOPATH"] = "/usr/local/go"
 	env["PATH"] = "/root/.local/bin:/usr/local/go/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-	env["SESSION_ID"] = session.Summary.ID
+	env["SANDBOX_ID"] = session.Summary.ID
 	env["WORKSPACE"] = config.GuestWorkspacePath
 	env["STATE_ROOT"] = config.GuestStateRoot
 	env["RUNTIME_ROOT"] = config.GuestRuntimeRoot
@@ -107,7 +107,7 @@ func BuildSessionExecEnv(config *appconfig.Config, session *domain.Session, home
 	return env
 }
 
-func runtimeEnvMap(items []domain.SessionEnvVar) map[string]string {
+func runtimeEnvMap(items []domain.SandboxEnvVar) map[string]string {
 	env := make(map[string]string, len(items))
 	for _, item := range domain.NormalizeEnvItems(items) {
 		name := strings.TrimSpace(item.Name)
@@ -122,7 +122,7 @@ func runtimeEnvMap(items []domain.SessionEnvVar) map[string]string {
 	return env
 }
 
-func managedRuntimeEnvMap(items []domain.SessionEnvVar) map[string]string {
+func managedRuntimeEnvMap(items []domain.SandboxEnvVar) map[string]string {
 	env := make(map[string]string, len(items))
 	for _, item := range domain.NormalizeEnvItems(items) {
 		name := strings.TrimSpace(item.Name)

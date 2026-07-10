@@ -1,16 +1,16 @@
 import { spawn } from "node:child_process";
 import readline from "node:readline";
-import { readStoredSession, writeStoredSession } from "../session-state.js";
+import { readStoredThread, writeStoredThread } from "../session-state.js";
 import { extractText, jsonString } from "../text.js";
 import { TranscriptWriter } from "../transcript.js";
-import type { AgentResult, RunnerOptions, StoredSession } from "../types.js";
+import type { AgentResult, RunnerOptions, StoredThread } from "../types.js";
 
 export class OpenCodeRunner {
   private readonly writer = new TranscriptWriter();
 
   constructor(private readonly options: RunnerOptions) {}
 
-  buildArgs(promptText: string, stored: StoredSession | null): string[] {
+  buildArgs(promptText: string, stored: StoredThread | null): string[] {
     const userPrompt = this.options.systemContext
       ? `${this.options.systemContext}\n\n${promptText}`
       : promptText;
@@ -25,8 +25,8 @@ export class OpenCodeRunner {
     if (model) {
       args.push("--model", model);
     }
-    if (stored?.sessionId) {
-      args.push("--session", stored.sessionId);
+    if (stored?.threadId) {
+      args.push("--session", stored.threadId);
     }
     return args;
   }
@@ -40,9 +40,9 @@ export class OpenCodeRunner {
   }
 
   handleEvent(event: Record<string, unknown>, result: AgentResult): void {
-    const sessionId = stringField(event, "sessionID", "sessionId", "session_id");
-    if (sessionId) {
-      result.sessionId = sessionId;
+    const providerThreadID = stringField(event, "sessionID", "sessionId", "session_id");
+    if (providerThreadID) {
+      result.threadId = providerThreadID;
     }
 
     const eventType = String(event.type || event.event || "");
@@ -90,10 +90,10 @@ export class OpenCodeRunner {
       throw new Error("structured JSON output is not supported by opencode runner");
     }
 
-    const stored = await readStoredSession(this.options.stateRoot, "opencode");
+    const stored = await readStoredThread(this.options.stateRoot, "opencode");
     const result: AgentResult = {
       provider: "opencode",
-      sessionId: stored?.sessionId || "",
+      threadId: stored?.threadId || "",
       stopReason: "completed",
       finalText: "",
       transcript: "",
@@ -145,7 +145,7 @@ export class OpenCodeRunner {
     if (!result.finalText && result.transcript) {
       result.finalText = result.transcript;
     }
-    await writeStoredSession(this.options.stateRoot, "opencode", result.sessionId);
+    await writeStoredThread(this.options.stateRoot, "opencode", result.threadId);
     return result;
   }
 }

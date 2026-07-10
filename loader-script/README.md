@@ -56,6 +56,10 @@ scheduler.cron("daily-summary", "0 9 * * *", function dailySummary() {
 }, { timezone: "Asia/Shanghai" });
 ```
 
+Sandbox lifecycle topics currently keep the compatibility prefix
+`agent-compose.session.*`; their payloads use sandbox-shaped fields such as
+`sandboxId`.
+
 省略 `triggerId` 时 agent-compose 会生成 `auto-...` ID，但脚本改动后不容易保持稳定。
 
 ## 触发器 API
@@ -120,13 +124,13 @@ scheduler.state.delete(key);
 ```js
 const reply = scheduler.agent(prompt, {
   agent: "codex",
-  sessionPolicy: "sticky", // "sticky" | "new" | "reuse"
+  sandboxPolicy: "sticky", // "sticky" | "new" | "reuse"
   timeout: "10m",
-  title: "Loader Agent Session",
+  title: "Loader Agent Sandbox",
   driver: "boxlite",
   guestImage: "agent-compose-guest:latest",
   workspaceId: "workspace-id",
-  sessionEnv: {
+  sandboxEnv: {
     API_TOKEN: { value: "token", secret: true },
   },
   outputSchema: schema,
@@ -141,17 +145,17 @@ const reply = scheduler.agent(prompt, {
   output,
   finalText,
   json,
-  sessionId,
+  sandboxId,
   cellId,
   agent,
-  agentSessionId,
+  agentThreadId,
   stopReason,
   success,
   exitCode
 }
 ```
 
-`scheduler.llm(...)` 调用 daemon 侧 LLM 配置。通过 daemon 环境变量或 UI global env 设置 `LLM_API_PROTOCOL=chat_completions`（别名 `chat`、`chat_completion`）可切换到 OpenAI 兼容 Chat Completions 后端；默认为 `responses`（OpenAI Responses API）。该路径仅用于单次文本生成，不会创建 workspace agent session。使用 `outputSchema` 时，`chat_completions` 通过 prompt 引导并设置 `json_object`，不等价于 Responses API strict JSON Schema。
+`scheduler.llm(...)` 调用 daemon 侧 LLM 配置。通过 daemon 环境变量或 UI global env 设置 `LLM_API_PROTOCOL=chat_completions`（别名 `chat`、`chat_completion`）可切换到 OpenAI 兼容 Chat Completions 后端；默认为 `responses`（OpenAI Responses API）。该路径仅用于单次文本生成，不会创建 workspace agent sandbox。使用 `outputSchema` 时，`chat_completions` 通过 prompt 引导并设置 `json_object`，不等价于 Responses API strict JSON Schema。
 
 ```js
 const result = scheduler.llm(prompt, {
@@ -173,12 +177,12 @@ const result = scheduler.exec({
   env: { FOO: "bar" },
   timeoutMs: 30000,
   maxOutputBytes: 4096,
-  sessionPolicy: "new",
-  title: "Loader Command Session",
+  sandboxPolicy: "new",
+  title: "Loader Command Sandbox",
   driver: "boxlite",
   guestImage: "agent-compose-guest:latest",
   workspaceId: "workspace-id",
-  sessionEnv: {
+  sandboxEnv: {
     COMMAND_TOKEN: { value: "token", secret: true },
   },
 });
@@ -201,7 +205,7 @@ const shell = scheduler.shell("echo hello && pwd", {
   stdoutTruncated,
   stderrTruncated,
   outputTruncated,
-  sessionId,
+  sandboxId,
   cellId,
   artifacts
 }
@@ -249,22 +253,24 @@ scheduler.z.object({ key: schema });
 
 `scheduler.z.object(...)` 会生成 `additionalProperties: false`，并把所有字段都视为必填字段。
 
-## Session RPC
+## Sandbox RPC
 
-`scheduler.session` 暴露 `SessionService` 的所有 unary RPC，参数和返回值使用 Connect/proto JSON shape。
+`scheduler.sandbox` 暴露 sandbox lifecycle unary RPC，参数和返回值使用 sandbox JSON shape。
 
 ```js
-const created = scheduler.session.createSession({ title: "Loader Session" });
-const sessionId = created.session.summary.sessionId;
+const created = scheduler.sandbox.createSandbox({ title: "Loader Sandbox" });
+const sandboxId = created.sandbox.summary.sandboxId;
 
-const current = scheduler.session.getSession({ sessionId });
-const sessions = scheduler.session.listSessions({});
-const proxy = scheduler.session.getSessionProxy({ sessionId });
-const resumed = scheduler.session.resumeSession({ sessionId });
-const stopped = scheduler.session.stopSession({ sessionId });
+const current = scheduler.sandbox.getSandbox({ sandboxId });
+const sandboxes = scheduler.sandbox.listSandboxes({});
+const proxy = scheduler.sandbox.getSandboxProxy({ sandboxId });
+const resumed = scheduler.sandbox.resumeSandbox({ sandboxId });
+const stopped = scheduler.sandbox.stopSandbox({ sandboxId });
 ```
 
-方法名同时支持 lower camel case 和原始 proto 名，例如 `scheduler.session.resumeSession(...)` 与 `scheduler.session.ResumeSession(...)`。
+方法名同时支持 lower camel case 和 PascalCase，例如 `scheduler.sandbox.resumeSandbox(...)` 与 `scheduler.sandbox.ResumeSandbox(...)`。
+
+Deprecated compatibility aliases `scheduler.session.*`、`sessionPolicy` 和 `sessionEnv` 仍会映射到 sandbox API，但新脚本应使用 `scheduler.sandbox.*`、`sandboxPolicy` 和 `sandboxEnv`。
 
 ## Runtime 信息
 
@@ -276,7 +282,7 @@ scheduler.runtime.name; // "scheduler"
 
 保存或校验 Loader 时，脚本会被求值以收集触发器。此时不要在顶层调用会执行副作用的 host API。
 
-- `scheduler.agent`、`scheduler.llm`、`scheduler.exec`、`scheduler.shell`、`scheduler.event.publish`、`scheduler.session.*` 在校验阶段不可用。
+- `scheduler.agent`、`scheduler.llm`、`scheduler.exec`、`scheduler.shell`、`scheduler.event.publish`、`scheduler.sandbox.*` 在校验阶段不可用。
 - `scheduler.log` 在校验阶段是 no-op。
 - `scheduler.state.*` 在校验阶段不会访问持久状态。
 

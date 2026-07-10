@@ -31,7 +31,7 @@ func (s *loaderStore) ensureLoaderSchema(ctx context.Context) error {
             driver TEXT NOT NULL DEFAULT '',
             guest_image TEXT NOT NULL DEFAULT '',
             default_agent TEXT NOT NULL DEFAULT 'codex',
-            session_policy TEXT NOT NULL DEFAULT 'sticky',
+            sandbox_policy TEXT NOT NULL DEFAULT 'sticky',
             concurrency_policy TEXT NOT NULL DEFAULT 'skip',
             capset_ids TEXT NOT NULL DEFAULT '[]',
             env_json TEXT NOT NULL DEFAULT '[]',
@@ -84,9 +84,9 @@ func (s *loaderStore) ensureLoaderSchema(ctx context.Context) error {
             level TEXT NOT NULL DEFAULT 'info',
             message TEXT NOT NULL DEFAULT '',
             payload_json TEXT NOT NULL DEFAULT '',
-            linked_session_id TEXT NOT NULL DEFAULT '',
+            linked_sandbox_id TEXT NOT NULL DEFAULT '',
             linked_cell_id TEXT NOT NULL DEFAULT '',
-            linked_agent_session_id TEXT NOT NULL DEFAULT '',
+            linked_agent_thread_id TEXT NOT NULL DEFAULT '',
             created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
             PRIMARY KEY(loader_id, event_id),
             FOREIGN KEY(loader_id) REFERENCES loader(id) ON DELETE CASCADE
@@ -102,7 +102,7 @@ func (s *loaderStore) ensureLoaderSchema(ctx context.Context) error {
         );`,
 		`CREATE TABLE IF NOT EXISTS loader_binding (
             loader_id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
+            sandbox_id TEXT NOT NULL,
             created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
             updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
         );`,
@@ -217,7 +217,7 @@ func (s *loaderStore) CreateLoader(ctx context.Context, item Loader) (Loader, er
 	normalized.Summary.CreatedAt = now
 	normalized.Summary.UpdatedAt = now
 	_, err = s.db.ExecContext(ctx, `INSERT INTO loader(
-        id, name, description, runtime, script, workspace_id, agent_id, driver, guest_image, default_agent, session_policy, concurrency_policy, capset_ids, env_json, volumes_json,
+        id, name, description, runtime, script, workspace_id, agent_id, driver, guest_image, default_agent, sandbox_policy, concurrency_policy, capset_ids, env_json, volumes_json,
         managed_project_id, managed_project_revision, managed_agent_name, managed_scheduler_id, enabled, last_error, created_at, updated_at
     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		normalized.Summary.ID,
@@ -230,7 +230,7 @@ func (s *loaderStore) CreateLoader(ctx context.Context, item Loader) (Loader, er
 		normalized.Summary.Driver,
 		normalized.Summary.GuestImage,
 		normalized.Summary.DefaultAgent,
-		normalized.Summary.SessionPolicy,
+		normalized.Summary.SandboxPolicy,
 		normalized.Summary.ConcurrencyPolicy,
 		capsetIDsJSON,
 		envJSON,
@@ -280,7 +280,7 @@ func (s *loaderStore) UpdateLoader(ctx context.Context, item Loader) (Loader, er
 	normalized.Summary.CreatedAt = existing.Summary.CreatedAt
 	normalized.Summary.UpdatedAt = time.Now().UTC()
 	result, err := s.db.ExecContext(ctx, `UPDATE loader SET
-        name = ?, description = ?, runtime = ?, script = ?, workspace_id = ?, agent_id = ?, driver = ?, guest_image = ?, default_agent = ?, session_policy = ?,
+        name = ?, description = ?, runtime = ?, script = ?, workspace_id = ?, agent_id = ?, driver = ?, guest_image = ?, default_agent = ?, sandbox_policy = ?,
         concurrency_policy = ?, capset_ids = ?, env_json = ?, volumes_json = ?, managed_project_id = ?, managed_project_revision = ?, managed_agent_name = ?, managed_scheduler_id = ?,
         enabled = ?, last_error = ?, updated_at = ?
         WHERE id = ?`,
@@ -293,7 +293,7 @@ func (s *loaderStore) UpdateLoader(ctx context.Context, item Loader) (Loader, er
 		normalized.Summary.Driver,
 		normalized.Summary.GuestImage,
 		normalized.Summary.DefaultAgent,
-		normalized.Summary.SessionPolicy,
+		normalized.Summary.SandboxPolicy,
 		normalized.Summary.ConcurrencyPolicy,
 		capsetIDsJSON,
 		envJSON,
@@ -847,7 +847,7 @@ func (s *loaderStore) ListRecentLoaderRuns(ctx context.Context, limit int) ([]do
 
 func (s *loaderStore) AddLoaderEvent(ctx context.Context, event domain.LoaderEvent) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO loader_event(
-        loader_id, event_id, run_id, trigger_id, type, level, message, payload_json, linked_session_id, linked_cell_id, linked_agent_session_id, created_at
+        loader_id, event_id, run_id, trigger_id, type, level, message, payload_json, linked_sandbox_id, linked_cell_id, linked_agent_thread_id, created_at
     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		strings.TrimSpace(event.LoaderID),
 		strings.TrimSpace(event.ID),
@@ -857,9 +857,9 @@ func (s *loaderStore) AddLoaderEvent(ctx context.Context, event domain.LoaderEve
 		strings.TrimSpace(event.Level),
 		strings.TrimSpace(event.Message),
 		strings.TrimSpace(event.PayloadJSON),
-		strings.TrimSpace(event.LinkedSessionID),
+		strings.TrimSpace(event.LinkedSandboxID),
 		strings.TrimSpace(event.LinkedCellID),
-		strings.TrimSpace(event.LinkedAgentSessionID),
+		strings.TrimSpace(event.LinkedAgentThreadID),
 		event.CreatedAt.UTC().UnixMilli(),
 	)
 	if err != nil {
@@ -940,17 +940,17 @@ func (s *loaderStore) GetLoaderBinding(ctx context.Context, loaderID string) (do
 
 func (s *loaderStore) UpsertLoaderBinding(ctx context.Context, binding domain.LoaderBinding) error {
 	binding.LoaderID = strings.TrimSpace(binding.LoaderID)
-	binding.SessionID = strings.TrimSpace(binding.SessionID)
-	if binding.LoaderID == "" || binding.SessionID == "" {
-		return fmt.Errorf("loader binding requires loader id and session id")
+	binding.SandboxID = strings.TrimSpace(binding.SandboxID)
+	if binding.LoaderID == "" || binding.SandboxID == "" {
+		return fmt.Errorf("loader binding requires loader id and sandbox id")
 	}
 	now := time.Now().UTC()
 	if binding.CreatedAt.IsZero() {
 		binding.CreatedAt = now
 	}
 	binding.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `INSERT INTO loader_binding(loader_id, session_id, created_at, updated_at) VALUES(?, ?, ?, ?)
-        ON CONFLICT(loader_id) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at`, binding.LoaderID, binding.SessionID, binding.CreatedAt.Unix(), binding.UpdatedAt.Unix())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO loader_binding(loader_id, sandbox_id, created_at, updated_at) VALUES(?, ?, ?, ?)
+        ON CONFLICT(loader_id) DO UPDATE SET sandbox_id = excluded.sandbox_id, updated_at = excluded.updated_at`, binding.LoaderID, binding.SandboxID, binding.CreatedAt.Unix(), binding.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("upsert loader binding: %w", err)
 	}

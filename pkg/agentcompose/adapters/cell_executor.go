@@ -29,15 +29,15 @@ func NewCellExecutor(config *appconfig.Config, store *sessionstore.Store, runtim
 	return &CellExecutor{config: config, store: store, runtimes: runtimes, streams: streams}
 }
 
-func (e *CellExecutor) ExecuteCell(ctx context.Context, session *domain.Session, cellType, source string) (domain.NotebookCell, error) {
+func (e *CellExecutor) ExecuteCell(ctx context.Context, session *domain.Sandbox, cellType, source string) (domain.NotebookCell, error) {
 	return e.executeCell(ctx, session, cellType, source, execution.CellExecutionStream{})
 }
 
-func (e *CellExecutor) ExecuteCellStream(ctx context.Context, session *domain.Session, cellType, source string, stream execution.CellExecutionStream) (domain.NotebookCell, error) {
+func (e *CellExecutor) ExecuteCellStream(ctx context.Context, session *domain.Sandbox, cellType, source string, stream execution.CellExecutionStream) (domain.NotebookCell, error) {
 	return e.executeCell(ctx, session, cellType, source, stream)
 }
 
-func (e *CellExecutor) executeCell(ctx context.Context, session *domain.Session, cellType, source string, stream execution.CellExecutionStream) (domain.NotebookCell, error) {
+func (e *CellExecutor) executeCell(ctx context.Context, session *domain.Sandbox, cellType, source string, stream execution.CellExecutionStream) (domain.NotebookCell, error) {
 	appconfig.ApplyDefaultGuestPaths(e.config)
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -49,7 +49,7 @@ func (e *CellExecutor) executeCell(ctx context.Context, session *domain.Session,
 		return domain.NotebookCell{}, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, e.config.SessionStartTimeout)
+	ctx, cancel := context.WithTimeout(ctx, e.config.SandboxStartTimeout)
 	defer cancel()
 	execCtx, execCancel := context.WithCancel(ctx)
 	defer execCancel()
@@ -155,7 +155,7 @@ func (e *CellExecutor) executeCell(ctx context.Context, session *domain.Session,
 		eventType = "kernel.cell.failed"
 		eventMessage = firstNonEmpty(result.Stderr, fmt.Sprintf("%s cell failed with exit code %d", cellType, result.ExitCode))
 	}
-	event := domain.SessionEvent{
+	event := domain.SandboxEvent{
 		ID:        uuid.NewString(),
 		Type:      eventType,
 		Level:     eventLevel,

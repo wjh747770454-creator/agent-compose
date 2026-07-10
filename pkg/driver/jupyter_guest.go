@@ -148,7 +148,7 @@ func jupyterLogPath(config *appconfig.Config) string {
 	return filepath.Join(jupyterLogDir(config), "jupyter.log")
 }
 
-func readSessionJupyterLog(session *Session) string {
+func readSandboxJupyterLog(session *Sandbox) string {
 	if session == nil {
 		return ""
 	}
@@ -207,7 +207,7 @@ func jupyterLaunchCommandWithBootstrap(config *appconfig.Config, proxyState Prox
 	}
 	commands = append(commands, launch)
 	if includeDirectoryOnlyBootstrap {
-		commands = append(commands[:1], append([]string{directoryOnlyGuestSessionBootstrapCommand(config)}, commands[1:]...)...)
+		commands = append(commands[:1], append([]string{directoryOnlyGuestSandboxBootstrapCommand(config)}, commands[1:]...)...)
 	}
 	return strings.Join(commands, " && ")
 }

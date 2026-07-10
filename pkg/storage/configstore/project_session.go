@@ -9,7 +9,7 @@ import (
 	"agent-compose/pkg/projects"
 )
 
-func (s *projectStore) ListProjectSessionRuns(ctx context.Context, filter domain.ProjectSessionRelationFilter) ([]ProjectRunRecord, error) {
+func (s *projectStore) ListProjectSandboxRuns(ctx context.Context, filter domain.ProjectSandboxRelationFilter) ([]ProjectRunRecord, error) {
 	query := projects.SelectProjectRunSQL() + ` WHERE sandbox_id != ''`
 	args := make([]any, 0, 4+len(filter.Statuses))
 	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" {
@@ -20,11 +20,7 @@ func (s *projectStore) ListProjectSessionRuns(ctx context.Context, filter domain
 		query += ` AND agent_name = ?`
 		args = append(args, agentName)
 	}
-	sandboxID := strings.TrimSpace(filter.SandboxID)
-	if sandboxID == "" {
-		sandboxID = strings.TrimSpace(filter.SessionID)
-	}
-	if sandboxID != "" {
+	if sandboxID := strings.TrimSpace(filter.SandboxID); sandboxID != "" {
 		query += ` AND sandbox_id = ?`
 		args = append(args, sandboxID)
 	}
@@ -48,7 +44,7 @@ func (s *projectStore) ListProjectSessionRuns(ctx context.Context, filter domain
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query project session runs: %w", err)
+		return nil, fmt.Errorf("query project sandbox runs: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var items []ProjectRunRecord
@@ -60,17 +56,17 @@ func (s *projectStore) ListProjectSessionRuns(ctx context.Context, filter domain
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate project session runs: %w", err)
+		return nil, fmt.Errorf("iterate project sandbox runs: %w", err)
 	}
 	return items, nil
 }
 
-func (s *projectStore) ListProjectRunsForSession(ctx context.Context, sessionID string) ([]ProjectRunRecord, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return nil, fmt.Errorf("session id is required")
+func (s *projectStore) ListProjectRunsForSandbox(ctx context.Context, sandboxID string) ([]ProjectRunRecord, error) {
+	sandboxID = strings.TrimSpace(sandboxID)
+	if sandboxID == "" {
+		return nil, fmt.Errorf("sandbox id is required")
 	}
-	return s.ListProjectSessionRuns(ctx, domain.ProjectSessionRelationFilter{SandboxID: sessionID})
+	return s.ListProjectSandboxRuns(ctx, domain.ProjectSandboxRelationFilter{SandboxID: sandboxID})
 }
 
 func placeholders(count int) string {

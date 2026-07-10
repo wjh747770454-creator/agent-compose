@@ -2,13 +2,13 @@
 
 ## Overview
 
-This repo contains the agent-compose session control plane. It creates, resumes, stops, and proxies isolated notebook runtimes, and exposes agent, loader, LLM, configuration, and workspace APIs.
+This repo contains the agent-compose sandbox control plane. It creates, resumes, stops, and proxies isolated notebook runtimes, and exposes agent, loader, LLM, configuration, and workspace APIs.
 
 Main entrypoints:
 - `cmd/agent-compose/main.go`: starts the HTTP/Connect service, registers agent-compose routes, and handles graceful shutdown.
 - `pkg/agentcompose/app/`: service graph setup, route registration, and background manager startup.
 - `pkg/agentcompose/api/`: Connect handlers and protobuf/domain mapping.
-- `pkg/agentcompose/adapters/`: daemon-only runtime, session, loader, capability, and LLM adapters.
+- `pkg/agentcompose/adapters/`: daemon-only runtime, sandbox/v1 session bridge, loader, capability, and LLM adapters.
 - `pkg/agentcompose/proxy/`: HTTP proxy routes for Jupyter, workspaces, and runtime LLM facade.
 - Owner packages under `pkg/` contain shared domain code: `model`, `storage`, `loaders`, `projects`, `runs`, `sessions`, `execution`, `llms`, `events`, `images`, `dashboard`, and `capabilities`. Event bus code lives in `loaders`; small dependency-free storage helpers (e.g. stored-time decoding) live in `pkg/storage/storeutil`.
 - `proto/agentcompose/v1/`: agent-compose Connect API definitions and generated Go code.
@@ -33,14 +33,14 @@ Main entrypoints:
 ## Core Services
 
 The active Connect services are:
-- `SessionService`
+- `SessionService` (v1 compatibility API)
 - `KernelService`
 - `AgentService`
 - `LLMService`
 - `ConfigService`
 - `LoaderService`
 
-Jupyter proxying is handled by HTTP routes in `pkg/agentcompose/proxy` under `/agent-compose/session/<session_id>`.
+Jupyter proxying is handled by HTTP routes in `pkg/agentcompose/proxy` under `/agent-compose/session/<session_id>` for the v1-compatible proxy path.
 
 ## Runtime Drivers
 
@@ -54,7 +54,7 @@ The default runtime driver is `docker`.
 
 Important defaults:
 - `DATA_ROOT`: `./data/`
-- `SESSION_ROOT`: `<data-root>/sessions`
+- `SANDBOX_ROOT`: `<data-root>/sandboxes`
 - `HTTP_LISTEN`: `127.0.0.1:7410`
 - `DEFAULT_IMAGE`: `debian:bookworm-slim`
 - `JUPYTER_PROXY_BASE`: `/jupyter`
@@ -68,7 +68,7 @@ Daemon LLM client (`LLMService`, `scheduler.llm`, SDK `runtime.llm`):
 
 ## Persistence
 
-Session metadata, notebook cells, event history, runtime state, and proxy state are stored under `SESSION_ROOT`. Session file storage helpers live in `pkg/storage/sessionstore`.
+Sandbox metadata, notebook cells, event history, runtime state, and proxy state are stored under `SANDBOX_ROOT`. Sandbox file storage helpers currently live in the compatibility package `pkg/storage/sessionstore`.
 
 Global environment variables, workspace configs, loader definitions, loader triggers, loader runs, and loader events are stored in `DATA_ROOT/data.db`. SQLite config-store helpers live in `pkg/storage/configstore`.
 
@@ -82,8 +82,8 @@ Current Docker build behavior:
 Current compose behavior:
 - `docker-compose.yml` deploys the `agent-compose` service and the published `agent-compose-frontend` nginx image
 - the agent-compose service listens on `7410`
-- data is mounted from `./data/agent-compose`
-- the user-created `.env` is mounted read-only at `/app/.env` for daemon configuration
+- data is mounted from `./data`
+- the user-created `.env` is mounted read-only at `/data/work/.env` for daemon configuration
 - the Docker socket and `/dev/kvm` are exposed for runtime support
 
 Compose and environment variable conventions:

@@ -12,14 +12,15 @@ function runWorkflow(input) {
   if (context.prompt) {
     const reply = scheduler.agent(context.prompt, {
       agent: "codex",
-      sessionPolicy: "sticky",
+      sandboxPolicy: "sticky",
     });
 
     result.agent = {
       ok: reply.success,
-      sessionId: reply.sessionId,
+      sandboxId: reply.sandboxId,
       cellId: reply.cellId,
       agent: reply.agent,
+      agentThreadId: reply.agentThreadId,
       text: reply.finalText ?? reply.text ?? reply.output ?? "",
     };
   }

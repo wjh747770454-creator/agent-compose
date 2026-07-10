@@ -147,8 +147,8 @@ func testComposeProjectPureHelpers(t *testing.T) {
 		{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_CREATED, ResourceType: "agent", ResourceId: "agent-1", Name: "worker"},
 		{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "project_scheduler", ResourceId: "scheduler-1", Name: "worker"},
 		{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "loader", ResourceId: "loader-1", Name: "worker scheduler"},
-		{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_REMOVED, ResourceType: "session", ResourceId: "session-1", Name: "old"},
-		{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UNCHANGED, ResourceType: "session", ResourceId: "session-2", Message: "stop failed"},
+		{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_REMOVED, ResourceType: "sandbox", ResourceId: "session-1", Name: "old"},
+		{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UNCHANGED, ResourceType: "sandbox", ResourceId: "session-2", Message: "stop failed"},
 	}
 	displaySpec := &compose.NormalizedProjectSpec{Agents: []compose.NormalizedAgentSpec{{
 		Name: "worker",
@@ -192,7 +192,7 @@ func testComposeProjectPureHelpers(t *testing.T) {
 		Changes: changes,
 	}
 	downOutput := composeDownOutputFromResponse(downResp)
-	if downOutput.Status != "partial-failure" || downOutput.FailedSessionStops != 1 || len(composeChangeOutputs(changes)) != len(changes) {
+	if downOutput.Status != "partial-failure" || downOutput.FailedSandboxStops != 1 || len(composeChangeOutputs(changes)) != len(changes) {
 		t.Fatalf("composeDownOutputFromResponse = %#v", downOutput)
 	}
 	out.Reset()
@@ -230,10 +230,10 @@ func testComposeProjectPureHelpers(t *testing.T) {
 		t.Fatalf("unchanged down output = %#v", unchangedDown)
 	}
 	if projectChangeActionText(agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UNSPECIFIED) != "unspecified" ||
-		countProjectDownFailedSessionStops(changes) != 1 {
+		countProjectDownFailedSandboxStops(changes) != 1 {
 		t.Fatalf("project change helpers returned unexpected values")
 	}
-	_ = domain.SessionSummary{ID: "compile-check"}
+	_ = domain.SandboxSummary{ID: "compile-check"}
 }
 
 func testComposeProjectOutputHelpers(t *testing.T) {
@@ -288,25 +288,25 @@ func testComposeProjectOutputHelpers(t *testing.T) {
 		t.Fatalf("composePSStatusFilter default filter=%#v err=%v", filter, err)
 	}
 
-	newerRun := &agentcomposev2.RunSummary{RunId: "run-new", ProjectId: "project-1", SessionId: "session-1", UpdatedAt: "2026-07-02T00:00:00Z"}
-	olderRun := &agentcomposev2.RunSummary{RunId: "run-old", ProjectId: "project-1", SessionId: "session-1", CreatedAt: "2026-07-01T00:00:00Z"}
-	bySession := latestRunsBySession([]*agentcomposev2.RunSummary{
+	newerRun := &agentcomposev2.RunSummary{RunId: "run-new", ProjectId: "project-1", SandboxId: "sandbox-1", UpdatedAt: "2026-07-02T00:00:00Z"}
+	olderRun := &agentcomposev2.RunSummary{RunId: "run-old", ProjectId: "project-1", SandboxId: "sandbox-1", CreatedAt: "2026-07-01T00:00:00Z"}
+	bySandbox := latestRunsBySandbox([]*agentcomposev2.RunSummary{
 		olderRun,
-		{RunId: "missing-session"},
+		{RunId: "missing-sandbox"},
 		newerRun,
 	})
-	if bySession["session-1"].GetRunId() != "run-new" {
-		t.Fatalf("latestRunsBySession = %#v", bySession)
+	if bySandbox["sandbox-1"].GetRunId() != "run-new" {
+		t.Fatalf("latestRunsBySandbox = %#v", bySandbox)
 	}
 	session := &agentcomposev1.SessionSummary{
-		SessionId:     "session-1",
+		SessionId:     "sandbox-1",
 		TriggerSource: "manual project-1 run",
 		Tags: []*agentcomposev1.SessionTag{
 			{Name: " project_id ", Value: " project-1 "},
 			{Name: "", Value: "ignored"},
 		},
 	}
-	if !composePSSessionBelongsToProject(session, project, bySession) {
+	if !composePSSessionBelongsToProject(session, project, bySandbox) {
 		t.Fatalf("expected session to belong to project")
 	}
 	if tags := sessionTagsMap(session.GetTags()); tags["project_id"] != "project-1" {
@@ -336,7 +336,7 @@ func testComposeProjectOutputHelpers(t *testing.T) {
 
 	var out bytes.Buffer
 	psOutput := composePSOutput{Project: output.Project, Sandboxes: []composePSSandboxOutput{{
-		ID: "session-1", ShortID: "session-1", Agent: "reviewer", Status: "running", RunID: "run-new", RunShortID: "run-new", CreatedAt: "created", UpdatedAt: "updated", Driver: "docker", Image: "guest", Workspace: "/repo",
+		SandboxID: "session-1", SandboxShortID: "session-1", Agent: "reviewer", Status: "running", RunID: "run-new", RunShortID: "run-new", CreatedAt: "created", UpdatedAt: "updated", Driver: "docker", Image: "guest", Workspace: "/repo",
 	}}}
 	if err := writePSText(&out, psOutput, true); err != nil {
 		t.Fatalf("writePSText verbose returned error: %v", err)
@@ -362,7 +362,7 @@ func testComposeRunLogAndExecHelpers(t *testing.T) {
 		AgentName:   "reviewer",
 		Source:      agentcomposev2.RunSource_RUN_SOURCE_SCHEDULER,
 		Status:      agentcomposev2.RunStatus_RUN_STATUS_FAILED,
-		SessionId:   "session-1",
+		SandboxId:   "session-1",
 		ExitCode:    7,
 		Error:       "failed",
 		StartedAt:   "started",
@@ -460,7 +460,7 @@ func testComposeRunLogAndExecHelpers(t *testing.T) {
 
 	execOutput := composeExecOutputFromResult(&agentcomposev2.ExecResult{
 		ExecId:    "exec-1",
-		SessionId: "session-1",
+		SandboxId: "session-1",
 		RunId:     "run-1",
 		Command:   &agentcomposev2.ExecCommand{Command: "bash", Args: []string{"-lc", "echo ok"}},
 		Cwd:       "/repo",
@@ -566,7 +566,7 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 	out.Reset()
 	logsCmd.SetErr(&out)
 	logOptions, err := normalizeComposeLogsOptions(logsCmd, composeLogsOptions{SandboxID: "sandbox-logs", TailLines: -1}, nil)
-	if err != nil || logOptions.SandboxID != "sandbox-logs" || logOptions.SessionID != "" || out.String() != "" {
+	if err != nil || logOptions.SandboxID != "sandbox-logs" || out.String() != "" {
 		t.Fatalf("normalizeComposeLogsOptions options=%#v err=%v stderr=%q", logOptions, err, out.String())
 	}
 	if _, err := normalizeComposeLogsOptions(&cobra.Command{Use: "logs"}, composeLogsOptions{TailLines: -2}, nil); commandExitCode(err) != exitCodeUsage {
@@ -595,7 +595,7 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 	normalizedExecProject := &compose.NormalizedProjectSpec{Name: "Project"}
 	execSandboxID := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	req, err := normalizeComposeExecRequest(&cobra.Command{Use: "exec"}, cliServiceClients{}, normalizedExecProject, "project-1", composeExecOptions{Cwd: " /repo "}, []string{" " + execSandboxID + " ", "bash", "-lc", "pwd"})
-	if err != nil || req.GetSessionId() != execSandboxID || req.GetCwd() != "/repo" || req.GetCommand().GetCommand() != "bash" {
+	if err != nil || req.GetSandboxId() != execSandboxID || req.GetCwd() != "/repo" || req.GetCommand().GetCommand() != "bash" {
 		t.Fatalf("normalizeComposeExecRequest req=%#v err=%v", req, err)
 	}
 	for _, tc := range []struct {
@@ -661,10 +661,10 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 		BlockWriteBytes:  metric("bytes", agentcomposev2.MetricStatus_METRIC_STATUS_OK),
 		UptimeSeconds:    metric("seconds", agentcomposev2.MetricStatus_METRIC_STATUS_OK),
 	})
-	if stats.ID != "session-1" || stats.CPUPercent.Status != "ok" || stats.MemoryLimitBytes.Status != "unavailable" || stats.MemoryPercent.Status != "unknown" {
+	if stats.SandboxID != "session-1" || stats.CPUPercent.Status != "ok" || stats.MemoryLimitBytes.Status != "unavailable" || stats.MemoryPercent.Status != "unknown" {
 		t.Fatalf("composeStatsOutputFromProto = %#v", stats)
 	}
-	if nilStats := composeStatsOutputFromProto(nil); nilStats.ID != "" {
+	if nilStats := composeStatsOutputFromProto(nil); nilStats.SandboxID != "" {
 		t.Fatalf("nil stats = %#v", nilStats)
 	}
 	if nilMetric := composeMetricOutputFromProto(nil); nilMetric.Status != "unknown" {
@@ -732,15 +732,14 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 	}
 	cacheItem := &agentcomposev2.CacheItem{
 		CacheId:        "cache-1",
-		Domain:         agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE,
+		Domain:         agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE,
 		Driver:         "docker",
 		Kind:           "sandbox-dir",
-		Path:           "/tmp/session",
+		Path:           "/tmp/sandbox",
 		SizeBytes:      789,
 		ImageId:        "sha256:image",
 		ImageRef:       "guest:latest",
 		ResolvedRef:    "guest@sha256:abc",
-		SessionId:      "session-1",
 		SandboxId:      "sandbox-1",
 		Status:         agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED,
 		Removable:      false,
@@ -748,10 +747,10 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 		LastUsedAt:     "used",
 		LastUsedSource: "metadata",
 		References: []*agentcomposev2.CacheReference{{
-			Type:        "session",
-			Id:          "session-1",
-			Name:        "Session",
-			Path:        "/tmp/session",
+			Type:        "sandbox",
+			Id:          "sandbox-1",
+			Name:        "Sandbox",
+			Path:        "/tmp/sandbox",
 			Status:      "running",
 			Description: "active sandbox",
 		}},
@@ -809,7 +808,7 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 	if !strings.Contains(out.String(), `"removed"`) || !strings.Contains(out.String(), "cache-1") {
 		t.Fatalf("cache remove json = %q", out.String())
 	}
-	if cacheRefSessionText(composeCacheOutput{ImageID: "image-only"}) != "image-only" ||
+	if cacheRefText(composeCacheOutput{ImageID: "image-only"}) != "image-only" ||
 		cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_OCI_IMAGE_STORE) != "oci-image-store" ||
 		cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE) != "materialized-image-cache" ||
 		cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE) != "runtime-derived-cache" ||
@@ -842,8 +841,8 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 		imageAvailabilityStatusText(agentcomposev2.ImageAvailabilityStatus_IMAGE_AVAILABILITY_STATUS_UNSPECIFIED) != "unspecified" ||
 		imageOperationStatusText(agentcomposev2.ImageOperationStatus_IMAGE_OPERATION_STATUS_SUCCEEDED) != "succeeded" ||
 		imageOperationStatusText(agentcomposev2.ImageOperationStatus_IMAGE_OPERATION_STATUS_UNSPECIFIED) != "unspecified" ||
-		cacheRefSessionText(composeCacheOutput{SandboxID: "sandbox-only"}) != "sandbox-only" ||
-		cacheRefSessionText(composeCacheOutput{ResolvedRef: "resolved-only"}) != "resolved-only" ||
+		cacheRefText(composeCacheOutput{SandboxID: "sandbox-only"}) != "sandbox-only" ||
+		cacheRefText(composeCacheOutput{ResolvedRef: "resolved-only"}) != "resolved-only" ||
 		firstNonEmptyString("", " ", "fallback") != "fallback" ||
 		runStatusText(agentcomposev2.RunStatus_RUN_STATUS_CANCELED) != "canceled" ||
 		runStatusText(agentcomposev2.RunStatus_RUN_STATUS_UNSPECIFIED) != "unspecified" ||
@@ -874,14 +873,14 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 	if err := writeCacheOperationTable(failingWriter{}, []composeCacheOutput{cacheInspect.Cache}); err == nil {
 		t.Fatalf("writeCacheOperationTable failing writer returned nil error")
 	}
-	if err := writeSandboxPruneMatchedTable(failingWriter{}, []composePSSandboxOutput{{ID: "sandbox"}}, "matched"); err == nil {
+	if err := writeSandboxPruneMatchedTable(failingWriter{}, []composePSSandboxOutput{{SandboxID: "sandbox"}}, "matched"); err == nil {
 		t.Fatalf("writeSandboxPruneMatchedTable failing writer returned nil error")
 	}
-	if err := writeSandboxPruneSkippedTable(failingWriter{}, []composeSandboxPruneSkipped{{Sandbox: "sandbox"}}); err == nil {
+	if err := writeSandboxPruneSkippedTable(failingWriter{}, []composeSandboxPruneSkipped{{SandboxID: "sandbox"}}); err == nil {
 		t.Fatalf("writeSandboxPruneSkippedTable failing writer returned nil error")
 	}
 
-	session := composeSessionOutputFromSummary(&agentcomposev1.SessionSummary{
+	session := composeSandboxOutputFromSummary(&agentcomposev1.SessionSummary{
 		SessionId:     "session-1",
 		Title:         "title",
 		Driver:        "docker",
@@ -899,8 +898,8 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 			{Name: " ", Value: "ignored"},
 		},
 	})
-	if session.VMStatus != "running" || session.Tags["agent"] != "reviewer" || session.EventCount != 4 {
-		t.Fatalf("composeSessionOutputFromSummary = %#v", session)
+	if session.SandboxID != "session-1" || session.VMStatus != "running" || session.Tags["agent"] != "reviewer" || session.EventCount != 4 {
+		t.Fatalf("composeSandboxOutputFromSummary = %#v", session)
 	}
 	if commandExitCode(nil) != 0 ||
 		commandExitCode(commandExitError{Code: exitCodeUsage, Err: connect.NewError(connect.CodeInvalidArgument, nil)}) != exitCodeUsage ||

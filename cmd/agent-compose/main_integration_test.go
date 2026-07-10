@@ -71,7 +71,7 @@ func testDaemonListenConfigWorkflow(t *testing.T) {
 	t.Run("cli exec streams and json", TestIntegrationCLIExecStreamsAndSupportsJSON)
 	t.Run("cli exec interactive reserved unsupported", TestCLIExecInteractiveReservedUnsupported)
 	t.Run("cli exec rejects empty sandbox", TestCLIExecRejectsEmptySandboxUsageError)
-	t.Run("cli exec ambiguous session is usage error", TestIntegrationCLIExecAmbiguousSessionIsUsageError)
+	t.Run("cli exec ambiguous sandbox is usage error", TestIntegrationCLIExecAmbiguousSandboxIsUsageError)
 	t.Run("cli inspect project agent run session json", TestIntegrationCLIInspectProjectAgentRunSandboxSessionJSON)
 	t.Run("cli images aliases and json", TestIntegrationCLIImagesAliasesAndJSON)
 	t.Run("cli image pull aliases and json", TestIntegrationCLIImagePullAliasesAndJSON)

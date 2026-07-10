@@ -22,7 +22,7 @@ type Store interface {
 	GetEvent(context.Context, string) (domain.TopicEventRecord, error)
 	ListEvents(context.Context, domain.TopicEventFilter) ([]domain.TopicEventRecord, error)
 	ListDescendantEventIDs(context.Context, string, int) ([]string, error)
-	ListEventSessionLinks(context.Context, []string) ([]domain.EventSessionTraceItem, error)
+	ListEventSandboxLinks(context.Context, []string) ([]domain.EventSandboxTraceItem, error)
 	ListEventDeliveries(context.Context, []string) ([]domain.EventDelivery, error)
 	ListWebhookSources(context.Context) ([]domain.WebhookSource, error)
 	GetWebhookSource(context.Context, string) (domain.WebhookSource, bool, error)
@@ -45,7 +45,8 @@ func RegisterRoutes(app *echo.Echo, opts RouteOptions) {
 	app.PUT("/api/webhook-sources/:source_id", h.handlePutWebhookSource)
 	app.DELETE("/api/webhook-sources/:source_id", h.handleDeleteWebhookSource)
 	app.GET("/api/events", h.handleListEvents)
-	app.GET("/api/events/:event_id/sessions", h.handleGetEventSessions)
+	app.GET("/api/events/:event_id/sessions", h.handleGetEventSandboxes)
+	app.GET("/api/events/:event_id/sandboxes", h.handleGetEventSandboxes)
 	app.GET("/api/events/:event_id/runs", h.handleGetEventRuns)
 	app.GET("/api/events/:event_id", h.handleGetEvent)
 }
@@ -223,7 +224,7 @@ func (h routeHandler) handleListEvents(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h routeHandler) handleGetEventSessions(c echo.Context) error {
+func (h routeHandler) handleGetEventSandboxes(c echo.Context) error {
 	eventID := strings.TrimSpace(c.Param("event_id"))
 	item, err := h.store().GetEvent(c.Request().Context(), eventID)
 	if err != nil {
@@ -236,11 +237,11 @@ func (h routeHandler) handleGetEventSessions(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to trace event descendants"})
 	}
-	links, err := h.store().ListEventSessionLinks(c.Request().Context(), eventIDs)
+	links, err := h.store().ListEventSandboxLinks(c.Request().Context(), eventIDs)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list event sessions"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list event sandboxes"})
 	}
-	return c.JSON(http.StatusOK, EventSessionsResponse(EventSessionsResponseFor(item, links)))
+	return c.JSON(http.StatusOK, EventSandboxesResponse(EventSandboxesResponseFor(item, links)))
 }
 
 func (h routeHandler) handleGetEventRuns(c echo.Context) error {

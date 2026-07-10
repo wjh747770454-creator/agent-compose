@@ -8,12 +8,12 @@ import (
 )
 
 func TestParseAgentAndCommandExecResultWorkflows(t *testing.T) {
-	agentPayload := AgentResultPrefix + `{"provider":"codex","sessionId":"agent-session","stopReason":"done","finalText":"final","transcript":"transcript"}`
+	agentPayload := AgentResultPrefix + `{"provider":"codex","threadId":"agent-thread","stopReason":"done","finalText":"final","transcript":"transcript"}`
 	agent, err := ParseAgentExecResult("codex", domain.ExecResult{Stdout: "logs\n" + agentPayload, ExitCode: 0, Success: true})
 	if err != nil {
 		t.Fatalf("ParseAgentExecResult returned error: %v", err)
 	}
-	if agent.Agent != "codex" || agent.SessionID != "agent-session" || agent.DisplayOutput != "transcript" {
+	if agent.Agent != "codex" || agent.ThreadID != "agent-thread" || agent.DisplayOutput != "transcript" {
 		t.Fatalf("agent result = %#v", agent)
 	}
 	if _, err := ParseAgentExecResult("codex", domain.ExecResult{Stderr: strings.Repeat("x", 300)}); err == nil || !strings.Contains(err.Error(), "...") {

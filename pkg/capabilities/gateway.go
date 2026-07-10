@@ -15,7 +15,7 @@ import (
 
 const (
 	ProxyTargetEnvName  = "CAP_GRPC_TARGET"
-	SessionTokenEnvName = "CAP_TOKEN"
+	SandboxTokenEnvName = "CAP_TOKEN"
 	CapsetTagName       = "capset"
 )
 
@@ -60,7 +60,7 @@ func DecodeCapsetIDs(raw string) []string {
 	return NormalizeCapsetIDs(ids)
 }
 
-func BuildGatewaySessionVars(publicTarget string, capsetIDs []string) ([]domain.SessionEnvVar, []domain.SessionTag) {
+func BuildGatewaySandboxVars(publicTarget string, capsetIDs []string) ([]domain.SandboxEnvVar, []domain.SandboxTag) {
 	ids := NormalizeCapsetIDs(capsetIDs)
 	if len(ids) == 0 {
 		return nil, nil
@@ -70,13 +70,13 @@ func BuildGatewaySessionVars(publicTarget string, capsetIDs []string) ([]domain.
 		slog.Warn("capability injection skipped: CAP_GRPC_TARGET not configured", "capsets", ids)
 		return nil, nil
 	}
-	env := []domain.SessionEnvVar{
+	env := []domain.SandboxEnvVar{
 		{Name: ProxyTargetEnvName, Value: publicTarget},
-		{Name: SessionTokenEnvName, Value: uuid.NewString(), Secret: true},
+		{Name: SandboxTokenEnvName, Value: uuid.NewString(), Secret: true},
 	}
-	tags := make([]domain.SessionTag, 0, len(ids))
+	tags := make([]domain.SandboxTag, 0, len(ids))
 	for _, id := range ids {
-		tags = append(tags, domain.SessionTag{Name: CapsetTagName, Value: id})
+		tags = append(tags, domain.SandboxTag{Name: CapsetTagName, Value: id})
 	}
 	return env, tags
 }
@@ -98,38 +98,38 @@ any method in the catalog below:
 - Schemas can be discovered via gRPC server reflection using the same
   `+"`x-octobus-capset`"+` metadata
 
-`, target, capproxy.SessionTokenMetadata)
+`, target, capproxy.SandboxTokenMetadata)
 }
 
-func SessionRuntimeDir(session *domain.Session) string {
-	if session == nil {
+func SandboxRuntimeDir(sandbox *domain.Sandbox) string {
+	if sandbox == nil {
 		return ""
 	}
-	workspace := strings.TrimSpace(session.Summary.WorkspacePath)
+	workspace := strings.TrimSpace(sandbox.Summary.WorkspacePath)
 	if workspace == "" {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(workspace), "runtime")
 }
 
-func SessionGuidePath(session *domain.Session) string {
-	dir := SessionRuntimeDir(session)
+func SandboxGuidePath(sandbox *domain.Sandbox) string {
+	dir := SandboxRuntimeDir(sandbox)
 	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, "mpi", "catalog.md")
 }
 
-func SessionToken(session *domain.Session) string {
-	return sessionEnvValue(session, SessionTokenEnvName)
+func SandboxToken(sandbox *domain.Sandbox) string {
+	return sandboxEnvValue(sandbox, SandboxTokenEnvName)
 }
 
-func SessionCapsets(session *domain.Session) []string {
-	if session == nil {
+func SandboxCapsets(sandbox *domain.Sandbox) []string {
+	if sandbox == nil {
 		return nil
 	}
 	var ids []string
-	for _, tag := range session.Summary.Tags {
+	for _, tag := range sandbox.Summary.Tags {
 		if tag.Name == CapsetTagName {
 			if v := strings.TrimSpace(tag.Value); v != "" {
 				ids = append(ids, v)
@@ -139,11 +139,11 @@ func SessionCapsets(session *domain.Session) []string {
 	return NormalizeCapsetIDs(ids)
 }
 
-func sessionEnvValue(session *domain.Session, name string) string {
-	if session == nil {
+func sandboxEnvValue(sandbox *domain.Sandbox, name string) string {
+	if sandbox == nil {
 		return ""
 	}
-	for _, item := range session.EnvItems {
+	for _, item := range sandbox.EnvItems {
 		if item.Name == name {
 			return strings.TrimSpace(item.Value)
 		}

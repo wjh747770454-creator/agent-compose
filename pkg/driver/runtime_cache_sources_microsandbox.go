@@ -21,12 +21,12 @@ func appendMicrosandboxRuntimeCacheSource(sources []runtimecache.Source, config 
 }
 
 func (s microsandboxRuntimeCacheSource) List(ctx context.Context) (runtimecache.ListResult, error) {
-	return listMicrosandboxSessionEphemeralCaches(ctx, s.microsandboxHome, microsandboxCacheReferenceState{
+	return listMicrosandboxSandboxEphemeralCaches(ctx, s.microsandboxHome, microsandboxCacheReferenceState{
 		Unknown:  true,
-		Warnings: []string{"microsandbox session references are not fully resolved"},
+		Warnings: []string{"microsandbox sandbox references are not fully resolved"},
 	})
 }
 
 func (s microsandboxRuntimeCacheSource) Remove(ctx context.Context, item runtimecache.Item) error {
-	return microsandboxSessionEphemeralRemover(s).Remove(ctx, item)
+	return microsandboxSandboxEphemeralRemover(s).Remove(ctx, item)
 }

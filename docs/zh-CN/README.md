@@ -130,7 +130,7 @@ docker compose --profile with-ui up -d
 - `agent-compose` 和 `agent-compose-ui` 需要一起升级。daemon 不再提供浏览器 auth/OAuth 路由；新的 UI 镜像内置 Go UI server，由它处理这些路由，并代理 daemon API/Jupyter 流量。
 - 浏览器登录配置（`AUTH_USERNAME`、`AUTH_PASSWORD`、`AUTH_SECRET`、`AUTH_SESSION_TTL`、`OAUTH_*`）归属 UI service 环境。启用 `with-ui` profile 时，Docker Compose 已经把 `.env` 传给 `agent-compose-frontend`。
 - 不要把 daemon TCP API 当作浏览器入口直接暴露。浏览器 cookie/OAuth 配置不再被 daemon 消费；直接访问 daemon TCP 只适用于可信网络或机器客户端，启用时应独立做好访问保护。
-- 修改 runtime 内可访问地址或 capability proxy 配置后，例如 `AGENT_COMPOSE_RUNTIME_BASE_URL`、`CAP_GRPC_LISTEN`、`CAP_GRPC_TARGET`，需要重启 daemon 并新建 agent session，让 guest 容器拿到更新后的 facade/capability 环境。
+- 修改 runtime 内可访问地址或 capability proxy 配置后，例如 `AGENT_COMPOSE_RUNTIME_BASE_URL`、`CAP_GRPC_LISTEN`、`CAP_GRPC_TARGET`，需要重启 daemon 并新建 agent sandbox，让 guest 容器拿到更新后的 facade/capability 环境。
 
 ## 配置
 
@@ -147,7 +147,8 @@ docker compose --profile with-ui up -d
 - `LLM_API_ENDPOINT`、`LLM_API_PROTOCOL`、`LLM_API_KEY`、`OPENAI_API_KEY`、`LLM_MODEL`、`LLM_TIMEOUT`：daemon 侧 OpenAI family LLM 配置，供 `LLMService`、`scheduler.llm` 和 runtime agent LLM facade bootstrap 使用。这些值不会作为 provider key 注入 guest agent runtime。对接 OpenAI 兼容 Chat Completions 后端时设置 `LLM_API_PROTOCOL=chat_completions`。
 - `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_ENDPOINT`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`、`CLAUDE_MODEL`：daemon 侧 Anthropic family LLM facade bootstrap 配置。
 - `AGENT_COMPOSE_RUNTIME_BASE_URL`：可选的 runtime 内可访问 daemon base URL，用于生成 Runtime LLM Facade 配置。Docker Compose 默认使用 `http://agent-compose:7410`；宿主机 Docker 场景应配置具体的宿主机 IP/名称和端口。
-- `DOCKER_HOST_SESSION_ROOT`：guest 容器 bind mount 使用的宿主机 sandbox 数据路径。Docker Compose 默认使用 `./data/agent-compose/sessions`。
+- `SANDBOX_ROOT`：容器内 sandbox metadata、state、workspace 和 runtime 文件路径。发布镜像默认使用 `/data/sandboxes`。
+- `DOCKER_HOST_SANDBOX_ROOT`：guest 容器 bind mount 使用的宿主机 sandbox 数据路径。Docker Compose 默认使用 `${PWD}/data/sandboxes`。
 - `CAP_GRPC_LISTEN`、`CAP_GRPC_TARGET`：仅在 Agent 需要调用 OctoBus gRPC capability 时必须配置。`CAP_GRPC_LISTEN` 启动 agent-compose capability proxy；`CAP_GRPC_TARGET` 是注入新 sandbox 的 guest 可达地址。修改后需要重启 daemon 并新建 sandbox。
 
 ### Agent Provider
@@ -156,8 +157,8 @@ Guest agent sandbox 在 guest 容器内通过 `agent-compose-runtime` CLI 运行
 
 | Provider | 典型环境变量 | 说明 |
 | --- | --- | --- |
-| `codex` | daemon LLM provider 配置；runtime 获取 `AGENT_COMPOSE_SESSION_TOKEN`、`LLM_API_KEY`、`LLM_API_ENDPOINT`、`OPENAI_BASE_URL` 和 facade-token API key aliases | 使用 guest 镜像中的 Codex CLI/SDK |
-| `claude` | daemon Anthropic family provider 配置；runtime 获取 `AGENT_COMPOSE_SESSION_TOKEN`、`LLM_API_KEY`、`LLM_API_ENDPOINT`、`ANTHROPIC_BASE_URL` 和 facade-token API key aliases | 使用 guest 镜像中的 Claude Code CLI |
+| `codex` | daemon LLM provider 配置；runtime 获取 `AGENT_COMPOSE_SANDBOX_TOKEN`、`LLM_API_KEY`、`LLM_API_ENDPOINT`、`OPENAI_BASE_URL` 和 facade-token API key aliases | 使用 guest 镜像中的 Codex CLI/SDK |
+| `claude` | daemon Anthropic family provider 配置；runtime 获取 `AGENT_COMPOSE_SANDBOX_TOKEN`、`LLM_API_KEY`、`LLM_API_ENDPOINT`、`ANTHROPIC_BASE_URL` 和 facade-token API key aliases | 使用 guest 镜像中的 Claude Code CLI |
 | `gemini` | 暂未接入 LLM facade | 使用 guest 镜像中的 Gemini CLI |
 | `opencode` | 取决于所选 OpenCode model provider，例如 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY` | 使用 guest 镜像中的 OpenCode CLI |
 

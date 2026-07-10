@@ -12,20 +12,20 @@ import (
 
 const defaultImagePullTimeout = 10 * time.Minute
 
-func PrepareSessionStart(ctx context.Context, config *appconfig.Config, driver string, session *Session, vmState VMState) (VMState, error) {
+func PrepareSandboxStart(ctx context.Context, config *appconfig.Config, driver string, session *Sandbox, vmState VMState) (VMState, error) {
 	pullTimeout := config.ImagePullTimeout
 	if pullTimeout <= 0 {
 		pullTimeout = defaultImagePullTimeout
 	}
 	pullPolicy := strings.ToLower(strings.TrimSpace(session.Summary.PullPolicy))
-	return prepareSessionStartWithResolver(ctx, config, driver, session, vmState, pullPolicy, pullTimeout, dockerFirstRuntimeImageResolver{ensureDocker: ensureDockerImage})
+	return prepareSandboxStartWithResolver(ctx, config, driver, session, vmState, pullPolicy, pullTimeout, dockerFirstRuntimeImageResolver{ensureDocker: ensureDockerImage})
 }
 
-func prepareSessionStartWithResolver(ctx context.Context, config *appconfig.Config, driver string, session *Session, vmState VMState, pullPolicy string, pullTimeout time.Duration, resolver runtimeImageResolver) (VMState, error) {
+func prepareSandboxStartWithResolver(ctx context.Context, config *appconfig.Config, driver string, session *Sandbox, vmState VMState, pullPolicy string, pullTimeout time.Duration, resolver runtimeImageResolver) (VMState, error) {
 	if _, err := prepareRuntimeMountManifest(config, session, driver); err != nil {
 		return vmState, err
 	}
-	vmState.Image = resolveSessionGuestImage(vmState.Image, session.Summary.GuestImage, defaultGuestImageForDriver(config, driver))
+	vmState.Image = resolveSandboxGuestImage(vmState.Image, session.Summary.GuestImage, defaultGuestImageForDriver(config, driver))
 	switch driver {
 	case RuntimeDriverBoxlite:
 		if err := ensureRuntimeAssets(config.BoxRootfsPath); err != nil {
@@ -33,22 +33,22 @@ func prepareSessionStartWithResolver(ctx context.Context, config *appconfig.Conf
 		}
 		vmState.Registry = config.ImageRegistry
 		if vmState.Image != "" {
-			slog.Info("agent-compose resolving boxlite guest image", "session_id", session.Summary.ID, "guest_image", vmState.Image)
+			slog.Info("agent-compose resolving boxlite guest image", "sandbox_id", session.Summary.ID, "guest_image", vmState.Image)
 			resolvedImage, err := resolver.ResolvePrepareImage(ctx, config, driver, vmState.Image, pullPolicy, pullTimeout)
 			if err != nil {
 				return vmState, err
 			}
-			vmState.Image = resolveSessionGuestImage(resolvedImage, vmState.Image)
+			vmState.Image = resolveSandboxGuestImage(resolvedImage, vmState.Image)
 		}
 	case RuntimeDriverDocker:
 		vmState.Registry = ""
 		if vmState.Image != "" {
-			slog.Info("agent-compose ensuring docker guest image", "session_id", session.Summary.ID, "guest_image", vmState.Image)
+			slog.Info("agent-compose ensuring docker guest image", "sandbox_id", session.Summary.ID, "guest_image", vmState.Image)
 			resolvedImage, err := resolver.ResolvePrepareImage(ctx, config, driver, vmState.Image, pullPolicy, pullTimeout)
 			if err != nil {
 				return vmState, err
 			}
-			vmState.Image = resolveSessionGuestImage(resolvedImage, vmState.Image)
+			vmState.Image = resolveSandboxGuestImage(resolvedImage, vmState.Image)
 		}
 	case RuntimeDriverMicrosandbox:
 		vmState.Registry = ""

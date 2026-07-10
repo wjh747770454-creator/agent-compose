@@ -21,12 +21,12 @@ func TestRuntimeLLMFacadeRoutesCoverageWorkflow(t *testing.T) {
 	e := echo.New()
 	client := &fakeRuntimeLLMHTTPClient{status: http.StatusOK, body: `{"id":"resp-1","model":"gpt","output":[]}`}
 	RegisterRuntimeLLMFacadeRoutes(e, RuntimeLLMOptions{
-		Tokens:        fakeRuntimeLLMTokens{token: llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}},
-		Sessions:      fakeRuntimeLLMSessions{session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}}},
+		Tokens:        fakeRuntimeLLMTokens{token: llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}},
+		Sandboxes:     fakeRuntimeLLMSessions{session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}}},
 		ResolveTarget: fakeRuntimeLLMTargetResolver("http://upstream.test/v1"),
 		Client:        client,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/runtime/sessions/session-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
 	req.Header.Set("Authorization", "Bearer raw-token")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -34,8 +34,16 @@ func TestRuntimeLLMFacadeRoutesCoverageWorkflow(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "resp-1") || client.calls != 1 {
 		t.Fatalf("responses proxy status=%d body=%s calls=%d", rec.Code, rec.Body.String(), client.calls)
 	}
+	req = httptest.NewRequest(http.MethodPost, "/api/runtime/sessions/sandbox-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"legacy"}`))
+	req.Header.Set("Authorization", "Bearer raw-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || client.calls != 2 {
+		t.Fatalf("legacy responses proxy status=%d body=%s calls=%d", rec.Code, rec.Body.String(), client.calls)
+	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/runtime/sessions/session-1/llm/openai/v1/responses", strings.NewReader(`{"model":"other","input":"hi"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses", strings.NewReader(`{"model":"other","input":"hi"}`))
 	req.Header.Set("Authorization", "Bearer raw-token")
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -43,7 +51,7 @@ func TestRuntimeLLMFacadeRoutesCoverageWorkflow(t *testing.T) {
 		t.Fatalf("model mismatch status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/runtime/sessions/session-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -52,7 +60,7 @@ func TestRuntimeLLMFacadeRoutesCoverageWorkflow(t *testing.T) {
 
 	missingDeps := echo.New()
 	RegisterRuntimeLLMFacadeRoutes(missingDeps, RuntimeLLMOptions{})
-	req = httptest.NewRequest(http.MethodPost, "/api/runtime/sessions/session-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
 	req.Header.Set("Authorization", "Bearer raw-token")
 	rec = httptest.NewRecorder()
 	missingDeps.ServeHTTP(rec, req)
@@ -77,12 +85,12 @@ func TestRuntimeLLMFacadeProtocolAndStreamCoverage(t *testing.T) {
 			body:   `{"id":"msg_1","type":"message","role":"assistant","model":"claude","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn"}`,
 		}
 		RegisterRuntimeLLMFacadeRoutes(e, RuntimeLLMOptions{
-			Tokens:        fakeRuntimeLLMTokens{token: llms.FacadeToken{SessionID: "session-1", Model: "claude", ProviderID: "provider-1", WireAPI: llms.APIProtocolMessages, ExpiresAt: time.Now().Add(time.Hour)}},
-			Sessions:      fakeRuntimeLLMSessions{session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}}},
+			Tokens:        fakeRuntimeLLMTokens{token: llms.FacadeToken{SandboxID: "sandbox-1", Model: "claude", ProviderID: "provider-1", WireAPI: llms.APIProtocolMessages, ExpiresAt: time.Now().Add(time.Hour)}},
+			Sandboxes:     fakeRuntimeLLMSessions{session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}}},
 			ResolveTarget: fakeRuntimeLLMAnthropicTargetResolver("http://upstream.test/v1"),
 			Client:        client,
 		})
-		req := httptest.NewRequest(http.MethodPost, "/api/runtime/sessions/session-1/llm/anthropic/v1/messages", strings.NewReader(`{"model":"claude","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/anthropic/v1/messages", strings.NewReader(`{"model":"claude","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
 		req.Header.Set("Authorization", "Bearer raw-token")
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -99,12 +107,12 @@ func TestRuntimeLLMFacadeProtocolAndStreamCoverage(t *testing.T) {
 			body:   `{"id":"chatcmpl-1","object":"chat.completion","created":0,"model":"gpt","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]}`,
 		}
 		RegisterRuntimeLLMFacadeRoutes(e, RuntimeLLMOptions{
-			Tokens:        fakeRuntimeLLMTokens{token: llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}},
-			Sessions:      fakeRuntimeLLMSessions{session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}}},
+			Tokens:        fakeRuntimeLLMTokens{token: llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}},
+			Sandboxes:     fakeRuntimeLLMSessions{session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}}},
 			ResolveTarget: fakeRuntimeLLMChatTargetResolver("http://upstream.test/v1"),
 			Client:        client,
 		})
-		req := httptest.NewRequest(http.MethodPost, "/api/runtime/sessions/session-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
 		req.Header.Set("Authorization", "Bearer raw-token")
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -209,48 +217,56 @@ func TestRuntimeLLMFacadeRejectsInvalidSecurityContext(t *testing.T) {
 		path     string
 		body     string
 		token    llms.FacadeToken
-		session  *domain.Session
+		session  *domain.Sandbox
 		resolver RuntimeLLMTargetResolver
 		want     int
 	}{
 		{
 			name:    "expired token",
-			path:    "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:    "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:    `{"model":"gpt","input":"hi"}`,
-			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(-time.Minute)},
-			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}},
+			token:   llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(-time.Minute)},
+			session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}},
 			want:    http.StatusForbidden,
 		},
 		{
 			name:    "revoked token",
-			path:    "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:    "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:    `{"model":"gpt","input":"hi"}`,
-			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, RevokedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)},
-			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}},
+			token:   llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, RevokedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}},
 			want:    http.StatusForbidden,
 		},
 		{
 			name:    "wire api mismatch",
-			path:    "/api/runtime/sessions/session-1/llm/openai/v1/chat/completions",
+			path:    "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/chat/completions",
 			body:    `{"model":"gpt","messages":[{"role":"user","content":"hi"}]}`,
-			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
-			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}},
+			token:   llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}},
 			want:    http.StatusForbidden,
 		},
 		{
-			name:    "stopped session",
-			path:    "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			name:    "path sandbox mismatch",
+			path:    "/api/runtime/sandboxes/sandbox-2/llm/openai/v1/responses",
 			body:    `{"model":"gpt","input":"hi"}`,
-			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
-			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusStopped}},
+			token:   llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-2", VMStatus: domain.VMStatusRunning}},
+			want:    http.StatusForbidden,
+		},
+		{
+			name:    "stopped sandbox",
+			path:    "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
+			body:    `{"model":"gpt","input":"hi"}`,
+			token:   llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusStopped}},
 			want:    http.StatusForbidden,
 		},
 		{
 			name:    "provider mismatch",
-			path:    "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:    "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:    `{"model":"gpt","input":"hi"}`,
-			token:   llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-2", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
-			session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}},
+			token:   llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-2", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)},
+			session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}},
 			resolver: func(context.Context, string, string) (llms.ResolvedTarget, error) {
 				return llms.ResolvedTarget{
 					Provider: llms.Provider{ID: "provider-1", ProviderType: llms.ProviderFamilyOpenAI, BaseURL: "http://upstream.test/v1"},
@@ -270,7 +286,7 @@ func TestRuntimeLLMFacadeRejectsInvalidSecurityContext(t *testing.T) {
 			}
 			RegisterRuntimeLLMFacadeRoutes(e, RuntimeLLMOptions{
 				Tokens:        fakeRuntimeLLMTokens{token: tc.token},
-				Sessions:      fakeRuntimeLLMSessions{session: tc.session},
+				Sandboxes:     fakeRuntimeLLMSessions{session: tc.session},
 				ResolveTarget: resolver,
 				Client:        &fakeRuntimeLLMHTTPClient{status: http.StatusOK, body: `{"id":"resp-1","model":"gpt","output":[]}`},
 			})
@@ -287,8 +303,8 @@ func TestRuntimeLLMFacadeRejectsInvalidSecurityContext(t *testing.T) {
 }
 
 func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
-	validToken := llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}
-	runningSession := &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}}
+	validToken := llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}
+	runningSession := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}}
 	tests := []struct {
 		name     string
 		path     string
@@ -302,7 +318,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 	}{
 		{
 			name:     "token lookup error",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{err: errors.New("token store down")},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -311,28 +327,28 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 			want:     http.StatusUnauthorized,
 		},
 		{
-			name:     "session lookup error",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			name:     "sandbox lookup error",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
-			sessions: fakeRuntimeLLMSessions{err: errors.New("session missing")},
+			sessions: fakeRuntimeLLMSessions{err: errors.New("sandbox missing")},
 			resolver: fakeRuntimeLLMTargetResolver("http://upstream.test/v1"),
 			client:   &fakeRuntimeLLMHTTPClient{status: http.StatusOK, body: `{"id":"resp-1","model":"gpt","output":[]}`},
 			want:     http.StatusForbidden,
 		},
 		{
-			name:     "failed session",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			name:     "failed sandbox",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
-			sessions: fakeRuntimeLLMSessions{session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusFailed}}},
+			sessions: fakeRuntimeLLMSessions{session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusFailed}}},
 			resolver: fakeRuntimeLLMTargetResolver("http://upstream.test/v1"),
 			client:   &fakeRuntimeLLMHTTPClient{status: http.StatusOK, body: `{"id":"resp-1","model":"gpt","output":[]}`},
 			want:     http.StatusForbidden,
 		},
 		{
 			name:     "decode request error",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{bad json`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -342,9 +358,9 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 		},
 		{
 			name:     "missing model",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"input":"hi"}`,
-			tokens:   fakeRuntimeLLMTokens{token: llms.FacadeToken{SessionID: "session-1", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}},
+			tokens:   fakeRuntimeLLMTokens{token: llms.FacadeToken{SandboxID: "sandbox-1", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
 			resolver: fakeRuntimeLLMTargetResolver("http://upstream.test/v1"),
 			client:   &fakeRuntimeLLMHTTPClient{status: http.StatusOK, body: `{"id":"resp-1","model":"gpt","output":[]}`},
@@ -353,7 +369,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 		},
 		{
 			name:     "resolver error",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -366,7 +382,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 		},
 		{
 			name:     "unsupported provider",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -383,7 +399,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 		},
 		{
 			name:     "transparent upstream transport error",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -393,7 +409,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 		},
 		{
 			name:     "transparent upstream non success",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -404,7 +420,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 		},
 		{
 			name:     "translated upstream non success",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -415,7 +431,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 		},
 		{
 			name:     "translated upstream transport error",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -425,7 +441,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 		},
 		{
 			name:     "translated upstream read error",
-			path:     "/api/runtime/sessions/session-1/llm/openai/v1/responses",
+			path:     "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
 			body:     `{"model":"gpt","input":"hi"}`,
 			tokens:   fakeRuntimeLLMTokens{token: validToken},
 			sessions: fakeRuntimeLLMSessions{session: runningSession},
@@ -439,7 +455,7 @@ func TestRuntimeLLMFacadeHandlerEdgeBranches(t *testing.T) {
 			e := echo.New()
 			RegisterRuntimeLLMFacadeRoutes(e, RuntimeLLMOptions{
 				Tokens:        tc.tokens,
-				Sessions:      tc.sessions,
+				Sandboxes:     tc.sessions,
 				ResolveTarget: tc.resolver,
 				Client:        tc.client,
 			})
@@ -522,8 +538,8 @@ func TestRuntimeLLMFacadeTransparentGenericResponsesTextParts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := echo.New()
 			RegisterRuntimeLLMFacadeRoutes(e, RuntimeLLMOptions{
-				Tokens:   fakeRuntimeLLMTokens{token: llms.FacadeToken{SessionID: "session-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}},
-				Sessions: fakeRuntimeLLMSessions{session: &domain.Session{Summary: domain.SessionSummary{ID: "session-1", VMStatus: domain.VMStatusRunning}}},
+				Tokens:    fakeRuntimeLLMTokens{token: llms.FacadeToken{SandboxID: "sandbox-1", Model: "gpt", ProviderID: "provider-1", WireAPI: llms.APIProtocolResponses, ExpiresAt: time.Now().Add(time.Hour)}},
+				Sandboxes: fakeRuntimeLLMSessions{session: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "sandbox-1", VMStatus: domain.VMStatusRunning}}},
 				ResolveTarget: func(context.Context, string, string) (llms.ResolvedTarget, error) {
 					return llms.ResolvedTarget{
 						Provider: llms.Provider{ID: "provider-1", ProviderType: llms.ProviderFamilyOpenAI, BaseURL: "http://upstream.test/v1", UseGenericResponsesTextParts: true},
@@ -533,7 +549,7 @@ func TestRuntimeLLMFacadeTransparentGenericResponsesTextParts(t *testing.T) {
 				},
 				Client: tc.client,
 			})
-			req := httptest.NewRequest(http.MethodPost, "/api/runtime/sessions/session-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
+			req := httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses", strings.NewReader(`{"model":"gpt","input":"hi"}`))
 			req.Header.Set("Authorization", "Bearer raw-token")
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
@@ -565,11 +581,11 @@ func (s fakeRuntimeLLMTokens) GetLLMFacadeToken(context.Context, string) (llms.F
 }
 
 type fakeRuntimeLLMSessions struct {
-	session *domain.Session
+	session *domain.Sandbox
 	err     error
 }
 
-func (s fakeRuntimeLLMSessions) GetSession(context.Context, string) (*domain.Session, error) {
+func (s fakeRuntimeLLMSessions) GetSandbox(context.Context, string) (*domain.Sandbox, error) {
 	return s.session, s.err
 }
 

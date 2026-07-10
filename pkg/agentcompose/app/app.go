@@ -56,6 +56,7 @@ func RegisterDependencies(di do.Injector) {
 	do.Provide(di, NewRuntimeProvider)
 	do.Provide(di, NewLLMClient)
 	do.Provide(di, NewCapabilityProvider)
+	do.Provide(di, NewCapabilitySandboxResolver)
 	do.Provide(di, NewImageBackends)
 	do.Provide(di, NewCacheController)
 	do.Provide(di, NewVolumeManager)
@@ -66,13 +67,13 @@ func RegisterDependencies(di do.Injector) {
 	do.Provide(di, NewDashboardOverviewAggregator)
 	do.Provide(di, NewDashboardOverviewHub)
 	do.Provide(di, loaders.NewLoaderEngine)
-	do.Provide(di, NewSessionDriver)
+	do.Provide(di, NewSandboxDriver)
 	do.Provide(di, NewCellExecutor)
 	do.Provide(di, NewAgentRunner)
 	do.Provide(di, NewAgentExecutor)
 	do.Provide(di, NewLoaderCommandExecutor)
-	do.Provide(di, NewLoaderSessionRunner)
-	do.Provide(di, NewSessionRPCBridge)
+	do.Provide(di, NewLoaderSandboxRunner)
+	do.Provide(di, NewSandboxRPCBridge)
 	do.Provide(di, NewLoaderController)
 	do.Provide(di, NewRunController)
 	do.Provide(di, NewRunSupervisor)
@@ -83,7 +84,7 @@ func RegisterRoutes(di do.Injector) {
 	app := do.MustInvoke[*echo.Echo](di)
 
 	sessionHandler := api.NewSessionHandler(
-		do.MustInvoke[*adapters.SessionRPCBridge](di),
+		do.MustInvoke[*adapters.SandboxRPCBridge](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		do.MustInvoke[*sessions.StreamBroker](di),
 	)
@@ -108,7 +109,7 @@ func RegisterRoutes(di do.Injector) {
 		do.MustInvoke[*appconfig.Config](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		do.MustInvoke[*configstore.ConfigStore](di),
-		do.MustInvoke[*adapters.SessionRPCBridge](di),
+		do.MustInvoke[*adapters.SandboxRPCBridge](di),
 		do.MustInvoke[*sessions.StreamBroker](di),
 	)
 	path, handler = agentcomposev1connect.NewAgentDefinitionServiceHandler(agentDefinitionHandler)
@@ -147,7 +148,7 @@ func RegisterRoutes(di do.Injector) {
 		do.MustInvoke[*appconfig.Config](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		do.MustInvoke[*configstore.ConfigStore](di),
-		func(session *domain.Session) (api.ExecRuntime, error) {
+		func(session *domain.Sandbox) (api.ExecRuntime, error) {
 			return do.MustInvoke[adapters.RuntimeProvider](di).ForSession(session)
 		},
 	)
@@ -163,10 +164,10 @@ func RegisterRoutes(di do.Injector) {
 	path, handler = agentcomposev2connect.NewVolumeServiceHandler(volumeHandler)
 	app.Any(path+"*", echo.WrapHandler(handler))
 	sandboxHandler := api.NewSandboxHandler(
-		do.MustInvoke[*adapters.SessionRPCBridge](di),
+		do.MustInvoke[*adapters.SandboxRPCBridge](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		do.MustInvoke[*dashboard.Hub](di),
-		func(session *domain.Session) (api.SandboxStatsRuntime, error) {
+		func(session *domain.Sandbox) (api.SandboxStatsRuntime, error) {
 			runtime, err := do.MustInvoke[adapters.RuntimeProvider](di).ForSession(session)
 			if err != nil {
 				return nil, err
@@ -192,10 +193,11 @@ func StartBackground(di do.Injector) error {
 		do.MustInvoke[context.Context](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		do.MustInvoke[*configstore.ConfigStore](di),
-		do.MustInvoke[*adapters.SessionRPCBridge](di),
+		do.MustInvoke[*adapters.SandboxRPCBridge](di),
 		do.MustInvoke[*loaders.Controller](di),
 		do.MustInvoke[*events.Dispatcher](di),
 		do.MustInvoke[*capproxy.Server](di),
+		do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
 	)
 }
 
@@ -203,7 +205,7 @@ func NewCapProxyServer(di do.Injector) (*capproxy.Server, error) {
 	return adapters.NewCapProxyServer(
 		do.MustInvoke[*appconfig.Config](di),
 		do.MustInvoke[*configstore.ConfigStore](di),
-		adapters.NewCapabilitySessionResolver(do.MustInvoke[*sessionstore.Store](di)),
+		do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
 	), nil
 }
 
@@ -245,7 +247,7 @@ func NewVolumeManager(di do.Injector) (*volumes.Manager, error) {
 	config := do.MustInvoke[*appconfig.Config](di)
 	store := do.MustInvoke[*configstore.ConfigStore](di)
 	manager := volumes.NewManager(store, volumes.NewLocalDriver(config))
-	manager.Sessions = do.MustInvoke[*sessionstore.Store](di)
+	manager.Sandboxes = do.MustInvoke[*sessionstore.Store](di)
 	return manager, nil
 }
 
@@ -257,8 +259,8 @@ func NewLLMClient(di do.Injector) (*adapters.LLMClient, error) {
 	return adapters.NewLLMClient(do.MustInvoke[*appconfig.Config](di), do.MustInvoke[*configstore.ConfigStore](di)), nil
 }
 
-func NewSessionDriver(di do.Injector) (*adapters.SessionDriver, error) {
-	return adapters.NewSessionDriver(
+func NewSandboxDriver(di do.Injector) (*adapters.SandboxDriver, error) {
+	return adapters.NewSandboxDriver(
 		do.MustInvoke[*appconfig.Config](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		do.MustInvoke[*configstore.ConfigStore](di),
@@ -304,30 +306,32 @@ func NewLoaderCommandExecutor(di do.Injector) (*adapters.LoaderCommandExecutor, 
 	), nil
 }
 
-func NewLoaderSessionRunner(di do.Injector) (*adapters.LoaderSessionRunner, error) {
-	return adapters.NewLoaderSessionRunner(
+func NewLoaderSandboxRunner(di do.Injector) (*adapters.LoaderSandboxRunner, error) {
+	return adapters.NewLoaderSandboxRunner(
 		do.MustInvoke[*appconfig.Config](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		do.MustInvoke[*configstore.ConfigStore](di),
-		do.MustInvoke[*adapters.SessionDriver](di),
+		do.MustInvoke[*adapters.SandboxDriver](di),
 		do.MustInvoke[capabilities.Provider](di),
 		do.MustInvoke[*volumes.Manager](di),
 		do.MustInvoke[*sessions.StreamBroker](di),
 		do.MustInvoke[*loaders.Bus](di),
+		do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
 	), nil
 }
 
-func NewSessionRPCBridge(di do.Injector) (*adapters.SessionRPCBridge, error) {
+func NewSandboxRPCBridge(di do.Injector) (*adapters.SandboxRPCBridge, error) {
 	dashboard, _ := do.Invoke[*dashboard.Hub](di)
-	return adapters.NewSessionRPCBridge(
+	return adapters.NewSandboxRPCBridge(
 		do.MustInvoke[*appconfig.Config](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		do.MustInvoke[*configstore.ConfigStore](di),
-		do.MustInvoke[*adapters.SessionDriver](di),
+		do.MustInvoke[*adapters.SandboxDriver](di),
 		do.MustInvoke[adapters.RuntimeProvider](di),
 		do.MustInvoke[*loaders.Bus](di),
 		do.MustInvoke[*sessions.StreamBroker](di),
 		do.MustInvoke[capabilities.Provider](di),
+		do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
 		dashboard,
 	), nil
 }
@@ -339,6 +343,10 @@ func NewConfigStore(di do.Injector) (*configstore.ConfigStore, error) {
 func NewCapabilityProvider(di do.Injector) (capabilities.Provider, error) {
 	conf := do.MustInvoke[*appconfig.Config](di)
 	return adapters.NewCapabilityProvider(do.MustInvoke[*configstore.ConfigStore](di), conf.CapGRPCTarget), nil
+}
+
+func NewCapabilitySandboxResolver(di do.Injector) (*adapters.CapabilitySandboxResolver, error) {
+	return adapters.NewCapabilitySandboxResolver(do.MustInvoke[*sessionstore.Store](di)), nil
 }
 
 func NewEventDispatcher(di do.Injector) (*events.Dispatcher, error) {
@@ -369,7 +377,7 @@ func NewDashboardOverviewHub(di do.Injector) (*dashboard.Hub, error) {
 }
 
 func registerProxyRoutes(app *echo.Echo, di do.Injector) {
-	sessions := do.MustInvoke[*adapters.SessionRPCBridge](di)
+	sessions := do.MustInvoke[*adapters.SandboxRPCBridge](di)
 	proxy.RegisterJupyterRoutes(app, proxy.JupyterOptions{
 		BasePath: do.MustInvoke[*appconfig.Config](di).JupyterProxyBasePath,
 		Store:    do.MustInvoke[*sessionstore.Store](di),
@@ -405,8 +413,8 @@ func registerRuntimeLLMFacadeRoutes(app *echo.Echo, di do.Injector) {
 	config := do.MustInvoke[*appconfig.Config](di)
 	configDB := do.MustInvoke[*configstore.ConfigStore](di)
 	proxy.RegisterRuntimeLLMFacadeRoutes(app, proxy.RuntimeLLMOptions{
-		Tokens:   configDB,
-		Sessions: do.MustInvoke[*sessionstore.Store](di),
+		Tokens:    configDB,
+		Sandboxes: do.MustInvoke[*sessionstore.Store](di),
 		ResolveTarget: func(ctx context.Context, requestedModel, providerID string) (llms.ResolvedTarget, error) {
 			return llms.ResolveRuntimeLLMTarget(ctx, config, configDB, requestedModel, providerID)
 		},

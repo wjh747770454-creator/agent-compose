@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { uniqueDirectories } from "../paths.js";
-import { readStoredSession, writeStoredSession } from "../session-state.js";
+import { readStoredThread, writeStoredThread } from "../session-state.js";
 import { jsonString } from "../text.js";
 import { TranscriptWriter } from "../transcript.js";
-import type { AgentResult, RunnerOptions, StoredSession } from "../types.js";
+import type { AgentResult, RunnerOptions, StoredThread } from "../types.js";
 
 type PendingToolUse = {
   name: string;
@@ -49,7 +49,7 @@ export class ClaudeRunner {
 
   constructor(private readonly options: RunnerOptions) {}
 
-  queryOptions(stored: StoredSession | null): Record<string, unknown> {
+  queryOptions(stored: StoredThread | null): Record<string, unknown> {
     const executable = claudeExecutable();
     return {
       cwd: this.options.workspace,
@@ -60,7 +60,7 @@ export class ClaudeRunner {
       forwardSubagentText: true,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      resume: stored?.sessionId,
+      resume: stored?.threadId,
       ...(this.options.outputSchema ? {
         outputFormat: {
           type: "json_schema",
@@ -145,7 +145,7 @@ export class ClaudeRunner {
 
   async runPrompt(promptText: string): Promise<AgentResult> {
     const { query: claudeQuery } = await import("@anthropic-ai/claude-agent-sdk");
-    const stored = await readStoredSession(this.options.stateRoot, "claude");
+    const stored = await readStoredThread(this.options.stateRoot, "claude");
     const stream = claudeQuery({
       prompt: promptText,
       options: this.queryOptions(stored),
@@ -153,7 +153,7 @@ export class ClaudeRunner {
 
     const result: AgentResult = {
       provider: "claude",
-      sessionId: stored?.sessionId || "",
+      threadId: stored?.threadId || "",
       stopReason: "completed",
       finalText: "",
       transcript: "",
@@ -163,7 +163,7 @@ export class ClaudeRunner {
     try {
       messages: for await (const rawMessage of stream) {
         const message = rawMessage as Record<string, unknown>;
-        result.sessionId = String(message.session_id || result.sessionId);
+        result.threadId = String(message.session_id || result.threadId);
         switch (message.type) {
           case "stream_event":
             this.handleStreamEvent(message);
@@ -232,7 +232,7 @@ export class ClaudeRunner {
     if (!result.finalText && result.transcript) {
       result.finalText = result.transcript;
     }
-    await writeStoredSession(this.options.stateRoot, "claude", result.sessionId);
+    await writeStoredThread(this.options.stateRoot, "claude", result.threadId);
     return result;
   }
 }

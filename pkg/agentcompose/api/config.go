@@ -19,8 +19,8 @@ import (
 )
 
 type ConfigStore interface {
-	ListGlobalEnv(ctx context.Context) ([]domain.SessionEnvVar, error)
-	ReplaceGlobalEnv(ctx context.Context, items []domain.SessionEnvVar) ([]domain.SessionEnvVar, error)
+	ListGlobalEnv(ctx context.Context) ([]domain.SandboxEnvVar, error)
+	ReplaceGlobalEnv(ctx context.Context, items []domain.SandboxEnvVar) ([]domain.SandboxEnvVar, error)
 	ListWorkspaceConfigs(ctx context.Context) ([]domain.WorkspaceConfig, error)
 	GetWorkspaceConfig(ctx context.Context, id string) (domain.WorkspaceConfig, error)
 	CreateWorkspaceConfig(ctx context.Context, item domain.WorkspaceConfig) (domain.WorkspaceConfig, error)
@@ -82,12 +82,12 @@ func (h *ConfigHandler) UpdateCapabilityGatewayConfig(ctx context.Context, req *
 	return connect.NewResponse(CapabilityGatewayConfigToProto(saved)), nil
 }
 
-func (h *ConfigHandler) preserveUnchangedGlobalEnvSecrets(ctx context.Context, items []domain.SessionEnvVar) ([]domain.SessionEnvVar, error) {
+func (h *ConfigHandler) preserveUnchangedGlobalEnvSecrets(ctx context.Context, items []domain.SandboxEnvVar) ([]domain.SandboxEnvVar, error) {
 	existingItems, err := h.store.ListGlobalEnv(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	existingByName := make(map[string]domain.SessionEnvVar, len(existingItems))
+	existingByName := make(map[string]domain.SandboxEnvVar, len(existingItems))
 	for _, item := range existingItems {
 		name := strings.TrimSpace(item.Name)
 		if name != "" {

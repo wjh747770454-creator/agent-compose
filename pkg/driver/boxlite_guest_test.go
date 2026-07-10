@@ -74,7 +74,7 @@ func TestBoxLiteExecRunsUserCommandAfterBootstrapSucceeds(t *testing.T) {
 }
 
 func TestBoxLiteBootstrapExecSpecRunsFromRoot(t *testing.T) {
-	spec := directoryOnlyGuestSessionBootstrapExecSpec(testRuntimeMountConfig())
+	spec := directoryOnlyGuestSandboxBootstrapExecSpec(testRuntimeMountConfig())
 	if spec.Command != "sh" {
 		t.Fatalf("bootstrap command = %q, want sh", spec.Command)
 	}
@@ -96,7 +96,7 @@ func TestBoxLiteBootstrapExecSpecRunsFromRoot(t *testing.T) {
 }
 
 func TestBoxLiteBootstrapErrorIncludesContextAndOutput(t *testing.T) {
-	err := formatDirectoryOnlyGuestSessionBootstrapError(
+	err := formatDirectoryOnlyGuestSandboxBootstrapError(
 		RuntimeDriverBoxlite,
 		"session-1",
 		"box-1",
@@ -107,7 +107,7 @@ func TestBoxLiteBootstrapErrorIncludesContextAndOutput(t *testing.T) {
 	for _, required := range []string{
 		"directory-only guest bootstrap failed",
 		"driver=boxlite",
-		"session_id=session-1",
+		"sandbox_id=session-1",
 		"runtime_id=box-1",
 		"exit_code=17",
 		"stdout=\"stdout detail\"",
@@ -120,7 +120,7 @@ func TestBoxLiteBootstrapErrorIncludesContextAndOutput(t *testing.T) {
 }
 
 func TestMicrosandboxBootstrapExecSpecRunsFromRoot(t *testing.T) {
-	spec := directoryOnlyGuestSessionBootstrapExecSpec(testRuntimeMountConfig())
+	spec := directoryOnlyGuestSandboxBootstrapExecSpec(testRuntimeMountConfig())
 	if spec.Command != "sh" {
 		t.Fatalf("bootstrap command = %q, want sh", spec.Command)
 	}
@@ -142,7 +142,7 @@ func TestMicrosandboxBootstrapExecSpecRunsFromRoot(t *testing.T) {
 }
 
 func TestMicrosandboxBootstrapErrorIncludesContextAndOutput(t *testing.T) {
-	err := formatDirectoryOnlyGuestSessionBootstrapError(
+	err := formatDirectoryOnlyGuestSandboxBootstrapError(
 		RuntimeDriverMicrosandbox,
 		"session-1",
 		"sandbox-1",
@@ -153,7 +153,7 @@ func TestMicrosandboxBootstrapErrorIncludesContextAndOutput(t *testing.T) {
 	for _, required := range []string{
 		"directory-only guest bootstrap failed",
 		"driver=microsandbox",
-		"session_id=session-1",
+		"sandbox_id=session-1",
 		"runtime_id=sandbox-1",
 		"exit_code=23",
 		"stdout=\"stdout detail\"",

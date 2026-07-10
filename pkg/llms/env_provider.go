@@ -7,7 +7,7 @@ import (
 	domain "agent-compose/pkg/model"
 )
 
-func EnvItemValue(items []domain.SessionEnvVar, key string) string {
+func EnvItemValue(items []domain.SandboxEnvVar, key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return ""
@@ -32,7 +32,7 @@ func LooksLikeAnthropicMessagesEndpoint(endpoint string) bool {
 	return strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/messages")
 }
 
-func EnvHasProviderKeyForFamily(envItems []domain.SessionEnvVar, providerFamily string) bool {
+func EnvHasProviderKeyForFamily(envItems []domain.SandboxEnvVar, providerFamily string) bool {
 	switch NormalizeProviderType(providerFamily) {
 	case ProviderFamilyAnthropic:
 		return strings.TrimSpace(firstNonEmpty(
@@ -50,7 +50,7 @@ func EnvHasProviderKeyForFamily(envItems []domain.SessionEnvVar, providerFamily 
 	}
 }
 
-func HasOpenAIEnvProviderInput(envItems []domain.SessionEnvVar) bool {
+func HasOpenAIEnvProviderInput(envItems []domain.SandboxEnvVar) bool {
 	endpoint := EnvItemValue(envItems, "LLM_API_ENDPOINT")
 	if LooksLikeAnthropicMessagesEndpoint(endpoint) {
 		return false
@@ -62,7 +62,7 @@ func HasOpenAIEnvProviderInput(envItems []domain.SessionEnvVar) bool {
 	)) != ""
 }
 
-func HasAnthropicEnvProviderInput(envItems []domain.SessionEnvVar) bool {
+func HasAnthropicEnvProviderInput(envItems []domain.SandboxEnvVar) bool {
 	return strings.TrimSpace(firstNonEmpty(
 		EnvItemValue(envItems, "ANTHROPIC_BASE_URL"),
 		EnvItemValue(envItems, "ANTHROPIC_API_ENDPOINT"),
@@ -71,11 +71,11 @@ func HasAnthropicEnvProviderInput(envItems []domain.SessionEnvVar) bool {
 	)) != "" || LooksLikeAnthropicMessagesEndpoint(EnvItemValue(envItems, "LLM_API_ENDPOINT"))
 }
 
-func HasSessionEnvProviderInput(envItems []domain.SessionEnvVar) bool {
+func HasSessionEnvProviderInput(envItems []domain.SandboxEnvVar) bool {
 	return HasOpenAIEnvProviderInput(envItems) || HasAnthropicEnvProviderInput(envItems)
 }
 
-func SessionAnthropicEnvModel(envItems []domain.SessionEnvVar) string {
+func SessionAnthropicEnvModel(envItems []domain.SandboxEnvVar) string {
 	genericModel := EnvItemValue(envItems, "LLM_MODEL")
 	return firstNonEmpty(
 		EnvItemValue(envItems, "ANTHROPIC_MODEL"),

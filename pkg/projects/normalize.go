@@ -147,11 +147,6 @@ func NormalizeRunRecord(run domain.ProjectRunRecord) (domain.ProjectRunRecord, e
 	run.TriggerID = strings.TrimSpace(run.TriggerID)
 	run.Status = NormalizeRunStatus(run.Status)
 	run.SandboxID = strings.TrimSpace(run.SandboxID)
-	run.SessionID = strings.TrimSpace(run.SessionID)
-	if run.SandboxID == "" {
-		run.SandboxID = run.SessionID
-	}
-	run.SessionID = run.SandboxID
 	run.ResultJSON = strings.TrimSpace(run.ResultJSON)
 	run.LogsPath = strings.TrimSpace(run.LogsPath)
 	run.ArtifactsDir = strings.TrimSpace(run.ArtifactsDir)

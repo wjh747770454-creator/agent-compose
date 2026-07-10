@@ -81,7 +81,7 @@ func DefaultLLMEnvProviderLookup(ctx context.Context, config *appconfig.Config, 
 
 // sessionLLMEnvProviderLookup reads only from per-session env items. Used by the
 // session_env bootstrap providers.
-func sessionLLMEnvProviderLookup(envItems []domain.SessionEnvVar) EnvProviderLookup {
+func sessionLLMEnvProviderLookup(envItems []domain.SandboxEnvVar) EnvProviderLookup {
 	return func(keys ...string) string {
 		for _, key := range keys {
 			if v := EnvItemValue(envItems, key); strings.TrimSpace(v) != "" {
@@ -131,7 +131,7 @@ func ResolveRuntimeLLMTarget(ctx context.Context, config *appconfig.Config, stor
 	return resolveRuntimeLLMTarget(ctx, config, store, requestedModel, providerID)
 }
 
-func resolveRuntimeLLMTargetWithEnv(ctx context.Context, config *appconfig.Config, store LLMResolverStore, sessionID, preferredProviderFamily, requestedModel, providerID string, envItems []domain.SessionEnvVar) (ResolvedTarget, error) {
+func resolveRuntimeLLMTargetWithEnv(ctx context.Context, config *appconfig.Config, store LLMResolverStore, sessionID, preferredProviderFamily, requestedModel, providerID string, envItems []domain.SandboxEnvVar) (ResolvedTarget, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	preferredProviderFamily = NormalizeOptionalProviderType(preferredProviderFamily)
 	requestedModel = strings.TrimSpace(requestedModel)
@@ -223,7 +223,7 @@ func resolveRuntimeLLMTargetWithEnv(ctx context.Context, config *appconfig.Confi
 	return ResolvedTarget{Provider: provider, Model: model, WireAPI: wireAPI, Endpoint: endpoint, Headers: headers}, nil
 }
 
-func ResolveRuntimeLLMTargetWithEnv(ctx context.Context, config *appconfig.Config, store LLMResolverStore, sessionID, preferredProviderFamily, requestedModel, providerID string, envItems []domain.SessionEnvVar) (ResolvedTarget, error) {
+func ResolveRuntimeLLMTargetWithEnv(ctx context.Context, config *appconfig.Config, store LLMResolverStore, sessionID, preferredProviderFamily, requestedModel, providerID string, envItems []domain.SandboxEnvVar) (ResolvedTarget, error) {
 	return resolveRuntimeLLMTargetWithEnv(ctx, config, store, sessionID, preferredProviderFamily, requestedModel, providerID, envItems)
 }
 
@@ -245,23 +245,23 @@ func ensureDefaultAnthropicEnvProvider(ctx context.Context, config *appconfig.Co
 	return err
 }
 
-func ensureSessionOpenAIEnvProvider(ctx context.Context, store LLMResolverStore, sessionID, requestedModel string, envItems []domain.SessionEnvVar) (string, error) {
+func ensureSessionOpenAIEnvProvider(ctx context.Context, store LLMResolverStore, sessionID, requestedModel string, envItems []domain.SandboxEnvVar) (string, error) {
 	providerID := SessionEnvProviderID(sessionID, ProviderFamilyOpenAI)
 	return EnsureOpenAIEnvProvider(ctx, store, sessionLLMEnvProviderLookup(envItems), providerID, providerID, ProviderScopeSessionEnv, requestedModel, false)
 }
 
-func EnsureSessionOpenAIEnvProvider(ctx context.Context, store LLMResolverStore, sessionID, requestedModel string, envItems []domain.SessionEnvVar) (string, error) {
+func EnsureSessionOpenAIEnvProvider(ctx context.Context, store LLMResolverStore, sessionID, requestedModel string, envItems []domain.SandboxEnvVar) (string, error) {
 	return ensureSessionOpenAIEnvProvider(ctx, store, sessionID, requestedModel, envItems)
 }
 
-func ensureSessionAnthropicEnvProvider(ctx context.Context, store LLMResolverStore, sessionID, requestedModel string, envItems []domain.SessionEnvVar) (string, error) {
+func ensureSessionAnthropicEnvProvider(ctx context.Context, store LLMResolverStore, sessionID, requestedModel string, envItems []domain.SandboxEnvVar) (string, error) {
 	providerID := SessionEnvProviderID(sessionID, ProviderFamilyAnthropic)
 	lookup := sessionLLMEnvProviderLookup(envItems)
 	authHeader, authScheme := AnthropicProviderAuthFromLookup(lookup)
 	return EnsureAnthropicEnvProvider(ctx, store, lookup, authHeader, authScheme, providerID, providerID, ProviderScopeSessionEnv, requestedModel, false)
 }
 
-func EnsureSessionAnthropicEnvProvider(ctx context.Context, store LLMResolverStore, sessionID, requestedModel string, envItems []domain.SessionEnvVar) (string, error) {
+func EnsureSessionAnthropicEnvProvider(ctx context.Context, store LLMResolverStore, sessionID, requestedModel string, envItems []domain.SandboxEnvVar) (string, error) {
 	return ensureSessionAnthropicEnvProvider(ctx, store, sessionID, requestedModel, envItems)
 }
 

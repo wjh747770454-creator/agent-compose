@@ -7,15 +7,15 @@ import (
 	"strings"
 )
 
-func directoryOnlyGuestSessionBootstrapCommand(config *appconfig.Config) string {
-	return directoryOnlyGuestSessionBootstrapCommandForSession(config, nil)
+func directoryOnlyGuestSandboxBootstrapCommand(config *appconfig.Config) string {
+	return directoryOnlyGuestSandboxBootstrapCommandForSandbox(config, nil)
 }
 
-func directoryOnlyGuestSessionBootstrapCommandForSession(config *appconfig.Config, session *Session) string {
+func directoryOnlyGuestSandboxBootstrapCommandForSandbox(config *appconfig.Config, session *Sandbox) string {
 	appconfig.ApplyDefaultGuestPaths(config)
-	workspaceSource := filepath.Clean(filepath.Join(directoryOnlyGuestSessionPath, "workspace"))
+	workspaceSource := filepath.Clean(filepath.Join(directoryOnlyGuestSandboxPath, "workspace"))
 	workspaceTarget := filepath.Clean(config.GuestWorkspacePath)
-	homeSource := filepath.Clean(filepath.Join(directoryOnlyGuestSessionPath, "home"))
+	homeSource := filepath.Clean(filepath.Join(directoryOnlyGuestSandboxPath, "home"))
 	homeTarget := filepath.Clean(config.GuestHomePath)
 
 	commands := []string{
@@ -35,10 +35,10 @@ func directoryOnlyGuestSessionBootstrapCommandForSession(config *appconfig.Confi
 		)
 	}
 	for _, entry := range runtimeMountEntries(config) {
-		if entry.directoryOnlyExposure != directoryOnlyExposureSymlink || !strings.HasPrefix(entry.sessionPath, "home/") {
+		if entry.directoryOnlyExposure != directoryOnlyExposureSymlink || !strings.HasPrefix(entry.sandboxPath, "home/") {
 			continue
 		}
-		source := filepath.Clean(filepath.Join(directoryOnlyGuestSessionPath, filepath.FromSlash(entry.sessionPath)))
+		source := filepath.Clean(filepath.Join(directoryOnlyGuestSandboxPath, filepath.FromSlash(entry.sandboxPath)))
 		target := filepath.Clean(entry.guestPath)
 		commands = append(commands, directoryOnlySymlinkCommand(source, target, entry.isFile, true))
 	}
@@ -79,14 +79,14 @@ func directoryOnlySymlinkCommand(source, target string, isFile bool, replaceExis
 		"test \"$(readlink " + targetQuote + ")\" = " + sourceQuote + " || { echo \"directory-only symlink target does not match " + source + "\" >&2; exit 1; }"
 }
 
-func directoryOnlyGuestSessionBootstrapExecSpec(config *appconfig.Config) ExecSpec {
-	return directoryOnlyGuestSessionBootstrapExecSpecForSession(config, nil)
+func directoryOnlyGuestSandboxBootstrapExecSpec(config *appconfig.Config) ExecSpec {
+	return directoryOnlyGuestSandboxBootstrapExecSpecForSandbox(config, nil)
 }
 
-func directoryOnlyGuestSessionBootstrapExecSpecForSession(config *appconfig.Config, session *Session) ExecSpec {
+func directoryOnlyGuestSandboxBootstrapExecSpecForSandbox(config *appconfig.Config, session *Sandbox) ExecSpec {
 	return ExecSpec{
 		Command: "sh",
-		Args:    []string{"-lc", directoryOnlyGuestSessionBootstrapCommandForSession(config, session)},
+		Args:    []string{"-lc", directoryOnlyGuestSandboxBootstrapCommandForSandbox(config, session)},
 		Cwd:     "/",
 	}
 }
@@ -98,10 +98,10 @@ func executeUserCommandAfterBootstrap(bootstrap func() error, execute func() (Ex
 	return execute()
 }
 
-func formatDirectoryOnlyGuestSessionBootstrapError(driver, sessionID, runtimeID string, result ExecResult, execErr error) error {
+func formatDirectoryOnlyGuestSandboxBootstrapError(driver, sandboxID, runtimeID string, result ExecResult, execErr error) error {
 	parts := []string{"directory-only guest bootstrap failed", "driver=" + strings.TrimSpace(driver)}
-	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
-		parts = append(parts, "session_id="+sessionID)
+	if sandboxID = strings.TrimSpace(sandboxID); sandboxID != "" {
+		parts = append(parts, "sandbox_id="+sandboxID)
 	}
 	if runtimeID = strings.TrimSpace(runtimeID); runtimeID != "" {
 		parts = append(parts, "runtime_id="+runtimeID)

@@ -15,51 +15,51 @@ import (
 )
 
 type LifecycleStore interface {
-	GetSession(context.Context, string) (*domain.Session, error)
-	UpdateSession(context.Context, *domain.Session) error
+	GetSandbox(context.Context, string) (*domain.Sandbox, error)
+	UpdateSandbox(context.Context, *domain.Sandbox) error
 	GetVMState(string) (domain.VMState, error)
 	SaveVMState(string, domain.VMState) error
 	GetProxyState(string) (domain.ProxyState, error)
-	AddEvent(context.Context, string, domain.SessionEvent) error
+	AddEvent(context.Context, string, domain.SandboxEvent) error
 }
 
-type SessionDriver interface {
-	StartSessionVM(context.Context, *domain.Session) error
-	StopSessionVM(context.Context, *domain.Session) error
+type SandboxDriver interface {
+	StartSandboxVM(context.Context, *domain.Sandbox) error
+	StopSandboxVM(context.Context, *domain.Sandbox) error
 }
 
 type RuntimeLivenessProvider interface {
-	IsSessionAlive(context.Context, string, *domain.Session, domain.VMState) (bool, bool, error)
+	IsSandboxAlive(context.Context, string, *domain.Sandbox, domain.VMState) (bool, bool, error)
 }
 
 type FacadeTokenRevoker interface {
-	RevokeLLMFacadeTokensForSession(context.Context, string) error
+	RevokeLLMFacadeTokensForSandbox(context.Context, string) error
 }
 
 type LifecycleNotifier interface {
-	PublishSessionUpdated(*domain.SessionSummary)
-	PublishEventAdded(string, domain.SessionEvent)
+	PublishSandboxUpdated(*domain.SandboxSummary)
+	PublishEventAdded(string, domain.SandboxEvent)
 	NotifyDashboard(string)
 }
 
-type CapabilityGuideWriter func(context.Context, *domain.Session, []string)
+type CapabilityGuideWriter func(context.Context, *domain.Sandbox, []string)
 
 type Lifecycle struct {
 	Config       *appconfig.Config
 	Store        LifecycleStore
 	Workspace    workspaces.Store
-	Driver       SessionDriver
+	Driver       SandboxDriver
 	Liveness     RuntimeLivenessProvider
 	TokenRevoker FacadeTokenRevoker
 	Notifier     LifecycleNotifier
 	GuideWriter  CapabilityGuideWriter
 }
 
-func (l Lifecycle) ReconcileRuntimeState(ctx context.Context, session *domain.Session) (*domain.Session, error) {
+func (l Lifecycle) ReconcileRuntimeState(ctx context.Context, session *domain.Sandbox) (*domain.Sandbox, error) {
 	if session == nil || session.Summary.VMStatus != domain.VMStatusRunning {
 		return session, nil
 	}
-	driver, err := driverpkg.ResolveSessionRuntimeDriver(session.Summary.Driver, l.Config.RuntimeDriver)
+	driver, err := driverpkg.ResolveSandboxRuntimeDriver(session.Summary.Driver, l.Config.RuntimeDriver)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (l Lifecycle) ReconcileRuntimeState(ctx context.Context, session *domain.Se
 	if err != nil {
 		return nil, err
 	}
-	alive, ok, err := l.Liveness.IsSessionAlive(ctx, driver, session, vmState)
+	alive, ok, err := l.Liveness.IsSandboxAlive(ctx, driver, session, vmState)
 	if err != nil {
 		return nil, err
 	}
@@ -95,30 +95,30 @@ func (l Lifecycle) ReconcileRuntimeState(ctx context.Context, session *domain.Se
 		return nil, err
 	}
 	session.Summary.VMStatus = domain.VMStatusStopped
-	if err := l.Store.UpdateSession(ctx, session); err != nil {
+	if err := l.Store.UpdateSandbox(ctx, session); err != nil {
 		return nil, err
 	}
 	if l.TokenRevoker != nil {
-		_ = l.TokenRevoker.RevokeLLMFacadeTokensForSession(ctx, session.Summary.ID)
+		_ = l.TokenRevoker.RevokeLLMFacadeTokensForSandbox(ctx, session.Summary.ID)
 	}
-	event := domain.SessionEvent{
+	event := domain.SandboxEvent{
 		ID:        uuid.NewString(),
-		Type:      "session.runtime_lost",
+		Type:      "sandbox.runtime_lost",
 		Level:     "warn",
-		Message:   "session marked stopped after microsandbox runtime became unreachable",
+		Message:   "sandbox marked stopped after microsandbox runtime became unreachable",
 		CreatedAt: now,
 	}
 	_ = l.Store.AddEvent(ctx, session.Summary.ID, event)
 	if l.Notifier != nil {
-		l.Notifier.PublishSessionUpdated(&session.Summary)
-		l.Notifier.NotifyDashboard("session_updated")
+		l.Notifier.PublishSandboxUpdated(&session.Summary)
+		l.Notifier.NotifyDashboard("sandbox_updated")
 		l.Notifier.PublishEventAdded(session.Summary.ID, event)
 	}
-	return l.Store.GetSession(ctx, session.Summary.ID)
+	return l.Store.GetSandbox(ctx, session.Summary.ID)
 }
 
-func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*domain.Session, domain.ProxyState, error) {
-	session, err := l.Store.GetSession(ctx, sessionID)
+func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*domain.Sandbox, domain.ProxyState, error) {
+	session, err := l.Store.GetSandbox(ctx, sessionID)
 	if err != nil {
 		return nil, domain.ProxyState{}, err
 	}
@@ -132,23 +132,23 @@ func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*dom
 	if session.Summary.VMStatus == domain.VMStatusRunning && JupyterTargetReachable(proxyState, 1500*time.Millisecond) {
 		return session, proxyState, nil
 	}
-	startCtx, cancel := context.WithTimeout(ctx, l.Config.SessionStartTimeout)
+	startCtx, cancel := context.WithTimeout(ctx, l.Config.SandboxStartTimeout)
 	defer cancel()
 	if err := workspaces.PrepareSessionWorkspace(startCtx, l.Config, l.Workspace, session); err != nil {
 		session.Summary.VMStatus = domain.VMStatusFailed
-		_ = l.Store.UpdateSession(ctx, session)
+		_ = l.Store.UpdateSandbox(ctx, session)
 		return nil, domain.ProxyState{}, err
 	}
-	if err := l.Driver.StartSessionVM(startCtx, session); err != nil {
+	if err := l.Driver.StartSandboxVM(startCtx, session); err != nil {
 		session.Summary.VMStatus = domain.VMStatusFailed
-		_ = l.Store.UpdateSession(ctx, session)
+		_ = l.Store.UpdateSandbox(ctx, session)
 		return nil, domain.ProxyState{}, err
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := l.Store.UpdateSession(ctx, session); err != nil {
+	if err := l.Store.UpdateSandbox(ctx, session); err != nil {
 		return nil, domain.ProxyState{}, err
 	}
-	loaded, err := l.Store.GetSession(ctx, session.Summary.ID)
+	loaded, err := l.Store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		return nil, domain.ProxyState{}, err
 	}
@@ -159,75 +159,75 @@ func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*dom
 	return loaded, proxyState, nil
 }
 
-func (l Lifecycle) ResumeLoaded(ctx context.Context, session *domain.Session, capsetIDs []string) (*domain.Session, error) {
+func (l Lifecycle) ResumeLoaded(ctx context.Context, session *domain.Sandbox, capsetIDs []string) (*domain.Sandbox, error) {
 	if err := workspaces.PrepareSessionWorkspace(ctx, l.Config, l.Workspace, session); err != nil {
 		return nil, err
 	}
 	if l.GuideWriter != nil {
 		l.GuideWriter(ctx, session, capsetIDs)
 	}
-	if err := l.Driver.StartSessionVM(ctx, session); err != nil {
+	if err := l.Driver.StartSandboxVM(ctx, session); err != nil {
 		return nil, err
 	}
 	session.Summary.VMStatus = domain.VMStatusRunning
-	if err := l.Store.UpdateSession(ctx, session); err != nil {
+	if err := l.Store.UpdateSandbox(ctx, session); err != nil {
 		return nil, err
 	}
-	l.publishSessionUpdated(&session.Summary)
-	event := domain.SessionEvent{
+	l.publishSandboxUpdated(&session.Summary)
+	event := domain.SandboxEvent{
 		ID:        uuid.NewString(),
-		Type:      "session.resumed",
+		Type:      "sandbox.resumed",
 		Level:     "info",
-		Message:   "session resumed with " + session.Summary.Driver + " driver using guest image " + session.Summary.GuestImage,
+		Message:   "sandbox resumed with " + session.Summary.Driver + " driver using guest image " + session.Summary.GuestImage,
 		CreatedAt: time.Now().UTC(),
 	}
 	_ = l.Store.AddEvent(ctx, session.Summary.ID, event)
 	l.publishEventAdded(session.Summary.ID, event)
-	loaded, err := l.Store.GetSession(ctx, session.Summary.ID)
+	loaded, err := l.Store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		return nil, err
 	}
-	domain.RestoreSessionTransientFields(loaded, session)
+	domain.RestoreSandboxTransientFields(loaded, session)
 	return loaded, nil
 }
 
-func (l Lifecycle) StopLoaded(ctx context.Context, session *domain.Session) (*domain.Session, bool, error) {
+func (l Lifecycle) StopLoaded(ctx context.Context, session *domain.Sandbox) (*domain.Sandbox, bool, error) {
 	if session.Summary.VMStatus != domain.VMStatusRunning {
 		return session, false, nil
 	}
-	if err := l.Driver.StopSessionVM(ctx, session); err != nil {
+	if err := l.Driver.StopSandboxVM(ctx, session); err != nil {
 		return nil, false, err
 	}
 	session.Summary.VMStatus = domain.VMStatusStopped
-	if err := l.Store.UpdateSession(ctx, session); err != nil {
+	if err := l.Store.UpdateSandbox(ctx, session); err != nil {
 		return nil, false, err
 	}
-	l.publishSessionUpdated(&session.Summary)
-	event := domain.SessionEvent{
+	l.publishSandboxUpdated(&session.Summary)
+	event := domain.SandboxEvent{
 		ID:        uuid.NewString(),
-		Type:      "session.stopped",
+		Type:      "sandbox.stopped",
 		Level:     "info",
-		Message:   "session stopped",
+		Message:   "sandbox stopped",
 		CreatedAt: time.Now().UTC(),
 	}
 	_ = l.Store.AddEvent(ctx, session.Summary.ID, event)
 	l.publishEventAdded(session.Summary.ID, event)
-	loaded, err := l.Store.GetSession(ctx, session.Summary.ID)
+	loaded, err := l.Store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		return nil, false, err
 	}
 	return loaded, true, nil
 }
 
-func (l Lifecycle) publishSessionUpdated(summary *domain.SessionSummary) {
+func (l Lifecycle) publishSandboxUpdated(summary *domain.SandboxSummary) {
 	if l.Notifier == nil {
 		return
 	}
-	l.Notifier.PublishSessionUpdated(summary)
-	l.Notifier.NotifyDashboard("session_updated")
+	l.Notifier.PublishSandboxUpdated(summary)
+	l.Notifier.NotifyDashboard("sandbox_updated")
 }
 
-func (l Lifecycle) publishEventAdded(sessionID string, event domain.SessionEvent) {
+func (l Lifecycle) publishEventAdded(sessionID string, event domain.SandboxEvent) {
 	if l.Notifier != nil {
 		l.Notifier.PublishEventAdded(sessionID, event)
 	}

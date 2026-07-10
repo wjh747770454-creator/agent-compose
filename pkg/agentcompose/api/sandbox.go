@@ -17,8 +17,8 @@ import (
 )
 
 type SandboxStore interface {
-	GetSession(context.Context, string) (*domain.Session, error)
-	RemoveSession(context.Context, string) error
+	GetSandbox(context.Context, string) (*domain.Sandbox, error)
+	RemoveSandbox(context.Context, string) error
 }
 
 type SandboxStatsStore interface {
@@ -27,10 +27,10 @@ type SandboxStatsStore interface {
 }
 
 type SandboxStatsRuntime interface {
-	Stats(context.Context, *domain.Session, domain.VMState) (domain.SandboxStats, error)
+	Stats(context.Context, *domain.Sandbox, domain.VMState) (domain.SandboxStats, error)
 }
 
-type SandboxStatsRuntimeResolver func(*domain.Session) (SandboxStatsRuntime, error)
+type SandboxStatsRuntimeResolver func(*domain.Sandbox) (SandboxStatsRuntime, error)
 
 type SandboxDashboardNotifier interface {
 	Notify(string)
@@ -60,7 +60,7 @@ func (h *SandboxHandler) RemoveSandbox(ctx context.Context, req *connect.Request
 	if err := validateSandboxID(sandboxID); err != nil {
 		return nil, err
 	}
-	session, err := h.store.GetSession(ctx, sandboxID)
+	session, err := h.store.GetSandbox(ctx, sandboxID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -82,11 +82,11 @@ func (h *SandboxHandler) RemoveSandbox(ctx context.Context, req *connect.Request
 		}
 		stopped = true
 	}
-	if err := h.store.RemoveSession(ctx, sandboxID); err != nil {
+	if err := h.store.RemoveSandbox(ctx, sandboxID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if h.dashboard != nil {
-		h.dashboard.Notify("session_removed")
+		h.dashboard.Notify("sandbox_removed")
 	}
 	return connect.NewResponse(&agentcomposev2.RemoveSandboxResponse{
 		SandboxId: sandboxID,
@@ -100,7 +100,7 @@ func (h *SandboxHandler) GetSandboxStats(ctx context.Context, req *connect.Reque
 	if err := validateSandboxID(sandboxID); err != nil {
 		return nil, err
 	}
-	session, err := h.store.GetSession(ctx, sandboxID)
+	session, err := h.store.GetSandbox(ctx, sandboxID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}

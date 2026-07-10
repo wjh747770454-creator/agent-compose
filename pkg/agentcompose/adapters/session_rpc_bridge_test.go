@@ -26,17 +26,17 @@ import (
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 )
 
-type fakeRPCSessionDriver struct {
+type fakeRPCSandboxDriver struct {
 	startCalls []string
 	stopCalls  []string
 }
 
-func (d *fakeRPCSessionDriver) StartSessionVM(_ context.Context, session *domain.Session) error {
+func (d *fakeRPCSandboxDriver) StartSandboxVM(_ context.Context, session *domain.Sandbox) error {
 	d.startCalls = append(d.startCalls, session.Summary.ID)
 	return nil
 }
 
-func (d *fakeRPCSessionDriver) StopSessionVM(_ context.Context, session *domain.Session) error {
+func (d *fakeRPCSandboxDriver) StopSandboxVM(_ context.Context, session *domain.Sandbox) error {
 	d.stopCalls = append(d.stopCalls, session.Summary.ID)
 	return nil
 }
@@ -69,9 +69,9 @@ func (p testCapabilityProvider) ProxyTarget() string {
 	return p.target
 }
 
-func TestSessionRPCBridgeCallJSONSupportsSessionRPCs(t *testing.T) {
+func TestSandboxRPCBridgeCallJSONSupportsSessionRPCs(t *testing.T) {
 	ctx := context.Background()
-	bridge, driver := newTestSessionRPCBridge(t)
+	bridge, driver := newTestSandboxRPCBridge(t)
 
 	createJSON, err := bridge.CallJSON(ctx, "CreateSession", `{"title":"Loader Created","tags":[{"name":"origin","value":"test"}]}`)
 	if err != nil {
@@ -89,7 +89,7 @@ func TestSessionRPCBridgeCallJSONSupportsSessionRPCs(t *testing.T) {
 		t.Fatalf("CreateSession vm status = %q, want %q", got, want)
 	}
 	if len(driver.startCalls) != 1 {
-		t.Fatalf("StartSessionVM call count = %d, want 1", len(driver.startCalls))
+		t.Fatalf("StartSandboxVM call count = %d, want 1", len(driver.startCalls))
 	}
 
 	getJSON, err := bridge.CallJSON(ctx, "GetSession", `{"sessionId":"`+sessionID+`"}`)
@@ -132,7 +132,7 @@ func TestSessionRPCBridgeCallJSONSupportsSessionRPCs(t *testing.T) {
 		t.Fatalf("StopSession vm status = %q, want %q", got, want)
 	}
 	if len(driver.stopCalls) != 1 {
-		t.Fatalf("StopSessionVM call count = %d, want 1", len(driver.stopCalls))
+		t.Fatalf("StopSandboxVM call count = %d, want 1", len(driver.stopCalls))
 	}
 
 	resumeJSON, err := bridge.CallJSON(ctx, "ResumeSession", `{"sessionId":"`+sessionID+`"}`)
@@ -147,7 +147,7 @@ func TestSessionRPCBridgeCallJSONSupportsSessionRPCs(t *testing.T) {
 		t.Fatalf("ResumeSession vm status = %q, want %q", got, want)
 	}
 	if len(driver.startCalls) != 2 {
-		t.Fatalf("StartSessionVM call count after resume = %d, want 2", len(driver.startCalls))
+		t.Fatalf("StartSandboxVM call count after resume = %d, want 2", len(driver.startCalls))
 	}
 
 	if _, err := bridge.CallJSON(ctx, "MissingRPC", `{}`); err == nil || !strings.Contains(err.Error(), "unsupported session rpc") {
@@ -158,9 +158,9 @@ func TestSessionRPCBridgeCallJSONSupportsSessionRPCs(t *testing.T) {
 	}
 }
 
-func TestSessionRPCBridgeCapabilityGuideLifecycle(t *testing.T) {
+func TestSandboxRPCBridgeCapabilityGuideLifecycle(t *testing.T) {
 	ctx := context.Background()
-	bridge, _ := newTestSessionRPCBridge(t)
+	bridge, _ := newTestSandboxRPCBridge(t)
 	catalog := "# Catalog: dev\n\ninitial"
 	bridge.cap = testCapabilityProvider{
 		target: "agent-compose:9100",
@@ -168,6 +168,7 @@ func TestSessionRPCBridgeCapabilityGuideLifecycle(t *testing.T) {
 			return []byte(catalog), nil
 		},
 	}
+	bridge.capTokens = NewCapabilitySandboxResolver(bridge.store)
 
 	resp, err := bridge.CreateSession(ctx, connect.NewRequest(&agentcomposev1.CreateSessionRequest{
 		Title:     "capability",
@@ -180,21 +181,26 @@ func TestSessionRPCBridgeCapabilityGuideLifecycle(t *testing.T) {
 	for _, item := range resp.Msg.GetSession().GetEnvItems() {
 		env[item.GetName()] = item.GetValue()
 	}
-	if env[capabilities.ProxyTargetEnvName] != "agent-compose:9100" || env[capabilities.SessionTokenEnvName] == "" {
+	if env[capabilities.ProxyTargetEnvName] != "agent-compose:9100" || env[capabilities.SandboxTokenEnvName] == "" {
 		t.Fatalf("capability gateway vars not injected: %+v", env)
 	}
 	sessionID := resp.Msg.GetSession().GetSummary().GetSessionId()
-	session, err := bridge.store.GetSession(ctx, sessionID)
+	session, err := bridge.store.GetSandbox(ctx, sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if capsets := capabilities.SessionCapsets(session); len(capsets) != 1 || capsets[0] != "dev" {
+	capabilityToken := capabilities.SandboxToken(session)
+	binding, err := bridge.capTokens.ResolveCapabilitySandbox(ctx, capabilityToken)
+	if err != nil || binding.SandboxID != sessionID || len(binding.CapsetIDs) != 1 || binding.CapsetIDs[0] != "dev" {
+		t.Fatalf("capability token binding = %#v err=%v", binding, err)
+	}
+	if capsets := capabilities.SandboxCapsets(session); len(capsets) != 1 || capsets[0] != "dev" {
 		t.Fatalf("capset tag not injected: %+v", capsets)
 	}
 	if _, err := os.Stat(filepath.Join(session.Summary.WorkspacePath, "CAPABILITIES.md")); !os.IsNotExist(err) {
 		t.Fatalf("capability guide must not be written into workspace, stat err = %v", err)
 	}
-	guidePath := capabilities.SessionGuidePath(session)
+	guidePath := capabilities.SandboxGuidePath(session)
 	guide, err := os.ReadFile(guidePath)
 	if err != nil {
 		t.Fatalf("capability guide not written: %v", err)
@@ -210,8 +216,14 @@ func TestSessionRPCBridgeCapabilityGuideLifecycle(t *testing.T) {
 	if _, err := bridge.StopSession(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: sessionID})); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := bridge.capTokens.ResolveCapabilitySandbox(ctx, capabilityToken); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("stopped sandbox token resolve error = %v", err)
+	}
 	if _, err := bridge.ResumeSession(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: sessionID})); err != nil {
 		t.Fatal(err)
+	}
+	if binding, err := bridge.capTokens.ResolveCapabilitySandbox(ctx, capabilityToken); err != nil || binding.SandboxID != sessionID {
+		t.Fatalf("resumed sandbox token binding = %#v err=%v", binding, err)
 	}
 	guide, err = os.ReadFile(guidePath)
 	if err != nil {
@@ -222,9 +234,9 @@ func TestSessionRPCBridgeCapabilityGuideLifecycle(t *testing.T) {
 	}
 }
 
-func TestSessionRPCBridgeCapabilityGuideIsBestEffort(t *testing.T) {
+func TestSandboxRPCBridgeCapabilityGuideIsBestEffort(t *testing.T) {
 	ctx := context.Background()
-	bridge, _ := newTestSessionRPCBridge(t)
+	bridge, _ := newTestSandboxRPCBridge(t)
 	bridge.cap = testCapabilityProvider{
 		target: "agent-compose:9100",
 		guide: func(context.Context, string) ([]byte, error) {
@@ -239,11 +251,11 @@ func TestSessionRPCBridgeCapabilityGuideIsBestEffort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session must not fail when guide rendering fails: %v", err)
 	}
-	session, err := bridge.store.GetSession(ctx, resp.Msg.GetSession().GetSummary().GetSessionId())
+	session, err := bridge.store.GetSandbox(ctx, resp.Msg.GetSession().GetSummary().GetSessionId())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(capabilities.SessionGuidePath(session)); !os.IsNotExist(err) {
+	if _, err := os.Stat(capabilities.SandboxGuidePath(session)); !os.IsNotExist(err) {
 		t.Fatalf("expected no capability guide when provider fails, stat err = %v", err)
 	}
 	events, err := bridge.store.ListEvents(ctx, session.Summary.ID)
@@ -262,30 +274,30 @@ func TestSessionRPCBridgeCapabilityGuideIsBestEffort(t *testing.T) {
 	}
 }
 
-func TestSessionRuntimeLivenessAndNotifierBranches(t *testing.T) {
+func TestSandboxRuntimeLivenessAndNotifierBranches(t *testing.T) {
 	ctx := context.Background()
-	session := &domain.Session{Summary: domain.SessionSummary{ID: "session-1"}}
-	if alive, checked, err := (sessionRuntimeLiveness{}).IsSessionAlive(ctx, "boxlite", session, domain.VMState{}); err != nil || alive || checked {
+	session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-1"}}
+	if alive, checked, err := (sandboxRuntimeLiveness{}).IsSandboxAlive(ctx, "boxlite", session, domain.VMState{}); err != nil || alive || checked {
 		t.Fatalf("nil runtime liveness = alive %v checked %v err %v", alive, checked, err)
 	}
-	if alive, checked, err := (sessionRuntimeLiveness{runtimes: fakeRuntimeProvider{runtime: fakeSessionRuntime{}}}).IsSessionAlive(ctx, "boxlite", session, domain.VMState{}); err != nil || alive || checked {
+	if alive, checked, err := (sandboxRuntimeLiveness{runtimes: fakeRuntimeProvider{runtime: fakeSessionRuntime{}}}).IsSandboxAlive(ctx, "boxlite", session, domain.VMState{}); err != nil || alive || checked {
 		t.Fatalf("runtime without liveness = alive %v checked %v err %v", alive, checked, err)
 	}
 	runtime := driverRuntimeAdapter{runtime: fakeDriverRuntime{alive: true}}
-	if alive, checked, err := (sessionRuntimeLiveness{runtimes: fakeRuntimeProvider{runtime: runtime}}).IsSessionAlive(ctx, "microsandbox", session, domain.VMState{}); err != nil || !alive || !checked {
+	if alive, checked, err := (sandboxRuntimeLiveness{runtimes: fakeRuntimeProvider{runtime: runtime}}).IsSandboxAlive(ctx, "microsandbox", session, domain.VMState{}); err != nil || !alive || !checked {
 		t.Fatalf("driver runtime adapter liveness = alive %v checked %v err %v", alive, checked, err)
 	}
 
 	streams := sessions.NewStreamBrokerForTest()
 	events, unsubscribe := streams.Subscribe("session-1")
 	defer unsubscribe()
-	notifier := sessionLifecycleNotifier{streams: streams}
-	notifier.PublishSessionUpdated(&session.Summary)
+	notifier := sandboxLifecycleNotifier{streams: streams}
+	notifier.PublishSandboxUpdated(&session.Summary)
 	got := <-events
-	if got.EventType != sessions.WatchEventTypeSessionUpdated || got.Session.ID != "session-1" {
+	if got.EventType != sessions.WatchEventTypeSandboxUpdated || got.Sandbox.ID != "session-1" {
 		t.Fatalf("session update event = %#v", got)
 	}
-	notifier.PublishEventAdded("session-1", domain.SessionEvent{ID: "event-1", Type: "test.event"})
+	notifier.PublishEventAdded("session-1", domain.SandboxEvent{ID: "event-1", Type: "test.event"})
 	got = <-events
 	if got.EventType != sessions.WatchEventTypeEventAdded || got.Event.ID != "event-1" {
 		t.Fatalf("event added = %#v", got)
@@ -293,12 +305,12 @@ func TestSessionRuntimeLivenessAndNotifierBranches(t *testing.T) {
 	notifier.NotifyDashboard("test")
 }
 
-func newTestSessionRPCBridge(t *testing.T) (*SessionRPCBridge, *fakeRPCSessionDriver) {
+func newTestSandboxRPCBridge(t *testing.T) (*SandboxRPCBridge, *fakeRPCSandboxDriver) {
 	t.Helper()
 	root := t.TempDir()
 	config := &appconfig.Config{
 		DataRoot:             root,
-		SessionRoot:          filepath.Join(root, "sessions"),
+		SandboxRoot:          filepath.Join(root, "sandboxes"),
 		DbAddr:               filepath.Join(root, "data.db"),
 		RuntimeDriver:        driverpkg.RuntimeDriverBoxlite,
 		DefaultImage:         "agent-compose-test:latest",
@@ -306,12 +318,12 @@ func newTestSessionRPCBridge(t *testing.T) (*SessionRPCBridge, *fakeRPCSessionDr
 		GuestWorkspacePath:   "/workspace",
 		GuestStateRoot:       "/state",
 		JupyterGuestPort:     8888,
-		SessionStartTimeout:  time.Second,
-		SessionStopTimeout:   time.Second,
+		SandboxStartTimeout:  time.Second,
+		SandboxStopTimeout:   time.Second,
 		JupyterProxyBasePath: "/agent-compose/session",
 	}
-	if err := os.MkdirAll(config.SessionRoot, 0o755); err != nil {
-		t.Fatalf("create session root: %v", err)
+	if err := os.MkdirAll(config.SandboxRoot, 0o755); err != nil {
+		t.Fatalf("create sandbox root: %v", err)
 	}
 	db, err := sql.Open("sqlite", config.DbAddr)
 	if err != nil {
@@ -328,8 +340,8 @@ func newTestSessionRPCBridge(t *testing.T) (*SessionRPCBridge, *fakeRPCSessionDr
 	if err != nil {
 		t.Fatalf("NewWithConfig returned error: %v", err)
 	}
-	driver := &fakeRPCSessionDriver{}
-	return NewSessionRPCBridge(
+	driver := &fakeRPCSandboxDriver{}
+	return NewSandboxRPCBridge(
 		config,
 		store,
 		configDB,
@@ -339,12 +351,13 @@ func newTestSessionRPCBridge(t *testing.T) (*SessionRPCBridge, *fakeRPCSessionDr
 		sessions.NewStreamBrokerForTest(),
 		testCapabilityProvider{},
 		nil,
+		nil,
 	), driver
 }
 
-func TestSessionRPCBridgeCapabilityGuideFromHTTPProvider(t *testing.T) {
+func TestSandboxRPCBridgeCapabilityGuideFromHTTPProvider(t *testing.T) {
 	ctx := context.Background()
-	bridge, _ := newTestSessionRPCBridge(t)
+	bridge, _ := newTestSandboxRPCBridge(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/admin/v1/catalog/dev" && r.URL.Query().Get("format") == "md" {
 			w.Header().Set("Content-Type", "text/markdown")
@@ -363,11 +376,11 @@ func TestSessionRPCBridgeCapabilityGuideFromHTTPProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := bridge.store.GetSession(ctx, resp.Msg.GetSession().GetSummary().GetSessionId())
+	session, err := bridge.store.GetSandbox(ctx, resp.Msg.GetSession().GetSummary().GetSessionId())
 	if err != nil {
 		t.Fatal(err)
 	}
-	guide, err := os.ReadFile(capabilities.SessionGuidePath(session))
+	guide, err := os.ReadFile(capabilities.SandboxGuidePath(session))
 	if err != nil {
 		t.Fatalf("capability guide not written: %v", err)
 	}

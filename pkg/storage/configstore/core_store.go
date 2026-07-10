@@ -19,7 +19,7 @@ import (
 )
 
 type (
-	SessionEnvVar          = domain.SessionEnvVar
+	SessionEnvVar          = domain.SandboxEnvVar
 	WorkspaceConfig        = domain.WorkspaceConfig
 	Loader                 = domain.Loader
 	ProjectRecord          = domain.ProjectRecord
@@ -125,6 +125,9 @@ func (s *ConfigStore) initSchema(ctx context.Context) error {
 	if s == nil {
 		return fmt.Errorf("config store is required")
 	}
+	if err := s.migrateLegacySQLiteSchema(ctx); err != nil {
+		return err
+	}
 	if err := s.InitCoreSchema(ctx); err != nil {
 		return err
 	}
@@ -146,11 +149,71 @@ func (s *ConfigStore) initSchema(ctx context.Context) error {
 	if err := s.ensureEventSchema(ctx); err != nil {
 		return err
 	}
+	if err := s.copyLegacyEventSessionLinks(ctx); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (s *ConfigStore) InitSchema(ctx context.Context) error {
 	return s.initSchema(ctx)
+}
+
+func (s *ConfigStore) migrateLegacySQLiteSchema(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("config store is required")
+	}
+	for _, item := range []struct {
+		table   string
+		legacy  string
+		current string
+	}{
+		{table: "loader", legacy: "session_policy", current: "sandbox_policy"},
+		{table: "loader_binding", legacy: "session_id", current: "sandbox_id"},
+		{table: "loader_event", legacy: "linked_session_id", current: "linked_sandbox_id"},
+		{table: "loader_event", legacy: "linked_agent_session_id", current: "linked_agent_thread_id"},
+		{table: "llm_facade_token", legacy: "session_id", current: "sandbox_id"},
+	} {
+		columns, err := s.tableColumnTypes(ctx, item.table)
+		if err != nil {
+			return err
+		}
+		if _, legacyExists := columns[item.legacy]; !legacyExists {
+			continue
+		}
+		if _, currentExists := columns[item.current]; currentExists {
+			if _, err := s.db.ExecContext(ctx, fmt.Sprintf(
+				`UPDATE %q SET %q = %q WHERE %q = ''`, item.table, item.current, item.legacy, item.current,
+			)); err != nil {
+				return fmt.Errorf("copy legacy SQLite column %s.%s to %s: %w", item.table, item.legacy, item.current, err)
+			}
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf(
+			`ALTER TABLE %q RENAME COLUMN %q TO %q`, item.table, item.legacy, item.current,
+		)); err != nil {
+			return fmt.Errorf("migrate legacy SQLite column %s.%s to %s: %w", item.table, item.legacy, item.current, err)
+		}
+	}
+	return nil
+}
+
+func (s *ConfigStore) copyLegacyEventSessionLinks(ctx context.Context) error {
+	exists, err := s.tableExists(ctx, "event_session_link")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT OR IGNORE INTO event_sandbox_link(
+		event_id, sandbox_id, relation, loader_id, run_id, trigger_id, loader_event_id, created_at
+	) SELECT event_id, session_id, relation, loader_id, run_id, trigger_id, loader_event_id, created_at
+	FROM event_session_link`)
+	if err != nil {
+		return fmt.Errorf("copy legacy event_session_link rows: %w", err)
+	}
+	return nil
 }
 
 func (s *coreStore) ensureGlobalEnvSchema(ctx context.Context) error {
@@ -268,6 +331,18 @@ func (s *coreStore) tableColumnTypes(ctx context.Context, tableName string) (map
 
 func (s *coreStore) TableColumnTypes(ctx context.Context, tableName string) (map[string]string, error) {
 	return s.tableColumnTypes(ctx, tableName)
+}
+
+func (s *coreStore) tableExists(ctx context.Context, tableName string) (bool, error) {
+	tableName = strings.TrimSpace(tableName)
+	if tableName == "" {
+		return false, fmt.Errorf("schema table name is required")
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, tableName).Scan(&count); err != nil {
+		return false, fmt.Errorf("query schema table %s: %w", tableName, err)
+	}
+	return count > 0, nil
 }
 
 func ensureColumn(ctx context.Context, db *sql.DB, table, column, definition string) error {

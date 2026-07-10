@@ -18,7 +18,7 @@ func TestFilterItems(t *testing.T) {
 	}{
 		{
 			name: "empty filter returns all items in stable order",
-			want: []string{"materialized-old", "session-active", "runtime-unknown", "oci-referenced"},
+			want: []string{"materialized-old", "sandbox-active", "runtime-unknown", "oci-referenced"},
 		},
 		{
 			name:   "driver",
@@ -28,7 +28,7 @@ func TestFilterItems(t *testing.T) {
 		{
 			name:   "driver all does not filter",
 			filter: Filter{Driver: DriverAll},
-			want:   []string{"materialized-old", "session-active", "runtime-unknown", "oci-referenced"},
+			want:   []string{"materialized-old", "sandbox-active", "runtime-unknown", "oci-referenced"},
 		},
 		{
 			name:   "domain",
@@ -37,8 +37,8 @@ func TestFilterItems(t *testing.T) {
 		},
 		{
 			name:   "type",
-			filter: Filter{Type: CacheTypeSession},
-			want:   []string{"session-active"},
+			filter: Filter{Type: CacheTypeSandbox},
+			want:   []string{"sandbox-active"},
 		},
 		{
 			name:   "status",
@@ -52,8 +52,8 @@ func TestFilterItems(t *testing.T) {
 		},
 		{
 			name:   "cache id",
-			filter: Filter{CacheID: "session-active"},
-			want:   []string{"session-active"},
+			filter: Filter{CacheID: "sandbox-active"},
+			want:   []string{"sandbox-active"},
 		},
 		{
 			name: "combined filters",
@@ -120,7 +120,7 @@ func TestNormalizeHelpers(t *testing.T) {
 	if got, ok := NormalizeStatus(Status(" Orphaned ")); !ok || got != StatusOrphaned {
 		t.Fatalf("NormalizeStatus = %q, %v", got, ok)
 	}
-	if got, ok := DomainType(DomainSessionEphemeralState); !ok || got != CacheTypeSession {
+	if got, ok := DomainType(DomainSandboxEphemeralState); !ok || got != CacheTypeSandbox {
 		t.Fatalf("DomainType = %q, %v", got, ok)
 	}
 	for _, tc := range []struct {
@@ -130,7 +130,7 @@ func TestNormalizeHelpers(t *testing.T) {
 		{CacheTypeOCI, DomainOCIImageStore},
 		{CacheTypeMaterialized, DomainMaterializedImageCache},
 		{CacheTypeRuntime, DomainRuntimeDerivedCache},
-		{CacheTypeSession, DomainSessionEphemeralState},
+		{CacheTypeSandbox, DomainSandboxEphemeralState},
 	} {
 		if got, ok := TypeDomain(tc.cacheType); !ok || got != tc.domain {
 			t.Fatalf("TypeDomain(%q) = %q, %v", tc.cacheType, got, ok)
@@ -181,8 +181,8 @@ func sampleFilterItems(now time.Time) []Item {
 			LastUsedSource: "metadata",
 		},
 		{
-			CacheID:        "session-active",
-			Domain:         DomainSessionEphemeralState,
+			CacheID:        "sandbox-active",
+			Domain:         DomainSandboxEphemeralState,
 			Driver:         DriverMicrosandbox,
 			Kind:           "microsandbox-docker-disk",
 			Status:         StatusActive,

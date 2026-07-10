@@ -10,10 +10,10 @@ import (
 const (
 	DefaultAgentProvider = "codex"
 
-	AgentSessionTagSource    = "source"
-	AgentSessionTagSourceVal = "agent"
-	AgentSessionTagID        = "agent_id"
-	AgentSessionTagName      = "agent_name"
+	AgentSandboxTagSource    = "source"
+	AgentSandboxTagSourceVal = "agent"
+	AgentSandboxTagID        = "agent_id"
+	AgentSandboxTagName      = "agent_name"
 )
 
 type AgentDefinition struct {
@@ -28,7 +28,7 @@ type AgentDefinition struct {
 	Driver                 string            `json:"driver,omitempty"`
 	GuestImage             string            `json:"guest_image,omitempty"`
 	WorkspaceID            string            `json:"workspace_id,omitempty"`
-	EnvItems               []SessionEnvVar   `json:"env_items,omitempty"`
+	EnvItems               []SandboxEnvVar   `json:"env_items,omitempty"`
 	Volumes                []VolumeMountSpec `json:"volumes,omitempty"`
 	ConfigJSON             string            `json:"config_json"`
 	CapsetIDs              []string          `json:"capset_ids,omitempty"`
@@ -163,7 +163,7 @@ func isJSONObject(raw string) bool {
 	return decoded != nil
 }
 
-func SessionHasAgentTag(session *Session, agentID string) bool {
+func SandboxHasAgentTag(session *Sandbox, agentID string) bool {
 	if session == nil {
 		return false
 	}
@@ -176,21 +176,21 @@ func SessionHasAgentTag(session *Session, agentID string) bool {
 	for _, tag := range session.Summary.Tags {
 		name := strings.TrimSpace(tag.Name)
 		value := strings.TrimSpace(tag.Value)
-		if name == AgentSessionTagSource && value == AgentSessionTagSourceVal {
+		if name == AgentSandboxTagSource && value == AgentSandboxTagSourceVal {
 			hasSource = true
 		}
-		if name == AgentSessionTagID && value == agentID {
+		if name == AgentSandboxTagID && value == agentID {
 			hasAgentID = true
 		}
 	}
 	return hasSource && hasAgentID
 }
 
-func AgentRunSummaries(agentID string, sessions []*Session) (AgentCurrentRunSummary, *AgentLatestRunSummary) {
+func AgentRunSummaries(agentID string, sessions []*Sandbox) (AgentCurrentRunSummary, *AgentLatestRunSummary) {
 	current := AgentCurrentRunSummary{}
 	var latest *AgentLatestRunSummary
 	for _, session := range sessions {
-		if !SessionHasAgentTag(session, agentID) {
+		if !SandboxHasAgentTag(session, agentID) {
 			continue
 		}
 		switch session.Summary.VMStatus {

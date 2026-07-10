@@ -2,7 +2,7 @@ package driver
 
 import "strings"
 
-func resolveSessionGuestImage(values ...string) string {
+func resolveSandboxGuestImage(values ...string) string {
 	for _, value := range values {
 		trimmed := strings.TrimSpace(value)
 		if trimmed != "" {
@@ -12,6 +12,6 @@ func resolveSessionGuestImage(values ...string) string {
 	return ""
 }
 
-func ResolveSessionGuestImage(values ...string) string {
-	return resolveSessionGuestImage(values...)
+func ResolveSandboxGuestImage(values ...string) string {
+	return resolveSandboxGuestImage(values...)
 }

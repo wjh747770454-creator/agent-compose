@@ -19,26 +19,26 @@ import (
 func TestReconcilePendingSessionStateMarksStaleStartupFailed(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	config := &appconfig.Config{DataRoot: root, SessionRoot: filepath.Join(root, "sessions"), RuntimeDriver: driverpkg.RuntimeDriverBoxlite}
+	config := &appconfig.Config{DataRoot: root, SandboxRoot: filepath.Join(root, "sandboxes"), RuntimeDriver: driverpkg.RuntimeDriverBoxlite}
 	store, err := sessionstore.NewWithConfig(config)
 	if err != nil {
 		t.Fatalf("NewWithConfig returned error: %v", err)
 	}
-	session, err := store.CreateSession(ctx, "stale", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "stale", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 	session.Summary.VMStatus = domain.VMStatusPending
 	session.Summary.CreatedAt = time.Now().Add(-time.Hour)
-	if err := store.UpdateSession(ctx, session); err != nil {
+	if err := store.UpdateSandbox(ctx, session); err != nil {
 		t.Fatalf("UpdateSession returned error: %v", err)
 	}
 	if err := store.SaveVMState(session.Summary.ID, domain.VMState{Driver: driverpkg.RuntimeDriverBoxlite}); err != nil {
 		t.Fatalf("SaveVMState returned error: %v", err)
 	}
-	reconciled, err := reconcilePendingSessionState(ctx, store, session, time.Now())
+	reconciled, err := reconcilePendingSandboxState(ctx, store, session, time.Now())
 	if err != nil {
-		t.Fatalf("reconcilePendingSessionState returned error: %v", err)
+		t.Fatalf("reconcilePendingSandboxState returned error: %v", err)
 	}
 	if reconciled.Summary.VMStatus != domain.VMStatusFailed {
 		t.Fatalf("status = %q", reconciled.Summary.VMStatus)
@@ -47,20 +47,20 @@ func TestReconcilePendingSessionStateMarksStaleStartupFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetVMState returned error: %v", err)
 	}
-	if vmState.LastError != stalePendingSessionLastError || vmState.StoppedAt.IsZero() {
+	if vmState.LastError != stalePendingSandboxLastError || vmState.StoppedAt.IsZero() {
 		t.Fatalf("vmState = %#v", vmState)
 	}
 	events, err := store.ListEvents(ctx, session.Summary.ID)
-	if err != nil || len(events) != 1 || events[0].Type != "session.startup_interrupted" {
+	if err != nil || len(events) != 1 || events[0].Type != "sandbox.startup_interrupted" {
 		t.Fatalf("events=%#v err=%v", events, err)
 	}
 
-	running := &domain.Session{Summary: domain.SessionSummary{VMStatus: domain.VMStatusRunning}}
-	if got, err := reconcilePendingSessionState(ctx, store, running, time.Now()); err != nil || got != running {
+	running := &domain.Sandbox{Summary: domain.SandboxSummary{VMStatus: domain.VMStatusRunning}}
+	if got, err := reconcilePendingSandboxState(ctx, store, running, time.Now()); err != nil || got != running {
 		t.Fatalf("running session got=%#v err=%v", got, err)
 	}
-	fresh := &domain.Session{Summary: domain.SessionSummary{VMStatus: domain.VMStatusPending, CreatedAt: time.Now().Add(time.Hour)}}
-	if got, err := reconcilePendingSessionState(ctx, store, fresh, time.Now()); err != nil || got != fresh {
+	fresh := &domain.Sandbox{Summary: domain.SandboxSummary{VMStatus: domain.VMStatusPending, CreatedAt: time.Now().Add(time.Hour)}}
+	if got, err := reconcilePendingSandboxState(ctx, store, fresh, time.Now()); err != nil || got != fresh {
 		t.Fatalf("fresh session got=%#v err=%v", got, err)
 	}
 	if err := startCapabilityProxy(context.Background(), nil); err != nil {
@@ -73,7 +73,7 @@ func TestReconcilePersistedProjectRunsMarksInterruptedRunsFailed(t *testing.T) {
 	root := t.TempDir()
 	config := &appconfig.Config{
 		DataRoot:    root,
-		SessionRoot: filepath.Join(root, "sessions"),
+		SandboxRoot: filepath.Join(root, "sandboxes"),
 		DbAddr:      filepath.Join(root, "data.db"),
 	}
 	di := do.New()

@@ -78,7 +78,7 @@ func TestNormalizeVolumeMountSpecsRejectsInvalidTargetsAndSources(t *testing.T) 
 }
 
 func TestNormalizeSessionVolumeMountsKeepsValidReadOnlyNestedMounts(t *testing.T) {
-	items := NormalizeSessionVolumeMounts([]SessionVolumeMount{
+	items := NormalizeSandboxVolumeMounts([]SandboxVolumeMount{
 		{ID: " mount-a ", Type: " VOLUME ", Source: " cache ", Target: "/mnt/nested/../cache", ReadOnly: true, HostPath: " /host/cache "},
 		{Type: VolumeMountTypeVolume, Source: "missing-target", Target: "", HostPath: "/host/missing"},
 		{Type: VolumeMountTypeVolume, Source: "missing-host", Target: "/mnt/missing"},

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -37,7 +38,8 @@ type Config struct {
 	DbName                     string
 	DbTimeout                  time.Duration
 	DataRoot                   string
-	SessionRoot                string
+	SandboxRoot                string
+	SandboxRootExplicit        bool
 	HttpListen                 string
 	AgentComposeSocket         string
 	AgentComposeHost           string
@@ -57,7 +59,7 @@ type Config struct {
 	BoxliteHome                string
 	BoxliteRuntimeDir          string
 	DockerHome                 string
-	DockerHostSessionRoot      string
+	DockerHostSandboxRoot      string
 	DockerDefaultImage         string
 	MicrosandboxHome           string
 	MicrosandboxMSBPath        string
@@ -80,8 +82,8 @@ type Config struct {
 	GuestRuntimeRoot           string
 	GuestLogRoot               string
 	JupyterGuestPort           int
-	SessionStartTimeout        time.Duration
-	SessionStopTimeout         time.Duration
+	SandboxStartTimeout        time.Duration
+	SandboxStopTimeout         time.Duration
 	JupyterReadyTimeout        time.Duration
 	JupyterProxyBasePath       string
 	CapGRPCListen              string
@@ -111,7 +113,22 @@ func NewConfig(di do.Injector) (*Config, error) {
 		}
 	}
 
-	sessionRoot := filepath.Join(dataRoot, "sessions")
+	sandboxRootExplicit := strings.TrimSpace(os.Getenv("SANDBOX_ROOT")) != "" || strings.TrimSpace(os.Getenv("SESSION_ROOT")) != ""
+	sandboxRoot, err := envWithLegacy(logger, "SANDBOX_ROOT", "SESSION_ROOT")
+	if err != nil {
+		return nil, err
+	}
+	if sandboxRoot == "" {
+		legacyRoot := filepath.Join(dataRoot, "sessions")
+		if nonEmpty, inspectErr := pathHasEntries(legacyRoot); inspectErr != nil {
+			return nil, fmt.Errorf("inspect legacy sessions root %s: %w", legacyRoot, inspectErr)
+		} else if nonEmpty {
+			sandboxRoot = legacyRoot
+			logger.Warn("using deprecated sessions storage root", "path", legacyRoot, "replacement", filepath.Join(dataRoot, "sandboxes"))
+		} else {
+			sandboxRoot = filepath.Join(dataRoot, "sandboxes")
+		}
+	}
 
 	httpListen := strings.TrimSpace(os.Getenv("HTTP_LISTEN"))
 	if httpListen != "" {
@@ -198,7 +215,10 @@ func NewConfig(di do.Injector) (*Config, error) {
 	if dockerHome == "" {
 		dockerHome = filepath.Join(dataRoot, "docker")
 	}
-	dockerHostSessionRoot := os.Getenv("DOCKER_HOST_SESSION_ROOT")
+	dockerHostSandboxRoot, err := envWithLegacy(logger, "DOCKER_HOST_SANDBOX_ROOT", "DOCKER_HOST_SESSION_ROOT")
+	if err != nil {
+		return nil, err
+	}
 
 	microsandboxHome := getenvFirst("MICROSANDBOX_HOME", "MSB_HOME")
 	if microsandboxHome == "" {
@@ -295,18 +315,22 @@ func NewConfig(di do.Injector) (*Config, error) {
 	}
 
 	startTimeout := 30 * time.Minute
-	if raw := os.Getenv("SESSION_START_TIMEOUT"); raw != "" {
+	if raw, err := envWithLegacy(logger, "SANDBOX_START_TIMEOUT", "SESSION_START_TIMEOUT"); err != nil {
+		return nil, err
+	} else if raw != "" {
 		if parsed, err := time.ParseDuration(raw); err != nil {
-			logger.Warn("failed to parse SESSION_START_TIMEOUT", "value", raw, "error", err)
+			logger.Warn("failed to parse SANDBOX_START_TIMEOUT", "value", raw, "error", err)
 		} else {
 			startTimeout = parsed
 		}
 	}
 
 	stopTimeout := 30 * time.Second
-	if raw := os.Getenv("SESSION_STOP_TIMEOUT"); raw != "" {
+	if raw, err := envWithLegacy(logger, "SANDBOX_STOP_TIMEOUT", "SESSION_STOP_TIMEOUT"); err != nil {
+		return nil, err
+	} else if raw != "" {
 		if parsed, err := time.ParseDuration(raw); err != nil {
-			logger.Warn("failed to parse SESSION_STOP_TIMEOUT", "value", raw, "error", err)
+			logger.Warn("failed to parse SANDBOX_STOP_TIMEOUT", "value", raw, "error", err)
 		} else {
 			stopTimeout = parsed
 		}
@@ -367,11 +391,11 @@ func NewConfig(di do.Injector) (*Config, error) {
 	}
 
 	dataRoot = mustAbs(dataRoot)
-	sessionRoot = mustAbs(sessionRoot)
+	sandboxRoot = mustAbs(sandboxRoot)
 	boxliteHome = mustAbs(boxliteHome)
 	boxliteRuntimeDir = mustAbs(boxliteRuntimeDir)
 	dockerHome = mustAbs(dockerHome)
-	dockerHostSessionRoot, err = normalizeDockerHostSessionRoot(dockerHostSessionRoot)
+	dockerHostSandboxRoot, err = normalizeDockerHostSandboxRoot(dockerHostSandboxRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +409,7 @@ func NewConfig(di do.Injector) (*Config, error) {
 
 	dirs := map[string]string{
 		"DATA_ROOT":         dataRoot,
-		"SESSION_ROOT":      sessionRoot,
+		"SANDBOX_ROOT":      sandboxRoot,
 		"BOXLITE_HOME":      boxliteHome,
 		"DOCKER_HOME":       dockerHome,
 		"IMAGE_CACHE_ROOT":  imageCacheRoot,
@@ -402,7 +426,8 @@ func NewConfig(di do.Injector) (*Config, error) {
 		DbName:                     dbName,
 		DbTimeout:                  dbTimeout,
 		DataRoot:                   dataRoot,
-		SessionRoot:                sessionRoot,
+		SandboxRoot:                sandboxRoot,
+		SandboxRootExplicit:        sandboxRootExplicit,
 		HttpListen:                 httpListen,
 		AgentComposeSocket:         agentComposeSocket,
 		AgentComposeHost:           agentComposeHost,
@@ -422,7 +447,7 @@ func NewConfig(di do.Injector) (*Config, error) {
 		BoxliteHome:                boxliteHome,
 		BoxliteRuntimeDir:          boxliteRuntimeDir,
 		DockerHome:                 dockerHome,
-		DockerHostSessionRoot:      dockerHostSessionRoot,
+		DockerHostSandboxRoot:      dockerHostSandboxRoot,
 		DockerDefaultImage:         dockerDefaultImage,
 		MicrosandboxHome:           microsandboxHome,
 		MicrosandboxMSBPath:        microsandboxMSBPath,
@@ -445,8 +470,8 @@ func NewConfig(di do.Injector) (*Config, error) {
 		GuestRuntimeRoot:           guestPaths.GuestRuntimeRoot,
 		GuestLogRoot:               guestPaths.GuestLogRoot,
 		JupyterGuestPort:           jupyterGuestPort,
-		SessionStartTimeout:        startTimeout,
-		SessionStopTimeout:         stopTimeout,
+		SandboxStartTimeout:        startTimeout,
+		SandboxStopTimeout:         stopTimeout,
 		JupyterReadyTimeout:        jupyterReadyTimeout,
 		JupyterProxyBasePath:       jupyterProxyBase,
 		CapGRPCListen:              strings.TrimSpace(os.Getenv("CAP_GRPC_LISTEN")),
@@ -622,6 +647,40 @@ func getenvFirst(keys ...string) string {
 	return ""
 }
 
+func envWithLegacy(logger *slog.Logger, newName, oldName string) (string, error) {
+	newValue := os.Getenv(newName)
+	oldValue := os.Getenv(oldName)
+	if newValue != "" {
+		if oldValue != "" {
+			logger.Warn("deprecated environment variable ignored because replacement is set", "deprecated", oldName, "replacement", newName)
+		}
+		return newValue, nil
+	}
+	if oldValue != "" {
+		logger.Warn("using deprecated environment variable", "deprecated", oldName, "replacement", newName)
+		return oldValue, nil
+	}
+	return "", nil
+}
+
+func pathHasEntries(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return true, nil
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
 func mustAbs(path string) string {
 	if path == "" {
 		return ""
@@ -633,14 +692,14 @@ func mustAbs(path string) string {
 	return resolved
 }
 
-func normalizeDockerHostSessionRoot(path string) (string, error) {
+func normalizeDockerHostSandboxRoot(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return "", nil
 	}
 	if isWindowsHostPath(trimmed) {
 		if hasParentPathSegment(trimmed) {
-			return "", fmt.Errorf("invalid DOCKER_HOST_SESSION_ROOT %q: parent path segments are not allowed", path)
+			return "", fmt.Errorf("invalid DOCKER_HOST_SANDBOX_ROOT %q: parent path segments are not allowed", path)
 		}
 		return trimmed, nil
 	}

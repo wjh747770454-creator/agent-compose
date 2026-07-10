@@ -984,7 +984,6 @@ type composeSchedulerTriggerOptions struct {
 type composeLogsOptions struct {
 	AgentName string
 	RunID     string
-	SessionID string
 	SandboxID string
 	TailLines int
 	Follow    bool
@@ -1010,8 +1009,8 @@ type composeSandboxActionOutput struct {
 }
 
 type composeSandboxActionResult struct {
-	Sandbox string `json:"sandbox"`
-	Status  string `json:"status"`
+	SandboxID string `json:"sandbox_id"`
+	Status    string `json:"status"`
 }
 
 type composeSandboxRemoveOptions struct {
@@ -1351,10 +1350,10 @@ func runComposeDownCommand(cmd *cobra.Command, cli cliOptions) error {
 	} else if err := writeComposeDownText(cmd.OutOrStdout(), composeDownDisplayChanges(resp.Msg, normalized)); err != nil {
 		return err
 	}
-	if output.FailedSessionStops > 0 {
+	if output.FailedSandboxStops > 0 {
 		return commandExitError{
 			Code: exitCodeGeneral,
-			Err:  fmt.Errorf("down project %s completed with %d sandbox stop failure(s)", normalized.Name, output.FailedSessionStops),
+			Err:  fmt.Errorf("down project %s completed with %d sandbox stop failure(s)", normalized.Name, output.FailedSandboxStops),
 		}
 	}
 	return nil
@@ -1397,8 +1396,8 @@ func runComposeSandboxActionCommand(cmd *cobra.Command, cli cliOptions, action, 
 			return commandExitErrorForConnect(fmt.Errorf("%s sandbox %s: %w", action, sandbox, err))
 		}
 		output.Results = append(output.Results, composeSandboxActionResult{
-			Sandbox: sandbox,
-			Status:  status,
+			SandboxID: sandbox,
+			Status:    status,
 		})
 	}
 	if cli.JSON {
@@ -1409,7 +1408,7 @@ func runComposeSandboxActionCommand(cmd *cobra.Command, cli cliOptions, action, 
 		return writeCommandOutput(cmd.OutOrStdout(), append(data, '\n'))
 	}
 	for _, result := range output.Results {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s sandbox %s\n", result.Status, result.Sandbox); err != nil {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s sandbox %s\n", result.Status, result.SandboxID); err != nil {
 			return err
 		}
 	}
@@ -1437,8 +1436,8 @@ func runComposeSandboxRemoveCommand(cmd *cobra.Command, cli cliOptions, options 
 			return commandExitErrorForConnect(fmt.Errorf("rm sandbox %s: %w", sandbox, err))
 		}
 		output.Results = append(output.Results, composeSandboxActionResult{
-			Sandbox: sandbox,
-			Status:  "removed",
+			SandboxID: sandbox,
+			Status:    "removed",
 		})
 	}
 	if cli.JSON {
@@ -1449,7 +1448,7 @@ func runComposeSandboxRemoveCommand(cmd *cobra.Command, cli cliOptions, options 
 		return writeCommandOutput(cmd.OutOrStdout(), append(data, '\n'))
 	}
 	for _, result := range output.Results {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s sandbox %s\n", result.Status, result.Sandbox); err != nil {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s sandbox %s\n", result.Status, result.SandboxID); err != nil {
 			return err
 		}
 	}
@@ -1495,10 +1494,10 @@ func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options c
 	if options.Force {
 		output.DryRun = false
 		for _, sandbox := range output.Matched {
-			removeID := firstNonEmptyString(sandbox.RawID, sandbox.ID)
+			removeID := firstNonEmptyString(sandbox.RawID, sandbox.SandboxID)
 			if err := removeSandbox(cmd.Context(), clients.sandbox, removeID, false); err != nil {
 				output.Skipped = append(output.Skipped, composeSandboxPruneSkipped{
-					Sandbox:   sandbox.ID,
+					SandboxID: sandbox.SandboxID,
 					Agent:     sandbox.Agent,
 					Status:    sandbox.Status,
 					Driver:    sandbox.Driver,
@@ -1507,7 +1506,7 @@ func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options c
 				})
 				continue
 			}
-			output.Removed = append(output.Removed, sandbox.ID)
+			output.Removed = append(output.Removed, sandbox.SandboxID)
 		}
 	}
 	if err := writeSandboxPruneOutput(cmd.OutOrStdout(), cli.JSON, output); err != nil {
@@ -1546,7 +1545,7 @@ func composeSandboxPruneDryRunOutput(sandboxes []composePSSandboxOutput, statusF
 		if !cutoff.IsZero() {
 			timestamp, _, err := sandboxPruneTimestamp(sandbox)
 			if err != nil {
-				output.Warnings = append(output.Warnings, fmt.Sprintf("sandbox %s skipped: %s", sandbox.ID, err))
+				output.Warnings = append(output.Warnings, fmt.Sprintf("sandbox %s skipped: %s", sandbox.SandboxID, err))
 				continue
 			}
 			if timestamp.After(cutoff) {
@@ -1757,11 +1756,11 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		}
 		normalizedOptions.SandboxID = sandboxID
 	}
-	cleanupPolicy := agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION
+	cleanupPolicy := agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_STOP_ON_COMPLETION
 	if normalizedOptions.KeepRunning {
-		cleanupPolicy = agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING
+		cleanupPolicy = agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING
 	} else if normalizedOptions.Remove {
-		cleanupPolicy = agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION
+		cleanupPolicy = agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION
 	}
 	client := clients.run
 	var jupyter *agentcomposev2.RunJupyterSpec
@@ -1777,7 +1776,7 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		Prompt:          prompt,
 		Command:         commandText,
 		Source:          agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
-		SessionId:       strings.TrimSpace(normalizedOptions.SandboxID),
+		SandboxId:       strings.TrimSpace(normalizedOptions.SandboxID),
 		Driver:          strings.TrimSpace(normalizedOptions.Driver),
 		CleanupPolicy:   cleanupPolicy,
 		ClientRequestId: manualRunClientRequestID(normalized.Name, agentName, firstNonEmptyString(prompt, commandText)),
@@ -1789,7 +1788,7 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 	if normalizedOptions.Interactive {
 		runReq.Prompt = ""
 		runReq.Command = ""
-		runReq.CleanupPolicy = agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING
+		runReq.CleanupPolicy = agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING
 		return runInteractiveComposeRun(cmd, normalizedOptions, normalized.Name, client, clients.sandbox, runReq, promptFlagChanged, prompt, commandText)
 	}
 	return executeComposeRunRequest(cmd, cli, normalized.Name, projectID, client, runReq, normalizedOptions.Detach)
@@ -1873,11 +1872,11 @@ func runComposeSchedulerTriggerCommand(cmd *cobra.Command, cli cliOptions, optio
 	if err != nil {
 		return err
 	}
-	cleanupPolicy := agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION
+	cleanupPolicy := agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_STOP_ON_COMPLETION
 	if options.KeepRunning {
-		cleanupPolicy = agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING
+		cleanupPolicy = agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING
 	} else if options.Remove {
-		cleanupPolicy = agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION
+		cleanupPolicy = agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION
 	}
 	var jupyter *agentcomposev2.RunJupyterSpec
 	if options.Jupyter || options.JupyterExpose {
@@ -1890,7 +1889,7 @@ func runComposeSchedulerTriggerCommand(cmd *cobra.Command, cli cliOptions, optio
 		ProjectId:       projectID,
 		AgentName:       trigger.AgentName,
 		Source:          agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
-		SessionId:       strings.TrimSpace(options.SandboxID),
+		SandboxId:       strings.TrimSpace(options.SandboxID),
 		Driver:          strings.TrimSpace(options.Driver),
 		SchedulerId:     firstNonEmptyString(trigger.RawSchedulerID, trigger.SchedulerID),
 		TriggerId:       firstNonEmptyString(trigger.RawTriggerID, trigger.TriggerID),
@@ -1939,7 +1938,7 @@ func normalizeComposeSchedulerTriggerOptions(options composeSchedulerTriggerOpti
 	options.SandboxID = strings.TrimSpace(options.SandboxID)
 	options.Driver = strings.TrimSpace(options.Driver)
 	if options.Driver != "" {
-		driver, err := driverpkg.ResolveSessionRuntimeDriver(options.Driver, "")
+		driver, err := driverpkg.ResolveSandboxRuntimeDriver(options.Driver, "")
 		if err != nil {
 			return options, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler trigger --driver: %w", err)}
 		}
@@ -2207,17 +2206,17 @@ func composeRunCompletionError(projectName, agentName string, completed *agentco
 }
 
 func runInteractiveComposeRun(cmd *cobra.Command, options composeRunOptions, projectName string, client agentcomposev2connect.RunServiceClient, sandboxClient agentcomposev2connect.SandboxServiceClient, baseReq *agentcomposev2.RunAgentRequest, promptMode bool, firstPrompt, firstCommand string) (err error) {
-	sessionID := strings.TrimSpace(baseReq.GetSessionId())
-	removeOnExit := options.Remove && sessionID == ""
+	sandboxID := strings.TrimSpace(baseReq.GetSandboxId())
+	removeOnExit := options.Remove && sandboxID == ""
 	defer func() {
-		if !removeOnExit || strings.TrimSpace(sessionID) == "" {
+		if !removeOnExit || strings.TrimSpace(sandboxID) == "" {
 			return
 		}
-		removeErr := removeSandbox(context.Background(), sandboxClient, sessionID, true)
+		removeErr := removeSandbox(context.Background(), sandboxClient, sandboxID, true)
 		if removeErr == nil {
 			return
 		}
-		wrapped := commandExitErrorForConnect(fmt.Errorf("remove interactive sandbox %s: %w", sessionID, removeErr))
+		wrapped := commandExitErrorForConnect(fmt.Errorf("remove interactive sandbox %s: %w", sandboxID, removeErr))
 		if err == nil {
 			err = wrapped
 			return
@@ -2257,8 +2256,8 @@ func runInteractiveComposeRun(cmd *cobra.Command, options composeRunOptions, pro
 			return nil
 		}
 		runReq := proto.Clone(baseReq).(*agentcomposev2.RunAgentRequest)
-		runReq.SessionId = sessionID
-		if strings.TrimSpace(sessionID) != "" {
+		runReq.SandboxId = sandboxID
+		if strings.TrimSpace(sandboxID) != "" {
 			runReq.Driver = ""
 		}
 		runReq.ClientRequestId = manualRunClientRequestID(projectName, baseReq.GetAgentName(), input)
@@ -2273,8 +2272,8 @@ func runInteractiveComposeRun(cmd *cobra.Command, options composeRunOptions, pro
 		if runErr != nil {
 			return runErr
 		}
-		if completed.GetSessionId() != "" {
-			sessionID = completed.GetSessionId()
+		if completed.GetSandboxId() != "" {
+			sandboxID = completed.GetSandboxId()
 		}
 		if err := writeRunWarnings(cmd.ErrOrStderr(), warnings); err != nil {
 			return err
@@ -2398,7 +2397,7 @@ func (w *terminalStreamWriter) Finish() error {
 func writeDetachedRunText(out io.Writer, run *agentcomposev2.RunSummary, logsCommand string) error {
 	if _, err := fmt.Fprintf(out, "Run: %s\nSandbox: %s\nStatus: %s\nLogs: %s\n",
 		firstNonEmptyString(displayOpaqueID(run.GetRunId()), "-"),
-		firstNonEmptyString(displayOpaqueID(run.GetSessionId()), "-"),
+		firstNonEmptyString(displayOpaqueID(run.GetSandboxId()), "-"),
 		runStatusText(run.GetStatus()),
 		logsCommand,
 	); err != nil {
@@ -2411,7 +2410,7 @@ func normalizeComposeRunOptions(cmd *cobra.Command, options composeRunOptions) (
 	options.SandboxID = strings.TrimSpace(options.SandboxID)
 	options.Driver = strings.TrimSpace(options.Driver)
 	if options.Driver != "" {
-		driver, err := driverpkg.ResolveSessionRuntimeDriver(options.Driver, "")
+		driver, err := driverpkg.ResolveSandboxRuntimeDriver(options.Driver, "")
 		if err != nil {
 			return options, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --driver: %w", err)}
 		}
@@ -2671,7 +2670,6 @@ func resolveComposeLogRefs(ctx context.Context, client agentcomposev2connect.Run
 		if err != nil {
 			return options, err
 		}
-		options.SessionID = sandboxID
 		options.SandboxID = sandboxID
 	}
 	return options, nil
@@ -2775,7 +2773,7 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 		}
 	}
 	if !result.GetSuccess() {
-		return commandExitError{Code: execResultExitCode(result), Err: fmt.Errorf("exec %s in sandbox %s failed: %s", result.GetExecId(), result.GetSessionId(), firstNonEmptyString(result.GetError(), result.GetStderr(), result.GetOutput(), "command failed"))}
+		return commandExitError{Code: execResultExitCode(result), Err: fmt.Errorf("exec %s in sandbox %s failed: %s", result.GetExecId(), result.GetSandboxId(), firstNonEmptyString(result.GetError(), result.GetStderr(), result.GetOutput(), "command failed"))}
 	}
 	return nil
 }
@@ -2823,7 +2821,7 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 			if err != nil {
 				return nil, err
 			}
-			req.Target = &agentcomposev2.ExecRequest_Selector{Selector: &agentcomposev2.ExecSessionSelector{
+			req.Target = &agentcomposev2.ExecRequest_Selector{Selector: &agentcomposev2.ExecSandboxSelector{
 				ProjectId:   projectID,
 				ProjectName: normalized.Name,
 				AgentName:   agentName,
@@ -2846,7 +2844,7 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 	return &agentcomposev2.ExecRequest{
 		Command: command,
 		Cwd:     strings.TrimSpace(options.Cwd),
-		Target:  &agentcomposev2.ExecRequest_SessionId{SessionId: sandbox},
+		Target:  &agentcomposev2.ExecRequest_SandboxId{SandboxId: sandbox},
 	}, nil
 }
 
@@ -3719,12 +3717,12 @@ func runComposeInspectCommand(cmd *cobra.Command, cli cliOptions, args []string)
 	return writeCommandOutput(cmd.OutOrStdout(), append(data, '\n'))
 }
 
-func composeSandboxInspectOutputFor(ctx context.Context, clients cliServiceClients, sandbox string) (composeSessionOutput, error) {
+func composeSandboxInspectOutputFor(ctx context.Context, clients cliServiceClients, sandbox string) (composeSandboxOutput, error) {
 	session, err := clients.session.GetSession(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: sandbox}))
 	if err != nil {
-		return composeSessionOutput{}, err
+		return composeSandboxOutput{}, err
 	}
-	return composeSessionOutputFromSummary(session.Msg.GetSession().GetSummary()), nil
+	return composeSandboxOutputFromSummary(session.Msg.GetSession().GetSummary()), nil
 }
 
 func resolveComposeProject(cli cliOptions) (string, *compose.NormalizedProjectSpec, string, error) {
@@ -3826,7 +3824,7 @@ type composeUpOutput struct {
 type composeDownOutput struct {
 	Project            composeUpProjectOutput  `json:"project"`
 	Status             string                  `json:"status"`
-	FailedSessionStops uint32                  `json:"failed_session_stops"`
+	FailedSandboxStops uint32                  `json:"failed_sandbox_stops"`
 	Changes            []composeUpChangeOutput `json:"changes"`
 }
 
@@ -3947,18 +3945,18 @@ type composePSOutput struct {
 }
 
 type composePSSandboxOutput struct {
-	ID         string `json:"id"`
-	RawID      string `json:"-"`
-	ShortID    string `json:"short_id"`
-	Agent      string `json:"agent,omitempty"`
-	Status     string `json:"status"`
-	RunID      string `json:"run_id,omitempty"`
-	RunShortID string `json:"run_short_id,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`
-	UpdatedAt  string `json:"updated_at,omitempty"`
-	Driver     string `json:"driver,omitempty"`
-	Image      string `json:"image,omitempty"`
-	Workspace  string `json:"workspace,omitempty"`
+	SandboxID      string `json:"sandbox_id"`
+	RawID          string `json:"-"`
+	SandboxShortID string `json:"sandbox_short_id"`
+	Agent          string `json:"agent,omitempty"`
+	Status         string `json:"status"`
+	RunID          string `json:"run_id,omitempty"`
+	RunShortID     string `json:"run_short_id,omitempty"`
+	CreatedAt      string `json:"created_at,omitempty"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
+	Driver         string `json:"driver,omitempty"`
+	Image          string `json:"image,omitempty"`
+	Workspace      string `json:"workspace,omitempty"`
 }
 
 type composeSandboxPruneOutput struct {
@@ -3970,7 +3968,7 @@ type composeSandboxPruneOutput struct {
 }
 
 type composeSandboxPruneSkipped struct {
-	Sandbox   string `json:"sandbox"`
+	SandboxID string `json:"sandbox_id"`
 	Agent     string `json:"agent,omitempty"`
 	Status    string `json:"status,omitempty"`
 	Driver    string `json:"driver,omitempty"`
@@ -3979,8 +3977,8 @@ type composeSandboxPruneSkipped struct {
 }
 
 type composeStatsOutput struct {
-	ID               string              `json:"id"`
-	ShortID          string              `json:"short_id"`
+	SandboxID        string              `json:"sandbox_id"`
+	SandboxShortID   string              `json:"sandbox_short_id"`
 	Driver           string              `json:"driver"`
 	SampledAt        string              `json:"sampled_at"`
 	CPUPercent       composeMetricOutput `json:"cpu_percent"`
@@ -4072,24 +4070,24 @@ type composeAgentInspectOutput struct {
 	Agent            composeProjectAgentOutput       `json:"agent"`
 	Schedulers       []composeProjectSchedulerOutput `json:"schedulers"`
 	LatestRun        *composeRunOutput               `json:"latest_run,omitempty"`
-	RunningSandboxes []composeSessionOutput          `json:"running_sandboxes,omitempty"`
+	RunningSandboxes []composeSandboxOutput          `json:"running_sandboxes,omitempty"`
 }
 
-type composeSessionOutput struct {
-	ID            string            `json:"id"`
-	ShortID       string            `json:"short_id,omitempty"`
-	Title         string            `json:"title,omitempty"`
-	Driver        string            `json:"driver,omitempty"`
-	VMStatus      string            `json:"vm_status,omitempty"`
-	WorkspacePath string            `json:"workspace_path,omitempty"`
-	ProxyPath     string            `json:"proxy_path,omitempty"`
-	GuestImage    string            `json:"guest_image,omitempty"`
-	TriggerSource string            `json:"trigger_source,omitempty"`
-	CreatedAt     string            `json:"created_at,omitempty"`
-	UpdatedAt     string            `json:"updated_at,omitempty"`
-	CellCount     uint32            `json:"cell_count"`
-	EventCount    uint32            `json:"event_count"`
-	Tags          map[string]string `json:"tags,omitempty"`
+type composeSandboxOutput struct {
+	SandboxID      string            `json:"sandbox_id"`
+	SandboxShortID string            `json:"sandbox_short_id,omitempty"`
+	Title          string            `json:"title,omitempty"`
+	Driver         string            `json:"driver,omitempty"`
+	VMStatus       string            `json:"vm_status,omitempty"`
+	WorkspacePath  string            `json:"workspace_path,omitempty"`
+	ProxyPath      string            `json:"proxy_path,omitempty"`
+	GuestImage     string            `json:"guest_image,omitempty"`
+	TriggerSource  string            `json:"trigger_source,omitempty"`
+	CreatedAt      string            `json:"created_at,omitempty"`
+	UpdatedAt      string            `json:"updated_at,omitempty"`
+	CellCount      uint32            `json:"cell_count"`
+	EventCount     uint32            `json:"event_count"`
+	Tags           map[string]string `json:"tags,omitempty"`
 }
 
 type composeExecOutput struct {
@@ -4185,7 +4183,6 @@ type composeCacheOutput struct {
 	ImageID        string                        `json:"image_id,omitempty"`
 	ImageRef       string                        `json:"image_ref,omitempty"`
 	ResolvedRef    string                        `json:"resolved_ref,omitempty"`
-	SessionID      string                        `json:"-"`
 	SandboxID      string                        `json:"sandbox_id,omitempty"`
 	Status         string                        `json:"status"`
 	Removable      bool                          `json:"removable"`
@@ -4333,18 +4330,18 @@ func composeUpOutputFromResponse(resp *agentcomposev2.ApplyProjectResponse) comp
 
 func composeDownOutputFromResponse(resp *agentcomposev2.RemoveProjectResponse) composeDownOutput {
 	changes := composeChangeOutputs(resp.GetChanges())
-	failedSessionStops := countProjectDownFailedSessionStops(resp.GetChanges())
+	failedSandboxStops := countProjectDownFailedSandboxStops(resp.GetChanges())
 	status := "down"
 	if len(changes) == 0 {
 		status = "unchanged"
 	}
-	if failedSessionStops > 0 {
+	if failedSandboxStops > 0 {
 		status = "partial-failure"
 	}
 	return composeDownOutput{
 		Project:            composeProjectSummaryOutput(resp.GetProject().GetSummary()),
 		Status:             status,
-		FailedSessionStops: uint32(failedSessionStops),
+		FailedSandboxStops: uint32(failedSandboxStops),
 		Changes:            changes,
 	}
 }
@@ -4654,11 +4651,11 @@ func composeDisplayResourceType(resourceType string) string {
 	}
 }
 
-func countProjectDownFailedSessionStops(changes []*agentcomposev2.ProjectChange) int {
+func countProjectDownFailedSandboxStops(changes []*agentcomposev2.ProjectChange) int {
 	count := 0
 	for _, change := range changes {
 		if change.GetAction() == agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UNCHANGED &&
-			change.GetResourceType() == "session" &&
+			change.GetResourceType() == "sandbox" &&
 			strings.TrimSpace(change.GetMessage()) != "" {
 			count++
 		}
@@ -4723,13 +4720,13 @@ func composePSOutputFromProject(ctx context.Context, clients cliServiceClients, 
 	if err != nil {
 		return composePSOutput{}, err
 	}
-	runBySession := latestRunsBySession(runs)
+	runBySandbox := latestRunsBySandbox(runs)
 	sessions, err := listAllSessions(ctx, clients.session)
 	if err != nil {
 		return composePSOutput{}, err
 	}
 	for _, session := range sessions {
-		if !composePSSessionBelongsToProject(session, project, runBySession) {
+		if !composePSSessionBelongsToProject(session, project, runBySandbox) {
 			continue
 		}
 		status := strings.ToLower(strings.TrimSpace(session.GetVmStatus()))
@@ -4739,23 +4736,23 @@ func composePSOutputFromProject(ctx context.Context, clients cliServiceClients, 
 		if statusFilter != nil && !statusFilter[status] {
 			continue
 		}
-		run := runBySession[session.GetSessionId()]
+		run := runBySandbox[session.GetSessionId()]
 		tags := sessionTagsMap(session.GetTags())
 		agent := firstNonEmptyString(run.GetAgentName(), tags["agent"])
 		runID := firstNonEmptyString(run.GetRunId(), tags["run_id"])
 		output.Sandboxes = append(output.Sandboxes, composePSSandboxOutput{
-			ID:         displayOpaqueID(session.GetSessionId()),
-			RawID:      session.GetSessionId(),
-			ShortID:    shortOpaqueID(session.GetSessionId()),
-			Agent:      agent,
-			Status:     status,
-			RunID:      displayOpaqueID(runID),
-			RunShortID: shortOpaqueID(runID),
-			CreatedAt:  session.GetCreatedAt(),
-			UpdatedAt:  session.GetUpdatedAt(),
-			Driver:     session.GetDriver(),
-			Image:      session.GetGuestImage(),
-			Workspace:  session.GetWorkspacePath(),
+			SandboxID:      displayOpaqueID(session.GetSessionId()),
+			RawID:          session.GetSessionId(),
+			SandboxShortID: shortOpaqueID(session.GetSessionId()),
+			Agent:          agent,
+			Status:         status,
+			RunID:          displayOpaqueID(runID),
+			RunShortID:     shortOpaqueID(runID),
+			CreatedAt:      session.GetCreatedAt(),
+			UpdatedAt:      session.GetUpdatedAt(),
+			Driver:         session.GetDriver(),
+			Image:          session.GetGuestImage(),
+			Workspace:      session.GetWorkspacePath(),
 		})
 	}
 	return output, nil
@@ -4828,15 +4825,15 @@ func listProjectRuns(ctx context.Context, client agentcomposev2connect.RunServic
 	return result, nil
 }
 
-func latestRunsBySession(runs []*agentcomposev2.RunSummary) map[string]*agentcomposev2.RunSummary {
+func latestRunsBySandbox(runs []*agentcomposev2.RunSummary) map[string]*agentcomposev2.RunSummary {
 	result := map[string]*agentcomposev2.RunSummary{}
 	for _, run := range runs {
-		sessionID := strings.TrimSpace(run.GetSessionId())
-		if sessionID == "" {
+		sandboxID := strings.TrimSpace(run.GetSandboxId())
+		if sandboxID == "" {
 			continue
 		}
-		if current := result[sessionID]; current == nil || runSortTime(run) > runSortTime(current) {
-			result[sessionID] = run
+		if current := result[sandboxID]; current == nil || runSortTime(run) > runSortTime(current) {
+			result[sandboxID] = run
 		}
 	}
 	return result
@@ -4850,14 +4847,14 @@ func runSummarySandboxID(run *agentcomposev2.RunSummary) string {
 	if run == nil {
 		return ""
 	}
-	return firstNonEmptyString(strings.TrimSpace(run.GetSandboxId()), strings.TrimSpace(run.GetSessionId()))
+	return strings.TrimSpace(run.GetSandboxId())
 }
 
-func composePSSessionBelongsToProject(session *agentcomposev1.SessionSummary, project *agentcomposev2.Project, runsBySession map[string]*agentcomposev2.RunSummary) bool {
+func composePSSessionBelongsToProject(session *agentcomposev1.SessionSummary, project *agentcomposev2.Project, runsBySandbox map[string]*agentcomposev2.RunSummary) bool {
 	projectID := strings.TrimSpace(project.GetSummary().GetProjectId())
 	projectName := strings.TrimSpace(project.GetSummary().GetName())
 	sourcePath := strings.TrimSpace(project.GetSummary().GetSourcePath())
-	if run := runsBySession[session.GetSessionId()]; run != nil {
+	if run := runsBySandbox[session.GetSessionId()]; run != nil {
 		if strings.TrimSpace(run.GetProjectId()) == projectID {
 			return true
 		}
@@ -4908,7 +4905,7 @@ func latestRunOutput(ctx context.Context, client agentcomposev2connect.RunServic
 	return &output, nil
 }
 
-func firstRunningSessionOutput(ctx context.Context, clients cliServiceClients, projectID, agentName string) (*composeSessionOutput, error) {
+func firstRunningSandboxOutput(ctx context.Context, clients cliServiceClients, projectID, agentName string) (*composeSandboxOutput, error) {
 	resp, err := clients.run.ListRuns(ctx, connect.NewRequest(&agentcomposev2.ListRunsRequest{
 		ProjectId: projectID,
 		AgentName: agentName,
@@ -4919,21 +4916,21 @@ func firstRunningSessionOutput(ctx context.Context, clients cliServiceClients, p
 	}
 	seen := map[string]struct{}{}
 	for _, run := range resp.Msg.GetRuns() {
-		sessionID := strings.TrimSpace(run.GetSessionId())
-		if sessionID == "" {
+		sandboxID := strings.TrimSpace(run.GetSandboxId())
+		if sandboxID == "" {
 			continue
 		}
-		if _, ok := seen[sessionID]; ok {
+		if _, ok := seen[sandboxID]; ok {
 			continue
 		}
-		seen[sessionID] = struct{}{}
-		session, err := clients.session.GetSession(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: sessionID}))
+		seen[sandboxID] = struct{}{}
+		session, err := clients.session.GetSession(ctx, connect.NewRequest(&agentcomposev1.SessionIDRequest{SessionId: sandboxID}))
 		if err != nil {
 			continue
 		}
 		summary := session.Msg.GetSession().GetSummary()
 		if strings.EqualFold(summary.GetVmStatus(), "running") {
-			output := composeSessionOutputFromSummary(summary)
+			output := composeSandboxOutputFromSummary(summary)
 			return &output, nil
 		}
 	}
@@ -4952,7 +4949,7 @@ func writePSText(out io.Writer, output composePSOutput, verbose bool) error {
 	for _, sandbox := range output.Sandboxes {
 		if verbose {
 			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				firstNonEmptyString(sandbox.ID, "-"),
+				firstNonEmptyString(sandbox.SandboxID, "-"),
 				firstNonEmptyString(sandbox.Agent, "-"),
 				firstNonEmptyString(sandbox.Status, "-"),
 				firstNonEmptyString(sandbox.RunID, "-"),
@@ -4967,7 +4964,7 @@ func writePSText(out io.Writer, output composePSOutput, verbose bool) error {
 			continue
 		}
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			firstNonEmptyString(sandbox.ShortID, shortOpaqueID(sandbox.ID), "-"),
+			firstNonEmptyString(sandbox.SandboxShortID, shortOpaqueID(sandbox.SandboxID), "-"),
 			firstNonEmptyString(sandbox.Agent, "-"),
 			firstNonEmptyString(sandbox.Status, "-"),
 			firstNonEmptyString(sandbox.RunShortID, shortOpaqueID(sandbox.RunID), "-"),
@@ -4985,8 +4982,8 @@ func composeStatsOutputFromProto(stats *agentcomposev2.SandboxStats) composeStat
 		return composeStatsOutput{}
 	}
 	return composeStatsOutput{
-		ID:               displayOpaqueID(stats.GetSandboxId()),
-		ShortID:          shortOpaqueID(stats.GetSandboxId()),
+		SandboxID:        displayOpaqueID(stats.GetSandboxId()),
+		SandboxShortID:   shortOpaqueID(stats.GetSandboxId()),
 		Driver:           stats.GetDriver(),
 		SampledAt:        stats.GetSampledAt(),
 		CPUPercent:       composeMetricOutputFromProto(stats.GetCpuPercent()),
@@ -5019,10 +5016,10 @@ func composeProjectStatsOutputFromProject(ctx context.Context, clients cliServic
 	}
 	output.Stats = make([]composeStatsOutput, 0, len(psOutput.Sandboxes))
 	for _, sandbox := range psOutput.Sandboxes {
-		sandboxID := firstNonEmptyString(sandbox.RawID, sandbox.ID)
+		sandboxID := firstNonEmptyString(sandbox.RawID, sandbox.SandboxID)
 		stats, err := composeStatsOutputForSandbox(ctx, clients.sandbox, sandboxID)
 		if err != nil {
-			return composeProjectStatsOutput{}, fmt.Errorf("get sandbox %s stats: %w", sandbox.ID, err)
+			return composeProjectStatsOutput{}, fmt.Errorf("get sandbox %s stats: %w", sandbox.SandboxID, err)
 		}
 		output.Stats = append(output.Stats, stats)
 	}
@@ -5061,7 +5058,7 @@ func writeStatsText(out io.Writer, stats []composeStatsOutput) error {
 	}
 	for _, output := range stats {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			firstNonEmptyString(output.ShortID, shortOpaqueID(output.ID), "-"),
+			firstNonEmptyString(output.SandboxShortID, shortOpaqueID(output.SandboxID), "-"),
 			firstNonEmptyString(output.Driver, "-"),
 			formatMetricForText(output.CPUPercent),
 			formatMetricForText(output.MemoryUsageBytes),
@@ -5129,7 +5126,7 @@ func composeAgentInspectOutputFor(ctx context.Context, clients cliServiceClients
 	} else {
 		output.LatestRun = latest
 	}
-	if session, err := firstRunningSessionOutput(ctx, clients, project.GetSummary().GetProjectId(), agentName); err != nil {
+	if session, err := firstRunningSandboxOutput(ctx, clients, project.GetSummary().GetProjectId(), agentName); err != nil {
 		return composeAgentInspectOutput{}, commandExitErrorForConnect(fmt.Errorf("list running sandbox for agent %s: %w", agentName, err))
 	} else if session != nil {
 		output.RunningSandboxes = append(output.RunningSandboxes, *session)
@@ -5232,7 +5229,7 @@ func composeRunOutputFromDetailWithOptions(run *agentcomposev2.RunDetail, option
 func composeExecOutputFromResult(result *agentcomposev2.ExecResult) composeExecOutput {
 	return composeExecOutput{
 		ExecID:    displayOpaqueID(result.GetExecId()),
-		SandboxID: displayOpaqueID(result.GetSessionId()),
+		SandboxID: displayOpaqueID(result.GetSandboxId()),
 		RunID:     displayOpaqueID(result.GetRunId()),
 		Command:   result.GetCommand().GetCommand(),
 		Args:      append([]string(nil), result.GetCommand().GetArgs()...),
@@ -5419,7 +5416,6 @@ func composeCacheOutputFromProto(cache *agentcomposev2.CacheItem) composeCacheOu
 		ImageID:        displayOpaqueID(cache.GetImageId()),
 		ImageRef:       cache.GetImageRef(),
 		ResolvedRef:    cache.GetResolvedRef(),
-		SessionID:      displayOpaqueID(cache.GetSessionId()),
 		SandboxID:      displayOpaqueID(cache.GetSandboxId()),
 		Status:         cacheStatusText(cache.GetStatus()),
 		Removable:      cache.GetRemovable(),
@@ -5606,7 +5602,7 @@ func writeCacheListText(out io.Writer, output composeCacheListOutput) error {
 			firstNonEmptyString(cache.Status, "-"),
 			strconv.FormatBool(cache.Removable),
 			cache.SizeBytes,
-			cacheRefSessionText(cache),
+			cacheRefText(cache),
 			firstNonEmptyString(cache.Path, "-"),
 		); err != nil {
 			return err
@@ -5642,9 +5638,9 @@ func writeCacheInspectText(out io.Writer, output composeCacheInspectOutput) erro
 			return err
 		}
 	}
-	if cache.SessionID != "" || cache.SandboxID != "" {
+	if cache.SandboxID != "" {
 		if _, err := fmt.Fprintf(out, "Sandbox: %s\n",
-			firstNonEmptyString(cache.SandboxID, cache.SessionID, "-"),
+			cache.SandboxID,
 		); err != nil {
 			return err
 		}
@@ -5841,7 +5837,7 @@ func writeSandboxPruneMatchedTable(out io.Writer, sandboxes []composePSSandboxOu
 	for _, sandbox := range sandboxes {
 		updated := firstNonEmptyString(sandbox.UpdatedAt, sandbox.CreatedAt)
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			firstNonEmptyString(sandbox.ShortID, shortOpaqueID(sandbox.ID), "-"),
+			firstNonEmptyString(sandbox.SandboxShortID, shortOpaqueID(sandbox.SandboxID), "-"),
 			firstNonEmptyString(sandbox.Agent, "-"),
 			firstNonEmptyString(sandbox.Status, "-"),
 			firstNonEmptyString(sandbox.Driver, "-"),
@@ -5861,7 +5857,7 @@ func writeSandboxPruneSkippedTable(out io.Writer, skipped []composeSandboxPruneS
 	}
 	for _, item := range skipped {
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			firstNonEmptyString(item.Sandbox, "-"),
+			firstNonEmptyString(item.SandboxID, "-"),
 			firstNonEmptyString(item.Agent, "-"),
 			firstNonEmptyString(item.Status, "-"),
 			firstNonEmptyString(item.Driver, "-"),
@@ -5973,7 +5969,7 @@ func writeCacheReferencesSection(out io.Writer, refs []composeCacheReferenceOutp
 	return tw.Flush()
 }
 
-func composeSessionOutputFromSummary(summary *agentcomposev1.SessionSummary) composeSessionOutput {
+func composeSandboxOutputFromSummary(summary *agentcomposev1.SessionSummary) composeSandboxOutput {
 	tags := make(map[string]string, len(summary.GetTags()))
 	for _, tag := range summary.GetTags() {
 		name := strings.TrimSpace(tag.GetName())
@@ -5985,21 +5981,21 @@ func composeSessionOutputFromSummary(summary *agentcomposev1.SessionSummary) com
 	if len(tags) == 0 {
 		tags = nil
 	}
-	return composeSessionOutput{
-		ID:            displayOpaqueID(summary.GetSessionId()),
-		ShortID:       identity.ShortID(summary.GetSessionId()),
-		Title:         summary.GetTitle(),
-		Driver:        summary.GetDriver(),
-		VMStatus:      strings.ToLower(strings.TrimSpace(summary.GetVmStatus())),
-		WorkspacePath: summary.GetWorkspacePath(),
-		ProxyPath:     summary.GetProxyPath(),
-		GuestImage:    summary.GetGuestImage(),
-		TriggerSource: summary.GetTriggerSource(),
-		CreatedAt:     summary.GetCreatedAt(),
-		UpdatedAt:     summary.GetUpdatedAt(),
-		CellCount:     summary.GetCellCount(),
-		EventCount:    summary.GetEventCount(),
-		Tags:          tags,
+	return composeSandboxOutput{
+		SandboxID:      displayOpaqueID(summary.GetSessionId()),
+		SandboxShortID: identity.ShortID(summary.GetSessionId()),
+		Title:          summary.GetTitle(),
+		Driver:         summary.GetDriver(),
+		VMStatus:       strings.ToLower(strings.TrimSpace(summary.GetVmStatus())),
+		WorkspacePath:  summary.GetWorkspacePath(),
+		ProxyPath:      summary.GetProxyPath(),
+		GuestImage:     summary.GetGuestImage(),
+		TriggerSource:  summary.GetTriggerSource(),
+		CreatedAt:      summary.GetCreatedAt(),
+		UpdatedAt:      summary.GetUpdatedAt(),
+		CellCount:      summary.GetCellCount(),
+		EventCount:     summary.GetEventCount(),
+		Tags:           tags,
 	}
 }
 
@@ -6199,8 +6195,8 @@ func resolveComposeSandboxRefFromProject(ctx context.Context, clients cliService
 	}
 	matches := map[string]struct{}{}
 	for _, sandbox := range psOutput.Sandboxes {
-		if resourceIDMatchesRef(sandbox.ID, sandbox.ShortID, ref) {
-			matches[firstNonEmptyString(sandbox.RawID, sandbox.ID)] = struct{}{}
+		if resourceIDMatchesRef(sandbox.SandboxID, sandbox.SandboxShortID, ref) {
+			matches[firstNonEmptyString(sandbox.RawID, sandbox.SandboxID)] = struct{}{}
 		}
 	}
 	if len(matches) == 0 {
@@ -6861,10 +6857,8 @@ func cacheTypeFilterValue(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "":
 		return "", nil
-	case "oci", "materialized", "runtime", "session":
+	case "oci", "materialized", "runtime", "sandbox":
 		return strings.ToLower(strings.TrimSpace(value)), nil
-	case "sandbox":
-		return "session", nil
 	default:
 		return "", fmt.Errorf("invalid --type %q: expected oci, materialized, runtime, or sandbox", value)
 	}
@@ -6910,7 +6904,7 @@ func cacheDomainText(domain agentcomposev2.CacheDomain) string {
 		return "materialized-image-cache"
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE:
 		return "runtime-derived-cache"
-	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE:
+	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE:
 		return "sandbox-ephemeral-state"
 	default:
 		return "unspecified"
@@ -6925,7 +6919,7 @@ func cacheTypeText(domain agentcomposev2.CacheDomain) string {
 		return "materialized"
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE:
 		return "runtime"
-	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE:
+	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE:
 		return "sandbox"
 	default:
 		return "unspecified"
@@ -6951,8 +6945,8 @@ func cacheStatusText(status agentcomposev2.CacheStatus) string {
 	}
 }
 
-func cacheRefSessionText(cache composeCacheOutput) string {
-	if ref := firstNonEmptyString(cache.SandboxID, cache.SessionID); ref != "" {
+func cacheRefText(cache composeCacheOutput) string {
+	if ref := cache.SandboxID; ref != "" {
 		return shortOpaqueID(ref)
 	}
 	if cache.ImageRef != "" || cache.ResolvedRef != "" {

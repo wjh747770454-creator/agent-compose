@@ -26,11 +26,11 @@ import (
 func TestSetupRegistersServiceGraph(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DATA_ROOT", root)
-	t.Setenv("SESSION_ROOT", filepath.Join(root, "sessions"))
+	t.Setenv("SANDBOX_ROOT", filepath.Join(root, "sandboxes"))
 	t.Setenv("RUNTIME_DRIVER", driverpkg.RuntimeDriverDocker)
 	t.Setenv("DOCKER_IMAGE", "guest:latest")
-	t.Setenv("SESSION_START_TIMEOUT", "1s")
-	t.Setenv("SESSION_STOP_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_START_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_STOP_TIMEOUT", "1s")
 	t.Setenv("JUPYTER_PROXY_BASE", "/agent-compose/jupyter/")
 	t.Setenv("LLM_API_ENDPOINT", "")
 
@@ -78,15 +78,46 @@ func TestSetupRegistersServiceGraph(t *testing.T) {
 	}
 }
 
+func TestRegisterUsesLegacySessionsRootAndInitializesConfigStoreSchema(t *testing.T) {
+	root := t.TempDir()
+	legacyRoot := filepath.Join(root, "sessions")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatalf("create legacy root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, "metadata.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write legacy fixture: %v", err)
+	}
+	t.Setenv("DATA_ROOT", root)
+	t.Setenv("RUNTIME_DRIVER", driverpkg.RuntimeDriverDocker)
+	t.Setenv("LLM_API_ENDPOINT", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	di := do.New()
+	appconfig.Setup(di)
+	do.ProvideValue(di, ctx)
+	do.ProvideValue(di, slog.Default())
+	do.ProvideValue(di, echo.New())
+
+	Register(di)
+	config := do.MustInvoke[*appconfig.Config](di)
+	if config.SandboxRoot != legacyRoot {
+		t.Fatalf("SandboxRoot = %q, want legacy root %q", config.SandboxRoot, legacyRoot)
+	}
+	if info, err := os.Stat(filepath.Join(root, "data.db")); err != nil || info.IsDir() {
+		t.Fatalf("data.db stat = %v/%v, want database file", info, err)
+	}
+}
+
 func TestCacheServiceRouteUsesRuntimeCacheController(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DATA_ROOT", root)
-	t.Setenv("SESSION_ROOT", filepath.Join(root, "sessions"))
+	t.Setenv("SANDBOX_ROOT", filepath.Join(root, "sandboxes"))
 	t.Setenv("IMAGE_CACHE_ROOT", filepath.Join(root, "images"))
 	t.Setenv("RUNTIME_DRIVER", driverpkg.RuntimeDriverDocker)
 	t.Setenv("DOCKER_IMAGE", "guest:latest")
-	t.Setenv("SESSION_START_TIMEOUT", "1s")
-	t.Setenv("SESSION_STOP_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_START_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_STOP_TIMEOUT", "1s")
 	t.Setenv("JUPYTER_PROXY_BASE", "/agent-compose/jupyter/")
 	t.Setenv("LLM_API_ENDPOINT", "")
 
@@ -216,75 +247,75 @@ func TestApplyProjectValidationIssuesOmitProjectAndRevision(t *testing.T) {
 	}
 }
 
-func TestStopProjectSessionUsesInternalStopSemantics(t *testing.T) {
-	sessionID := "session-1"
-	store := &projectStopSessionStore{
-		session: &domain.Session{Summary: domain.SessionSummary{
-			ID:       sessionID,
+func TestStopProjectSandboxUsesInternalStopSemantics(t *testing.T) {
+	sandboxID := "sandbox-1"
+	store := &projectStopSandboxStore{
+		session: &domain.Sandbox{Summary: domain.SandboxSummary{
+			ID:       sandboxID,
 			VMStatus: domain.VMStatusRunning,
 		}},
 	}
-	driver := &projectStopSessionDriver{}
-	streams := &projectStopSessionStreams{}
+	driver := &projectStopSandboxDriver{}
+	streams := &projectStopSandboxStreams{}
 
-	if err := stopProjectSession(context.Background(), store, driver, streams, store.session); err != nil {
-		t.Fatalf("stopProjectSession returned error: %v", err)
+	if err := stopProjectSandbox(context.Background(), store, driver, streams, store.session); err != nil {
+		t.Fatalf("stopProjectSandbox returned error: %v", err)
 	}
 	if driver.stopCount != 1 {
-		t.Fatalf("StopSessionVM calls = %d, want 1", driver.stopCount)
+		t.Fatalf("StopSandboxVM calls = %d, want 1", driver.stopCount)
 	}
 	if store.updated == nil || store.updated.Summary.VMStatus != domain.VMStatusStopped {
-		t.Fatalf("updated session = %#v, want stopped", store.updated)
+		t.Fatalf("updated sandbox = %#v, want stopped", store.updated)
 	}
-	if len(store.events) != 1 || store.events[0].Type != "session.stopped" || store.events[0].Message != "session stopped" {
-		t.Fatalf("events = %#v, want one session.stopped event", store.events)
+	if len(store.events) != 1 || store.events[0].Type != "sandbox.stopped" || store.events[0].Message != "sandbox stopped" {
+		t.Fatalf("events = %#v, want one sandbox.stopped event", store.events)
 	}
 	if streams.updatedCount != 1 || streams.eventCount != 1 {
 		t.Fatalf("stream notifications updated=%d events=%d, want 1/1", streams.updatedCount, streams.eventCount)
 	}
 }
 
-type projectStopSessionStore struct {
-	session *domain.Session
-	updated *domain.Session
-	events  []domain.SessionEvent
+type projectStopSandboxStore struct {
+	session *domain.Sandbox
+	updated *domain.Sandbox
+	events  []domain.SandboxEvent
 }
 
-func (s *projectStopSessionStore) GetSession(context.Context, string) (*domain.Session, error) {
+func (s *projectStopSandboxStore) GetSandbox(context.Context, string) (*domain.Sandbox, error) {
 	copy := *s.session
 	return &copy, nil
 }
 
-func (s *projectStopSessionStore) UpdateSession(_ context.Context, session *domain.Session) error {
+func (s *projectStopSandboxStore) UpdateSandbox(_ context.Context, session *domain.Sandbox) error {
 	copy := *session
 	s.updated = &copy
 	return nil
 }
 
-func (s *projectStopSessionStore) AddEvent(_ context.Context, _ string, event domain.SessionEvent) error {
+func (s *projectStopSandboxStore) AddEvent(_ context.Context, _ string, event domain.SandboxEvent) error {
 	s.events = append(s.events, event)
 	return nil
 }
 
-type projectStopSessionDriver struct {
+type projectStopSandboxDriver struct {
 	stopCount int
 }
 
-func (d *projectStopSessionDriver) StopSessionVM(context.Context, *domain.Session) error {
+func (d *projectStopSandboxDriver) StopSandboxVM(context.Context, *domain.Sandbox) error {
 	d.stopCount++
 	return nil
 }
 
-type projectStopSessionStreams struct {
+type projectStopSandboxStreams struct {
 	updatedCount int
 	eventCount   int
 }
 
-func (s *projectStopSessionStreams) PublishSessionUpdated(*domain.SessionSummary) {
+func (s *projectStopSandboxStreams) PublishSandboxUpdated(*domain.SandboxSummary) {
 	s.updatedCount++
 }
 
-func (s *projectStopSessionStreams) PublishEventAdded(string, domain.SessionEvent) {
+func (s *projectStopSandboxStreams) PublishEventAdded(string, domain.SandboxEvent) {
 	s.eventCount++
 }
 

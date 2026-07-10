@@ -477,11 +477,7 @@ func (s *projectStore) ListProjectRunsByOptions(ctx context.Context, options Pro
 		where = append(where, "agent_name = ?")
 		args = append(args, agentName)
 	}
-	sandboxID := strings.TrimSpace(options.SandboxID)
-	if sandboxID == "" {
-		sandboxID = strings.TrimSpace(options.SessionID)
-	}
-	if sandboxID != "" {
+	if sandboxID := strings.TrimSpace(options.SandboxID); sandboxID != "" {
 		where = append(where, "sandbox_id = ?")
 		args = append(args, sandboxID)
 	}

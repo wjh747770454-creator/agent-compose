@@ -15,13 +15,13 @@ import (
 )
 
 type KernelStore interface {
-	GetSession(context.Context, string) (*domain.Session, error)
+	GetSandbox(context.Context, string) (*domain.Sandbox, error)
 	ListCells(context.Context, string) ([]domain.NotebookCell, error)
 }
 
 type CellExecutor interface {
-	ExecuteCell(context.Context, *domain.Session, string, string) (domain.NotebookCell, error)
-	ExecuteCellStream(context.Context, *domain.Session, string, string, execution.CellExecutionStream) (domain.NotebookCell, error)
+	ExecuteCell(context.Context, *domain.Sandbox, string, string) (domain.NotebookCell, error)
+	ExecuteCellStream(context.Context, *domain.Sandbox, string, string, execution.CellExecutionStream) (domain.NotebookCell, error)
 }
 
 type LoaderTopicPublisher interface {
@@ -39,7 +39,7 @@ func NewKernelHandler(store KernelStore, executor CellExecutor, publisher Loader
 }
 
 func (h *KernelHandler) ExecuteCell(ctx context.Context, req *connect.Request[agentcomposev1.ExecuteCellRequest]) (*connect.Response[agentcomposev1.ExecuteCellResponse], error) {
-	session, err := h.store.GetSession(ctx, req.Msg.GetSessionId())
+	session, err := h.store.GetSandbox(ctx, req.Msg.GetSessionId())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -50,7 +50,7 @@ func (h *KernelHandler) ExecuteCell(ctx context.Context, req *connect.Request[ag
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	loaded, err := h.store.GetSession(ctx, session.Summary.ID)
+	loaded, err := h.store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -60,7 +60,7 @@ func (h *KernelHandler) ExecuteCell(ctx context.Context, req *connect.Request[ag
 
 func (h *KernelHandler) ExecuteCellStream(ctx context.Context, req *connect.Request[agentcomposev1.ExecuteCellRequest], stream *connect.ServerStream[agentcomposev1.ExecuteCellStreamResponse]) error {
 	PrepareStreamingHeaders(stream.ResponseHeader())
-	session, err := h.store.GetSession(ctx, req.Msg.GetSessionId())
+	session, err := h.store.GetSandbox(ctx, req.Msg.GetSessionId())
 	if err != nil {
 		return connect.NewError(connect.CodeNotFound, err)
 	}
@@ -98,7 +98,7 @@ func (h *KernelHandler) ExecuteCellStream(ctx context.Context, req *connect.Requ
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
-	loaded, err := h.store.GetSession(ctx, session.Summary.ID)
+	loaded, err := h.store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}

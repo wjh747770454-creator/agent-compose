@@ -34,10 +34,10 @@ func TestManualBoxLiteFiveDirMountRepro(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		t.Run("run", func(t *testing.T) {
 			config := newRuntimeSmokeConfig(t, RuntimeDriverBoxlite)
-			session, vmState, proxyState := newRuntimeSmokeSession(t, ctx, config, RuntimeDriverBoxlite)
+			session, vmState, proxyState := newRuntimeSmokeSandbox(t, ctx, config, RuntimeDriverBoxlite)
 			writeFiveDirBoxLiteManifest(t, session)
 
-			runtime := &cgoBoxRuntime{config: config}
+			runtime := &cgoSandboxRuntime{config: config}
 			box, created, err := runtime.getOrCreateBox(ctx, session, vmState, proxyState)
 			if err != nil {
 				t.Fatalf("getOrCreateBox returned error: %v", err)
@@ -53,9 +53,9 @@ func TestManualBoxLiteFiveDirMountRepro(t *testing.T) {
 			}
 			err = runtime.startBox(ctx, box)
 			if err == nil {
-				stopCtx, stopCancel := context.WithTimeout(context.Background(), config.SessionStopTimeout)
+				stopCtx, stopCancel := context.WithTimeout(context.Background(), config.SandboxStopTimeout)
 				defer stopCancel()
-				_, _ = runtime.StopSession(stopCtx, session, VMState{BoxID: boxID})
+				_, _ = runtime.StopSandbox(stopCtx, session, VMState{BoxID: boxID})
 				t.Fatalf("startBox unexpectedly succeeded")
 			}
 			logText := readBoxLiteReproLogs(t, config.BoxliteHome, boxID)
@@ -69,19 +69,19 @@ func TestManualBoxLiteFiveDirMountRepro(t *testing.T) {
 	}
 }
 
-func writeFiveDirBoxLiteManifest(t *testing.T, session *Session) {
+func writeFiveDirBoxLiteManifest(t *testing.T, session *Sandbox) {
 	t.Helper()
 	writeNDirBoxLiteManifest(t, session, 5)
 }
 
-func writeNDirBoxLiteManifest(t *testing.T, session *Session, mountCount int) {
+func writeNDirBoxLiteManifest(t *testing.T, session *Sandbox, mountCount int) {
 	t.Helper()
 	allMounts := []RuntimeMount{
 		{HostPath: session.Summary.WorkspacePath, GuestPath: "/workspace", Type: "bind"},
-		{HostPath: filepath.Join(hostSessionDir(session), "state"), GuestPath: "/data/state", Type: "bind"},
-		{HostPath: filepath.Join(hostSessionDir(session), "runtime"), GuestPath: "/data/runtime", Type: "bind"},
-		{HostPath: filepath.Join(hostSessionDir(session), "logs"), GuestPath: "/data/logs", Type: "bind"},
-		{HostPath: hostSessionHome(session), GuestPath: "/root", Type: "bind"},
+		{HostPath: filepath.Join(hostSandboxDir(session), "state"), GuestPath: "/data/state", Type: "bind"},
+		{HostPath: filepath.Join(hostSandboxDir(session), "runtime"), GuestPath: "/data/runtime", Type: "bind"},
+		{HostPath: filepath.Join(hostSandboxDir(session), "logs"), GuestPath: "/data/logs", Type: "bind"},
+		{HostPath: hostSandboxHome(session), GuestPath: "/root", Type: "bind"},
 	}
 	if mountCount < 0 || mountCount > len(allMounts) {
 		t.Fatalf("invalid mount count %d", mountCount)

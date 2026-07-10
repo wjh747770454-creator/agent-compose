@@ -54,8 +54,8 @@ type ControllerStore interface {
 	DownStore
 }
 
-type SessionStore interface {
-	DownSessionStore
+type SandboxStore interface {
+	DownSandboxStore
 }
 
 type LoaderValidator interface {
@@ -73,22 +73,22 @@ type VolumeManager interface {
 type Controller struct {
 	config    *appconfig.Config
 	store     ControllerStore
-	sessions  SessionStore
+	sandboxes SandboxStore
 	images    images.Backend
 	loaders   LoaderValidator
 	volumes   VolumeManager
-	stop      func(context.Context, *domain.Session) error
+	stop      func(context.Context, *domain.Sandbox) error
 	defaultDR string
 }
 
 type ControllerDependencies struct {
 	Config      *appconfig.Config
 	Store       ControllerStore
-	Sessions    SessionStore
+	Sandboxes   SandboxStore
 	Images      images.Backend
 	Loaders     LoaderValidator
 	Volumes     VolumeManager
-	StopSession func(context.Context, *domain.Session) error
+	StopSandbox func(context.Context, *domain.Sandbox) error
 }
 
 func NewController(deps ControllerDependencies) *Controller {
@@ -99,11 +99,11 @@ func NewController(deps ControllerDependencies) *Controller {
 	return &Controller{
 		config:    deps.Config,
 		store:     deps.Store,
-		sessions:  deps.Sessions,
+		sandboxes: deps.Sandboxes,
 		images:    deps.Images,
 		loaders:   deps.Loaders,
 		volumes:   deps.Volumes,
-		stop:      deps.StopSession,
+		stop:      deps.StopSandbox,
 		defaultDR: defaultDriver,
 	}
 }
@@ -323,10 +323,10 @@ func (c *Controller) RemoveProject(ctx context.Context, req RemoveRequest) (Remo
 	}
 	downChanges, err := DownProject(ctx, project, DownOptions{
 		Store:                c.store,
-		Sessions:             c.sessions,
+		Sandboxes:            c.sandboxes,
 		DisableManagedLoader: c.disableManagedLoaderIfOwned,
 		RefreshLoaders:       c.refreshLoaders,
-		StopSession:          c.stop,
+		StopSandbox:          c.stop,
 	})
 	changes := downChangesToChanges(downChanges)
 	if err != nil {
@@ -550,7 +550,7 @@ func (c *Controller) validateManagedAgentDefinitions(normalized NormalizedProjec
 			continue
 		}
 		if strings.TrimSpace(agent.Driver) != "" {
-			if _, err := driverpkg.ResolveSessionRuntimeDriver(agent.Driver, c.defaultDR); err != nil {
+			if _, err := driverpkg.ResolveSandboxRuntimeDriver(agent.Driver, c.defaultDR); err != nil {
 				issues = append(issues, ValidationIssue{Path: path + ".driver", Message: err.Error()})
 			}
 		}

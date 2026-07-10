@@ -37,7 +37,7 @@ type VolumeMountSpec struct {
 	ReadOnly bool   `json:"read_only,omitempty" yaml:"read_only,omitempty"`
 }
 
-type SessionVolumeMount struct {
+type SandboxVolumeMount struct {
 	ID          string `json:"id,omitempty"`
 	Type        string `json:"type"`
 	Source      string `json:"source"`
@@ -158,11 +158,11 @@ func NormalizeVolumeMountSpecs(items []VolumeMountSpec) ([]VolumeMountSpec, erro
 	return normalized, nil
 }
 
-func NormalizeSessionVolumeMounts(items []SessionVolumeMount) []SessionVolumeMount {
+func NormalizeSandboxVolumeMounts(items []SandboxVolumeMount) []SandboxVolumeMount {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]SessionVolumeMount, 0, len(items))
+	out := make([]SandboxVolumeMount, 0, len(items))
 	for _, item := range items {
 		item.ID = strings.TrimSpace(item.ID)
 		item.Type = strings.ToLower(strings.TrimSpace(item.Type))

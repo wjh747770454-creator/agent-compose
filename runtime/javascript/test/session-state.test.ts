@@ -1,13 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { readStoredSession, sessionStatePath, writeStoredSession } from "../src/session-state.js";
+import { providerStatePath, readStoredThread, writeStoredThread } from "../src/session-state.js";
 import { withTempSession } from "./helpers.js";
 
-describe("provider session state", () => {
+describe("provider thread state", () => {
   it("uses the compatible provider state path", async () => {
     await withTempSession(async (root) => {
-      expect(sessionStatePath(path.join(root, "state"), "codex")).toBe(
+      expect(providerStatePath(path.join(root, "state"), "codex")).toBe(
         path.join(root, "state", "agents", "providers", "codex.json"),
       );
     });
@@ -16,38 +16,71 @@ describe("provider session state", () => {
   it("returns null for absent or malformed state", async () => {
     await withTempSession(async (root) => {
       const stateRoot = path.join(root, "state");
-      expect(await readStoredSession(stateRoot, "codex")).toBeNull();
+      expect(await readStoredThread(stateRoot, "codex")).toBeNull();
 
-      const target = sessionStatePath(stateRoot, "codex");
+      const target = providerStatePath(stateRoot, "codex");
       await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.writeFile(target, "{\"sessionId\": 3}", "utf8");
+      await fs.writeFile(target, "{\"threadId\": 3}", "utf8");
 
-      expect(await readStoredSession(stateRoot, "codex")).toBeNull();
+      expect(await readStoredThread(stateRoot, "codex")).toBeNull();
+
+      await fs.writeFile(target, "{\"provider\":\"codex\"}", "utf8");
+
+      expect(await readStoredThread(stateRoot, "codex")).toBeNull();
     });
   });
 
-  it("writes and reads session id state", async () => {
+  it("characterizes current whitespace thread id compatibility", async () => {
+    await withTempSession(async (root) => {
+      const stateRoot = path.join(root, "state");
+      const target = providerStatePath(stateRoot, "codex");
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, "{\"threadId\":\"   \",\"updatedAt\":\"2026-01-01T00:00:00.000Z\"}", "utf8");
+
+      await expect(readStoredThread(stateRoot, "codex")).resolves.toEqual({
+        threadId: "   ",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+    });
+  });
+
+  it("writes and reads thread id state", async () => {
     await withTempSession(async (root) => {
       const stateRoot = path.join(root, "state");
       const now = new Date("2026-01-01T00:00:00.000Z");
 
-      await writeStoredSession(stateRoot, "claude", "session-1", now);
+      await writeStoredThread(stateRoot, "claude", "thread-1", now);
 
-      await expect(readStoredSession(stateRoot, "claude")).resolves.toEqual({
+      await expect(readStoredThread(stateRoot, "claude")).resolves.toEqual({
         provider: "claude",
-        sessionId: "session-1",
+        threadId: "thread-1",
         updatedAt: now.toISOString(),
       });
     });
   });
 
-  it("does not create state for an empty session id", async () => {
+  it("reads legacy session id state", async () => {
+    await withTempSession(async (root) => {
+      const stateRoot = path.join(root, "state");
+      const target = providerStatePath(stateRoot, "codex");
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, '{"provider":"codex","sessionId":"legacy-thread"}', "utf8");
+
+      await expect(readStoredThread(stateRoot, "codex")).resolves.toEqual({
+        provider: "codex",
+        sessionId: "legacy-thread",
+        threadId: "legacy-thread",
+      });
+    });
+  });
+
+  it("does not create state for an empty thread id", async () => {
     await withTempSession(async (root) => {
       const stateRoot = path.join(root, "state");
 
-      await writeStoredSession(stateRoot, "gemini", "");
+      await writeStoredThread(stateRoot, "gemini", "");
 
-      await expect(fs.stat(sessionStatePath(stateRoot, "gemini"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(fs.stat(providerStatePath(stateRoot, "gemini"))).rejects.toMatchObject({ code: "ENOENT" });
     });
   });
 });

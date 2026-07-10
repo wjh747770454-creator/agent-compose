@@ -35,11 +35,11 @@ type fileWorkspace struct {
 	workspace domain.WorkspaceConfig
 }
 
-func PrepareFileWorkspace(config *appconfig.Config, session *domain.Session, workspace domain.WorkspaceConfig) error {
+func PrepareFileWorkspace(config *appconfig.Config, session *domain.Sandbox, workspace domain.WorkspaceConfig) error {
 	return fileWorkspace{config: config, workspace: workspace}.Prepare(context.Background(), session)
 }
 
-func (w fileWorkspace) Prepare(_ context.Context, session *domain.Session) error {
+func (w fileWorkspace) Prepare(_ context.Context, session *domain.Sandbox) error {
 	workspaceRoot := strings.TrimSpace(session.Summary.WorkspacePath)
 	if workspaceRoot == "" {
 		return domain.ClassifyError(domain.ErrRequired, fmt.Sprintf("session %s missing workspace path", session.Summary.ID), nil)

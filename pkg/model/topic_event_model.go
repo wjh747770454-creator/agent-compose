@@ -94,9 +94,9 @@ type EventDelivery struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type EventSessionLink struct {
+type EventSandboxLink struct {
 	EventID       string    `json:"event_id"`
-	SessionID     string    `json:"session_id"`
+	SandboxID     string    `json:"sandbox_id"`
 	Relation      string    `json:"relation"`
 	LoaderID      string    `json:"loader_id,omitempty"`
 	RunID         string    `json:"run_id,omitempty"`
@@ -105,8 +105,8 @@ type EventSessionLink struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-type EventSessionTraceItem struct {
-	SessionID     string    `json:"session_id"`
+type EventSandboxTraceItem struct {
+	SandboxID     string    `json:"sandbox_id"`
 	Relation      string    `json:"relation"`
 	LoaderID      string    `json:"loader_id,omitempty"`
 	RunID         string    `json:"run_id,omitempty"`

@@ -72,11 +72,11 @@ func testJupyterGuestCoverageWorkflow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(logDir, "jupyter.log"), []byte(" Jupyter Server 2.0\n is running at: http://127.0.0.1 "), 0o644); err != nil {
 		t.Fatalf("write jupyter log: %v", err)
 	}
-	session := &Session{Summary: SessionSummary{WorkspacePath: workspace}}
-	if logText := readSessionJupyterLog(session); !jupyterLogIndicatesReady(logText) {
+	session := &Sandbox{Summary: SandboxSummary{WorkspacePath: workspace}}
+	if logText := readSandboxJupyterLog(session); !jupyterLogIndicatesReady(logText) {
 		t.Fatalf("jupyter log did not indicate readiness: %q", logText)
 	}
-	if readSessionJupyterLog(nil) != "" || jupyterLogIndicatesReady(" ") {
+	if readSandboxJupyterLog(nil) != "" || jupyterLogIndicatesReady(" ") {
 		t.Fatalf("nil/empty jupyter log helpers returned unexpected values")
 	}
 	if logPath := jupyterLogPath(&appconfig.Config{GuestLogRoot: "/data/logs"}); logPath != "/data/logs/jupyter.log" {

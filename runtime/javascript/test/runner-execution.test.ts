@@ -31,8 +31,8 @@ vi.mock("@openai/codex-sdk", () => ({
           };
         }),
       })),
-      resumeThread: vi.fn((sessionId: string) => {
-        codexState.resumed = sessionId;
+      resumeThread: vi.fn((threadId: string) => {
+        codexState.resumed = threadId;
         return {
           id: codexState.resumedThreadId,
           runStreamed: vi.fn(async (input: unknown, options: unknown) => {
@@ -134,7 +134,7 @@ describe("runner execution", () => {
     childProcessState.spawnSyncStdout = "";
   });
 
-  it("runs a new Codex thread and persists the resulting session", async () => {
+  it("runs a new Codex thread and persists the resulting thread", async () => {
     const { CodexRunner } = await import("../src/runners/codex.js");
     await withTempSession(async (root) => {
       codexState.events = [
@@ -147,7 +147,7 @@ describe("runner execution", () => {
 
         expect(result).toMatchObject({
           provider: "codex",
-          sessionId: "thread-new",
+          threadId: "thread-new",
           finalText: "codex answer",
           transcript: "codex answer",
         });
@@ -159,7 +159,7 @@ describe("runner execution", () => {
         config: { developer_instructions: "catalog body" },
       });
       const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "codex.json"), "utf8"));
-      expect(stored.sessionId).toBe("thread-new");
+      expect(stored.threadId).toBe("thread-new");
     });
   });
 
@@ -193,13 +193,13 @@ describe("runner execution", () => {
       await fs.mkdir(providerRoot, { recursive: true });
       await fs.writeFile(path.join(providerRoot, "codex.json"), JSON.stringify({
         provider: "codex",
-        sessionId: "old-thread",
+        threadId: "old-thread",
       }), "utf8");
       codexState.events = [{ type: "item.completed", item: { id: "a2", type: "agent_message", text: "resumed" } }];
       const stdio = captureStdio();
       try {
         const result = await new CodexRunner(runnerOptions(root)).runPrompt("prompt");
-        expect(result.sessionId).toBe("thread-resumed");
+        expect(result.threadId).toBe("thread-resumed");
       } finally {
         stdio.restore();
       }
@@ -207,11 +207,11 @@ describe("runner execution", () => {
     });
   });
 
-  it("reuses the same Codex provider session file across two prompt turns", async () => {
+  it("reuses the same Codex provider thread file across two prompt turns", async () => {
     const { CodexRunner } = await import("../src/runners/codex.js");
     await withTempSession(async (root) => {
-      codexState.threadId = "codex-session";
-      codexState.resumedThreadId = "codex-session";
+      codexState.threadId = "codex-thread";
+      codexState.resumedThreadId = "codex-thread";
       codexState.events = [{ type: "item.completed", item: { id: "a1", type: "agent_message", text: "first" } }];
       const stdio = captureStdio();
       try {
@@ -223,8 +223,8 @@ describe("runner execution", () => {
       }
 
       const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "codex.json"), "utf8"));
-      expect(stored.sessionId).toBe("codex-session");
-      expect(codexState.resumed).toBe("codex-session");
+      expect(stored.threadId).toBe("codex-thread");
+      expect(codexState.resumed).toBe("codex-thread");
       expect(codexState.runStreamedCalls.map((call) => call.input)).toEqual(["first prompt", "second prompt"]);
     });
   });
@@ -247,7 +247,7 @@ describe("runner execution", () => {
 
         expect(result).toMatchObject({
           provider: "claude",
-          sessionId: "claude-session",
+          threadId: "claude-session",
           stopReason: "end_turn",
           finalText: "final claude",
         });
@@ -260,11 +260,11 @@ describe("runner execution", () => {
       }
       expect(claudeState.closed).toBe(true);
       const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "claude.json"), "utf8"));
-      expect(stored.sessionId).toBe("claude-session");
+      expect(stored.threadId).toBe("claude-session");
     });
   });
 
-  it("reuses the same Claude provider session file across two prompt turns", async () => {
+  it("reuses the same Claude provider thread file across two prompt turns", async () => {
     const { ClaudeRunner } = await import("../src/runners/claude.js");
     await withTempSession(async (root) => {
       claudeState.closed = false;
@@ -285,7 +285,7 @@ describe("runner execution", () => {
       }
 
       const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "claude.json"), "utf8"));
-      expect(stored.sessionId).toBe("claude-session");
+      expect(stored.threadId).toBe("claude-session");
       expect(claudeState.queryCalls.at(1)?.options).toMatchObject({ resume: "claude-session" });
     });
   });
@@ -464,7 +464,7 @@ describe("runner execution", () => {
 
         expect(result).toMatchObject({
           provider: "gemini",
-          sessionId: "gemini-session",
+          threadId: "gemini-session",
           finalText: "gemini final",
         });
         expect(childProcessState.spawnCalls.at(-1)).toMatchObject({
@@ -477,7 +477,7 @@ describe("runner execution", () => {
     });
   });
 
-  it("reuses the same OpenCode provider session file across two prompt turns", async () => {
+  it("reuses the same OpenCode provider thread file across two prompt turns", async () => {
     const { OpenCodeRunner } = await import("../src/runners/opencode.js");
     await withTempSession(async (root) => {
       childProcessState.exitCode = 0;
@@ -500,7 +500,7 @@ describe("runner execution", () => {
       }
 
       const stored = JSON.parse(await fs.readFile(path.join(root, "state", "agents", "providers", "opencode.json"), "utf8"));
-      expect(stored.sessionId).toBe("opencode-session");
+      expect(stored.threadId).toBe("opencode-session");
       expect(childProcessState.spawnCalls.at(1)?.args).toContain("--session");
       expect(childProcessState.spawnCalls.at(1)?.args).toContain("opencode-session");
     });
@@ -527,7 +527,7 @@ describe("runner execution", () => {
 
         expect(result).toMatchObject({
           provider: "gemini",
-          sessionId: "gemini-session",
+          threadId: "gemini-session",
           finalText: "gemini final",
         });
         expect(result.transcript).toContain("hello");

@@ -9,7 +9,7 @@ import (
 )
 
 type GlobalEnvStore interface {
-	ListGlobalEnv(ctx context.Context) ([]domain.SessionEnvVar, error)
+	ListGlobalEnv(ctx context.Context) ([]domain.SandboxEnvVar, error)
 }
 
 type ClientConfig struct {

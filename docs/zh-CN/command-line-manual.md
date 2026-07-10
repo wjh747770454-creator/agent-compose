@@ -282,7 +282,7 @@ agent-compose sandbox prune --agent worker --driver microsandbox --force
 - `sandbox prune` 只处理属于当前 compose project 的 sandbox。
 - `sandbox prune` 永远不会删除 `running` 或 `pending` sandbox，也不会向 `RemoveSandbox` 发送 `force=true`。
 - 无法解析的时间会被跳过，并在 warnings 中报告。
-- `sandbox prune` 通过 `SandboxService.RemoveSandbox` 删除 sandbox/session 记录；它不清理 runtime cache 文件。daemon runtime cache inventory 仍由 `cache prune` 或 `cache rm` 管理。
+- `sandbox prune` 通过 `SandboxService.RemoveSandbox` 删除 sandbox 记录；它不清理 runtime cache 文件。daemon runtime cache inventory 仍由 `cache prune` 或 `cache rm` 管理。
 - forced prune 中某个 sandbox 删除失败时，命令会继续处理后续匹配项，输出 skipped 项，并以非零退出码结束。
 
 ## `stats`：查看 sandbox 资源统计

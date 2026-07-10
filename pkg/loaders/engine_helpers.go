@@ -125,11 +125,11 @@ func normalizeAgentKind(agent string) string {
 	return domain.NormalizeAgentKind(agent)
 }
 
-func normalizeLoaderSessionPolicy(policy string) string {
-	return domain.NormalizeLoaderSessionPolicy(policy)
+func normalizeLoaderSandboxPolicy(policy string) string {
+	return domain.NormalizeLoaderSandboxPolicy(policy)
 }
 
-func normalizeEnvItems(items []domain.SessionEnvVar) []domain.SessionEnvVar {
+func normalizeEnvItems(items []domain.SandboxEnvVar) []domain.SandboxEnvVar {
 	return domain.NormalizeEnvItems(items)
 }
 

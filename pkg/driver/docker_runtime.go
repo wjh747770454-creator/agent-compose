@@ -26,9 +26,10 @@ import (
 )
 
 const (
-	dockerSessionLabelPrefix = "agent-compose"
-	dockerSessionLabelID     = dockerSessionLabelPrefix + ".session_id"
-	dockerSessionLabelDriver = dockerSessionLabelPrefix + ".driver"
+	dockerSandboxLabelPrefix   = "agent-compose"
+	dockerSandboxLabelID       = dockerSandboxLabelPrefix + ".sandbox_id"
+	dockerLegacySessionLabelID = dockerSandboxLabelPrefix + ".session_id"
+	dockerSandboxLabelDriver   = dockerSandboxLabelPrefix + ".driver"
 
 	dockerStopAPIMargin             = 5 * time.Second
 	dockerStopFallbackActionTimeout = 5 * time.Second
@@ -51,7 +52,7 @@ type dockerExecWriter struct {
 	stream    StdioStream
 }
 
-func newDockerRuntime(config *appconfig.Config) (BoxRuntime, error) {
+func newDockerRuntime(config *appconfig.Config) (SandboxRuntime, error) {
 	return &dockerRuntime{config: config}, nil
 }
 
@@ -93,47 +94,47 @@ func (w *dockerExecWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (r *dockerRuntime) EnsureSession(ctx context.Context, session *Session, vmState VMState, proxyState ProxyState) (SessionVMInfo, error) {
+func (r *dockerRuntime) EnsureSandbox(ctx context.Context, session *Sandbox, vmState VMState, proxyState ProxyState) (SandboxVMInfo, error) {
 	dockerClient, err := r.newClient()
 	if err != nil {
-		return SessionVMInfo{}, err
+		return SandboxVMInfo{}, err
 	}
 	defer func() { _ = dockerClient.Close() }()
 
-	proxyState = r.dockerSessionProxyState(session, vmState, proxyState)
+	proxyState = r.dockerSandboxProxyState(session, vmState, proxyState)
 	containerInfo, _, err := r.getOrCreateContainer(ctx, dockerClient, session, vmState, proxyState)
 	if err != nil {
-		return SessionVMInfo{}, err
+		return SandboxVMInfo{}, err
 	}
 	if containerInfo.State == nil || !containerInfo.State.Running {
 		if err := dockerClient.ContainerStart(ctx, containerInfo.ID, containerapi.StartOptions{}); err != nil {
-			return SessionVMInfo{}, fmt.Errorf("start docker container %s: %w", containerInfo.ID, err)
+			return SandboxVMInfo{}, fmt.Errorf("start docker container %s: %w", containerInfo.ID, err)
 		}
 	}
 	if !jupyterEnabled(proxyState) {
-		return SessionVMInfo{BoxID: containerInfo.ID, ProxyState: &proxyState}, nil
+		return SandboxVMInfo{BoxID: containerInfo.ID, ProxyState: &proxyState}, nil
 	}
 
 	readyCtx, cancel := context.WithTimeout(ctx, r.config.JupyterReadyTimeout)
 	readyErr := waitForJupyterProxy(readyCtx, proxyState)
 	cancel()
 	if readyErr != nil {
-		if logText := readSessionJupyterLog(session); jupyterLogIndicatesReady(logText) {
-			return SessionVMInfo{BoxID: containerInfo.ID, JupyterURL: jupyterDirectURL(proxyState), ProxyState: &proxyState}, nil
+		if logText := readSandboxJupyterLog(session); jupyterLogIndicatesReady(logText) {
+			return SandboxVMInfo{BoxID: containerInfo.ID, JupyterURL: jupyterDirectURL(proxyState), ProxyState: &proxyState}, nil
 		}
-		if logText := readSessionJupyterLog(session); logText != "" {
-			return SessionVMInfo{}, fmt.Errorf("%w\nGuest log:\n%s", readyErr, logText)
+		if logText := readSandboxJupyterLog(session); logText != "" {
+			return SandboxVMInfo{}, fmt.Errorf("%w\nGuest log:\n%s", readyErr, logText)
 		}
 		if logText, err := r.readContainerLogs(ctx, dockerClient, containerInfo.ID); err == nil && strings.TrimSpace(logText) != "" {
-			return SessionVMInfo{}, fmt.Errorf("%w\nContainer log:\n%s", readyErr, strings.TrimSpace(logText))
+			return SandboxVMInfo{}, fmt.Errorf("%w\nContainer log:\n%s", readyErr, strings.TrimSpace(logText))
 		}
-		return SessionVMInfo{}, readyErr
+		return SandboxVMInfo{}, readyErr
 	}
 
-	return SessionVMInfo{BoxID: containerInfo.ID, JupyterURL: jupyterDirectURL(proxyState), ProxyState: &proxyState}, nil
+	return SandboxVMInfo{BoxID: containerInfo.ID, JupyterURL: jupyterDirectURL(proxyState), ProxyState: &proxyState}, nil
 }
 
-func (r *dockerRuntime) StopSession(ctx context.Context, session *Session, vmState VMState) (bool, error) {
+func (r *dockerRuntime) StopSandbox(ctx context.Context, session *Sandbox, vmState VMState) (bool, error) {
 	dockerClient, err := r.newClient()
 	if err != nil {
 		return false, err
@@ -148,7 +149,7 @@ func (r *dockerRuntime) StopSession(ctx context.Context, session *Session, vmSta
 		return true, nil
 	}
 	if containerInfo.State != nil && containerInfo.State.Running {
-		timeoutSeconds := int(math.Ceil(r.config.SessionStopTimeout.Seconds()))
+		timeoutSeconds := int(math.Ceil(r.config.SandboxStopTimeout.Seconds()))
 		if timeoutSeconds < 0 {
 			timeoutSeconds = 0
 		}
@@ -168,15 +169,15 @@ func (r *dockerRuntime) StopSession(ctx context.Context, session *Session, vmSta
 	return false, nil
 }
 
-func (r *dockerRuntime) Exec(ctx context.Context, session *Session, vmState VMState, spec ExecSpec) (ExecResult, error) {
+func (r *dockerRuntime) Exec(ctx context.Context, session *Sandbox, vmState VMState, spec ExecSpec) (ExecResult, error) {
 	return r.execWithStream(ctx, session, vmState, spec, nil)
 }
 
-func (r *dockerRuntime) ExecStream(ctx context.Context, session *Session, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
+func (r *dockerRuntime) ExecStream(ctx context.Context, session *Sandbox, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
 	return r.execWithStream(ctx, session, vmState, spec, stream)
 }
 
-func (r *dockerRuntime) Stats(ctx context.Context, session *Session, vmState VMState) (SandboxStats, error) {
+func (r *dockerRuntime) Stats(ctx context.Context, session *Sandbox, vmState VMState) (SandboxStats, error) {
 	dockerClient, err := r.newClient()
 	if err != nil {
 		return SandboxStats{}, err
@@ -188,21 +189,21 @@ func (r *dockerRuntime) Stats(ctx context.Context, session *Session, vmState VMS
 		return SandboxStats{}, err
 	}
 	if !ok || containerInfo.State == nil || !containerInfo.State.Running {
-		return SandboxStats{}, fmt.Errorf("docker container for session %s is not running", session.Summary.ID)
+		return SandboxStats{}, fmt.Errorf("docker container for sandbox %s is not running", session.Summary.ID)
 	}
 	reader, err := dockerClient.ContainerStatsOneShot(ctx, containerInfo.ID)
 	if err != nil {
-		return SandboxStats{}, fmt.Errorf("read docker stats for session %s: %w", session.Summary.ID, err)
+		return SandboxStats{}, fmt.Errorf("read docker stats for sandbox %s: %w", session.Summary.ID, err)
 	}
 	defer func() { _ = reader.Body.Close() }()
 	var response containerapi.StatsResponse
 	if err := json.NewDecoder(reader.Body).Decode(&response); err != nil {
-		return SandboxStats{}, fmt.Errorf("decode docker stats for session %s: %w", session.Summary.ID, err)
+		return SandboxStats{}, fmt.Errorf("decode docker stats for sandbox %s: %w", session.Summary.ID, err)
 	}
 	return dockerStatsFromResponse(session, vmState, containerInfo, response), nil
 }
 
-func (r *dockerRuntime) execWithStream(ctx context.Context, session *Session, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
+func (r *dockerRuntime) execWithStream(ctx context.Context, session *Sandbox, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
 	command := strings.TrimSpace(spec.Command)
 	if command == "" {
 		return ExecResult{}, fmt.Errorf("docker exec command is required")
@@ -219,7 +220,7 @@ func (r *dockerRuntime) execWithStream(ctx context.Context, session *Session, vm
 		return ExecResult{}, err
 	}
 	if !ok || containerInfo.State == nil || !containerInfo.State.Running {
-		return ExecResult{}, fmt.Errorf("docker container for session %s is not running", session.Summary.ID)
+		return ExecResult{}, fmt.Errorf("docker container for sandbox %s is not running", session.Summary.ID)
 	}
 
 	execResp, err := dockerClient.ContainerExecCreate(ctx, containerInfo.ID, containerapi.ExecOptions{
@@ -230,11 +231,11 @@ func (r *dockerRuntime) execWithStream(ctx context.Context, session *Session, vm
 		WorkingDir:   firstNonEmpty(spec.Cwd, r.config.GuestWorkspacePath),
 	})
 	if err != nil {
-		return ExecResult{}, fmt.Errorf("create docker exec for session %s: %w", session.Summary.ID, err)
+		return ExecResult{}, fmt.Errorf("create docker exec for sandbox %s: %w", session.Summary.ID, err)
 	}
 	attachResp, err := dockerClient.ContainerExecAttach(ctx, execResp.ID, containerapi.ExecAttachOptions{})
 	if err != nil {
-		return ExecResult{}, fmt.Errorf("attach docker exec for session %s: %w", session.Summary.ID, err)
+		return ExecResult{}, fmt.Errorf("attach docker exec for sandbox %s: %w", session.Summary.ID, err)
 	}
 	defer attachResp.Close()
 
@@ -286,7 +287,7 @@ func (r *dockerRuntime) newClient() (*client.Client, error) {
 	return dockerClient, nil
 }
 
-func (r *dockerRuntime) getOrCreateContainer(ctx context.Context, dockerClient *client.Client, session *Session, vmState VMState, proxyState ProxyState) (containerapi.InspectResponse, bool, error) {
+func (r *dockerRuntime) getOrCreateContainer(ctx context.Context, dockerClient *client.Client, session *Sandbox, vmState VMState, proxyState ProxyState) (containerapi.InspectResponse, bool, error) {
 	appconfig.ApplyDefaultGuestPaths(r.config)
 	if containerInfo, ok, err := r.findContainer(ctx, dockerClient, session, vmState); err != nil {
 		return containerapi.InspectResponse{}, false, err
@@ -310,21 +311,21 @@ func (r *dockerRuntime) getOrCreateContainer(ctx context.Context, dockerClient *
 		cmdText = jupyterLaunchCommand(r.config, proxyState, false)
 	}
 	containerConfig := &containerapi.Config{
-		Image:        resolveSessionGuestImage(vmState.Image, session.Summary.GuestImage, defaultGuestImageForDriver(r.config, RuntimeDriverDocker)),
+		Image:        resolveSandboxGuestImage(vmState.Image, session.Summary.GuestImage, defaultGuestImageForDriver(r.config, RuntimeDriverDocker)),
 		WorkingDir:   r.config.GuestWorkspacePath,
 		Env:          r.containerEnv(session, proxyState),
 		Entrypoint:   []string{"sh", "-lc"},
 		Cmd:          []string{cmdText},
 		ExposedPorts: exposedPorts,
 		Labels: map[string]string{
-			dockerSessionLabelID:     session.Summary.ID,
-			dockerSessionLabelDriver: RuntimeDriverDocker,
+			dockerSandboxLabelID:     session.Summary.ID,
+			dockerSandboxLabelDriver: RuntimeDriverDocker,
 		},
 	}
-	hostConfig := dockerSessionHostConfig(mounts, portBindings, networkMode)
+	hostConfig := dockerSandboxHostConfig(mounts, portBindings, networkMode)
 	createResp, err := dockerClient.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, name)
 	if err != nil {
-		return containerapi.InspectResponse{}, false, fmt.Errorf("create docker container for session %s: %w", session.Summary.ID, err)
+		return containerapi.InspectResponse{}, false, fmt.Errorf("create docker container for sandbox %s: %w", session.Summary.ID, err)
 	}
 	containerInfo, err := dockerClient.ContainerInspect(ctx, createResp.ID)
 	if err != nil {
@@ -369,7 +370,7 @@ func dockerFallbackContextIfDone(ctx context.Context) (context.Context, context.
 	return context.WithTimeout(context.Background(), dockerStopFallbackActionTimeout)
 }
 
-func dockerSessionHostConfig(mounts []mountapi.Mount, portBindings nat.PortMap, networkMode containerapi.NetworkMode) *containerapi.HostConfig {
+func dockerSandboxHostConfig(mounts []mountapi.Mount, portBindings nat.PortMap, networkMode containerapi.NetworkMode) *containerapi.HostConfig {
 	useInit := true
 	return &containerapi.HostConfig{
 		Mounts:       mounts,
@@ -380,7 +381,7 @@ func dockerSessionHostConfig(mounts []mountapi.Mount, portBindings nat.PortMap, 
 	}
 }
 
-func SessionStopContextTimeout(driver string, stopTimeout time.Duration) time.Duration {
+func SandboxStopContextTimeout(driver string, stopTimeout time.Duration) time.Duration {
 	if driver != RuntimeDriverDocker || stopTimeout <= 0 {
 		return stopTimeout
 	}
@@ -447,7 +448,7 @@ func selectDockerNetworkName(containerInfo containerapi.InspectResponse) (string
 	return networkNames[0], true
 }
 
-func (r *dockerRuntime) dockerRuntimeMounts(ctx context.Context, dockerClient *client.Client, session *Session) ([]mountapi.Mount, error) {
+func (r *dockerRuntime) dockerRuntimeMounts(ctx context.Context, dockerClient *client.Client, session *Sandbox) ([]mountapi.Mount, error) {
 	manifest, err := loadRuntimeMountManifest(session, RuntimeDriverDocker)
 	if err != nil {
 		return nil, err
@@ -474,9 +475,9 @@ func (r *dockerRuntime) bindRuntimeMountSource(ctx context.Context, dockerClient
 		return "", fmt.Errorf("docker runtime mount source is empty")
 	}
 
-	hostRoot := strings.TrimSpace(r.config.DockerHostSessionRoot)
+	hostRoot := strings.TrimSpace(r.config.DockerHostSandboxRoot)
 	if hostRoot != "" {
-		return rebasePathUnderRoot(hostPath, r.config.SessionRoot, hostRoot)
+		return rebasePathUnderRoot(hostPath, r.config.SandboxRoot, hostRoot)
 	}
 
 	if dockerClient != nil {
@@ -588,7 +589,7 @@ func relativePathUnderRoot(path, root string) (string, error) {
 	return relativeDir, nil
 }
 
-func (r *dockerRuntime) findContainer(ctx context.Context, dockerClient *client.Client, session *Session, vmState VMState) (containerapi.InspectResponse, bool, error) {
+func (r *dockerRuntime) findContainer(ctx context.Context, dockerClient *client.Client, session *Sandbox, vmState VMState) (containerapi.InspectResponse, bool, error) {
 	for _, lookup := range []string{strings.TrimSpace(vmState.BoxID), r.containerName(session, vmState)} {
 		if lookup == "" {
 			continue
@@ -602,12 +603,19 @@ func (r *dockerRuntime) findContainer(ctx context.Context, dockerClient *client.
 		}
 	}
 
-	args := filters.NewArgs()
-	args.Add("label", dockerSessionLabelID+"="+session.Summary.ID)
-	args.Add("label", dockerSessionLabelDriver+"="+RuntimeDriverDocker)
-	containers, err := dockerClient.ContainerList(ctx, containerapi.ListOptions{All: true, Filters: args})
-	if err != nil {
-		return containerapi.InspectResponse{}, false, fmt.Errorf("list docker containers for session %s: %w", session.Summary.ID, err)
+	var containers []containerapi.Summary
+	var err error
+	for _, idLabel := range dockerSandboxLookupLabelIDs() {
+		args := filters.NewArgs()
+		args.Add("label", idLabel+"="+session.Summary.ID)
+		args.Add("label", dockerSandboxLabelDriver+"="+RuntimeDriverDocker)
+		containers, err = dockerClient.ContainerList(ctx, containerapi.ListOptions{All: true, Filters: args})
+		if err != nil {
+			return containerapi.InspectResponse{}, false, fmt.Errorf("list docker containers for sandbox %s: %w", session.Summary.ID, err)
+		}
+		if len(containers) > 0 {
+			break
+		}
 	}
 	if len(containers) == 0 {
 		return containerapi.InspectResponse{}, false, nil
@@ -622,7 +630,11 @@ func (r *dockerRuntime) findContainer(ctx context.Context, dockerClient *client.
 	return containerInfo, true, nil
 }
 
-func (r *dockerRuntime) dockerSessionProxyState(session *Session, vmState VMState, proxyState ProxyState) ProxyState {
+func dockerSandboxLookupLabelIDs() []string {
+	return []string{dockerSandboxLabelID, dockerLegacySessionLabelID}
+}
+
+func (r *dockerRuntime) dockerSandboxProxyState(session *Sandbox, vmState VMState, proxyState ProxyState) ProxyState {
 	if !proxyState.Enabled {
 		proxyState.GuestHost = ""
 		proxyState.GuestPort = 0
@@ -632,19 +644,19 @@ func (r *dockerRuntime) dockerSessionProxyState(session *Session, vmState VMStat
 	return proxyState
 }
 
-func (r *dockerRuntime) containerName(session *Session, vmState VMState) string {
+func (r *dockerRuntime) containerName(session *Sandbox, vmState VMState) string {
 	return firstNonEmpty(strings.TrimSpace(vmState.BoxName), strings.TrimSpace(session.Summary.RuntimeRef), "agent-compose-"+sanitizeDockerContainerName(session.Summary.ID))
 }
 
-func (r *dockerRuntime) containerEnv(session *Session, proxyState ProxyState) []string {
+func (r *dockerRuntime) containerEnv(session *Sandbox, proxyState ProxyState) []string {
 	appconfig.ApplyDefaultGuestPaths(r.config)
-	env := sessionEnvMap(session.EnvItems, session.RuntimeEnvItems)
+	env := sandboxEnvMap(session.EnvItems, session.RuntimeEnvItems)
 	if env == nil {
 		env = map[string]string{}
 	}
 	env["GOPATH"] = "/usr/local/go"
 	env["PATH"] = "/root/.local/bin:/usr/local/go/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-	env["SESSION_ID"] = session.Summary.ID
+	env["SANDBOX_ID"] = session.Summary.ID
 	env["WORKSPACE"] = r.config.GuestWorkspacePath
 	env["STATE_ROOT"] = r.config.GuestStateRoot
 	env["RUNTIME_ROOT"] = r.config.GuestRuntimeRoot
@@ -685,7 +697,7 @@ func (r *dockerRuntime) readContainerLogs(ctx context.Context, dockerClient *cli
 	return strings.TrimSpace(stdout.String() + stderr.String()), nil
 }
 
-func dockerStatsFromResponse(session *Session, vmState VMState, containerInfo containerapi.InspectResponse, response containerapi.StatsResponse) SandboxStats {
+func dockerStatsFromResponse(session *Sandbox, vmState VMState, containerInfo containerapi.InspectResponse, response containerapi.StatsResponse) SandboxStats {
 	sandboxID := ""
 	driverName := RuntimeDriverDocker
 	if session != nil {
@@ -809,7 +821,7 @@ func isDockerStreamClosed(err error) bool {
 func sanitizeDockerContainerName(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if value == "" {
-		return "session"
+		return "sandbox"
 	}
 	var b strings.Builder
 	lastDash := false
@@ -826,7 +838,7 @@ func sanitizeDockerContainerName(value string) string {
 	}
 	result := strings.Trim(b.String(), "-")
 	if result == "" {
-		return "session"
+		return "sandbox"
 	}
 	return result
 }

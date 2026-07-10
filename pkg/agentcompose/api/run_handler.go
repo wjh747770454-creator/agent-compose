@@ -89,7 +89,7 @@ func (h *RunHandler) ListRuns(ctx context.Context, req *connect.Request[agentcom
 	runs, err := h.store.ListProjectRunsByOptions(ctx, domain.ProjectRunListOptions{
 		ProjectID:   req.Msg.GetProjectId(),
 		AgentName:   req.Msg.GetAgentName(),
-		SandboxID:   firstNonEmpty(req.Msg.GetSandboxId(), req.Msg.GetSessionId()),
+		SandboxID:   req.Msg.GetSandboxId(),
 		SchedulerID: req.Msg.GetSchedulerId(),
 		Status:      ProjectRunStatusFromProto(req.Msg.GetStatus()),
 		Source:      ProjectRunSourceFilterFromProto(req.Msg.GetSource()),

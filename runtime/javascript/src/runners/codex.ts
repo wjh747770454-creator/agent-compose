@@ -1,7 +1,7 @@
 import { resolveCodexPath } from "../codex-path.js";
 import { stringEnv } from "../env.js";
 import { uniqueDirectories } from "../paths.js";
-import { readStoredSession, writeStoredSession } from "../session-state.js";
+import { readStoredThread, writeStoredThread } from "../session-state.js";
 import { extractText, jsonString } from "../text.js";
 import { appendDelta, TranscriptWriter } from "../transcript.js";
 import type { AgentResult, RunnerOptions } from "../types.js";
@@ -130,7 +130,7 @@ export class CodexRunner {
 
   handleEvent(event: Record<string, unknown>, result: AgentResult): void {
     if (event.type === "thread.started") {
-      result.sessionId = String(event.thread_id || result.sessionId);
+      result.threadId = String(event.thread_id || result.threadId);
       return;
     }
     if (event.type === "turn.failed") {
@@ -176,7 +176,7 @@ export class CodexRunner {
 
   async runPrompt(promptText: string): Promise<AgentResult> {
     const { Codex } = await import("@openai/codex-sdk");
-    const stored = await readStoredSession(this.options.stateRoot, "codex");
+    const stored = await readStoredThread(this.options.stateRoot, "codex");
     const codex = new Codex({
       codexPathOverride: resolveCodexPath(),
       env: stringEnv(),
@@ -187,13 +187,13 @@ export class CodexRunner {
         ? { config: { developer_instructions: this.options.systemContext } }
         : {}),
     });
-    const thread = stored?.sessionId
-      ? codex.resumeThread(stored.sessionId, this.threadOptions())
+    const thread = stored?.threadId
+      ? codex.resumeThread(stored.threadId, this.threadOptions())
       : codex.startThread(this.threadOptions());
 
     const result: AgentResult = {
       provider: "codex",
-      sessionId: stored?.sessionId || "",
+      threadId: stored?.threadId || "",
       stopReason: "completed",
       finalText: "",
       transcript: "",
@@ -207,12 +207,12 @@ export class CodexRunner {
     for await (const event of events) {
       this.handleEvent(event as Record<string, unknown>, result);
     }
-    result.sessionId = thread.id || result.sessionId;
+    result.threadId = thread.id || result.threadId;
     result.transcript = this.writer.transcript();
     if (!result.finalText && result.transcript) {
       result.finalText = result.transcript;
     }
-    await writeStoredSession(this.options.stateRoot, "codex", result.sessionId);
+    await writeStoredThread(this.options.stateRoot, "codex", result.threadId);
     return result;
   }
 }

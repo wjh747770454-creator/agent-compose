@@ -29,11 +29,11 @@ type gitWorkspace struct {
 	workspace domain.WorkspaceConfig
 }
 
-func PrepareGitWorkspace(ctx context.Context, session *domain.Session, workspace domain.WorkspaceConfig) error {
+func PrepareGitWorkspace(ctx context.Context, session *domain.Sandbox, workspace domain.WorkspaceConfig) error {
 	return gitWorkspace{workspace: workspace}.Prepare(ctx, session)
 }
 
-func (w gitWorkspace) Prepare(ctx context.Context, session *domain.Session) error {
+func (w gitWorkspace) Prepare(ctx context.Context, session *domain.Sandbox) error {
 	var cfg GitWorkspaceConfig
 	if err := json.Unmarshal([]byte(w.workspace.ConfigJSON), &cfg); err != nil {
 		return fmt.Errorf("decode workspace config %s: %w", w.workspace.ID, err)

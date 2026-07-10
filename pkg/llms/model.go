@@ -59,7 +59,7 @@ type ResolvedTarget struct {
 }
 
 type FacadeToken struct {
-	SessionID        string
+	SandboxID        string
 	TokenHash        string
 	TokenFingerprint string
 	Model            string

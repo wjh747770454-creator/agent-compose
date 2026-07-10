@@ -11,7 +11,7 @@ import (
 
 func TestMicrosandboxStatsFromMetricsMapsStableMetrics(t *testing.T) {
 	stats := microsandboxStatsFromMetrics(
-		&Session{Summary: SessionSummary{ID: "session-1", Driver: RuntimeDriverMicrosandbox}},
+		&Sandbox{Summary: SandboxSummary{ID: "session-1", Driver: RuntimeDriverMicrosandbox}},
 		VMState{},
 		&microsandbox.Metrics{
 			CPUPercent:       12.5,
@@ -39,7 +39,7 @@ func TestMicrosandboxStatsFromMetricsMapsStableMetrics(t *testing.T) {
 }
 
 func TestMicrosandboxStatsFromNilMetricsReturnsUnknownFields(t *testing.T) {
-	stats := microsandboxStatsFromMetrics(&Session{Summary: SessionSummary{ID: "session-1"}}, VMState{}, nil)
+	stats := microsandboxStatsFromMetrics(&Sandbox{Summary: SandboxSummary{ID: "session-1"}}, VMState{}, nil)
 	if stats.CPUPercent.Status != MetricStatusUnknown || stats.MemoryUsageBytes.Value != nil {
 		t.Fatalf("nil metrics stats = %#v", stats)
 	}

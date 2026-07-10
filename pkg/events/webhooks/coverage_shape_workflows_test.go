@@ -137,6 +137,7 @@ func TestWebhookHTTPRoutesCoverageWorkflow(t *testing.T) {
 		"/api/events/event-1",
 		"/api/events?topic=webhook.github.push&limit=10",
 		"/api/events/event-1/sessions",
+		"/api/events/event-1/sandboxes",
 		"/api/events/event-1/runs",
 		"/api/webhook-sources",
 	} {
@@ -307,8 +308,8 @@ func (s *webhookRouteStore) ListDescendantEventIDs(context.Context, string, int)
 	return []string{"event-1"}, nil
 }
 
-func (s *webhookRouteStore) ListEventSessionLinks(context.Context, []string) ([]domain.EventSessionTraceItem, error) {
-	return []domain.EventSessionTraceItem{{EventID: "event-1", SessionID: "session-1", Relation: "created"}}, nil
+func (s *webhookRouteStore) ListEventSandboxLinks(context.Context, []string) ([]domain.EventSandboxTraceItem, error) {
+	return []domain.EventSandboxTraceItem{{EventID: "event-1", SandboxID: "session-1", Relation: "created"}}, nil
 }
 
 func (s *webhookRouteStore) ListEventDeliveries(context.Context, []string) ([]domain.EventDelivery, error) {

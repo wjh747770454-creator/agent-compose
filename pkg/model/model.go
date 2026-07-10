@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -12,23 +13,23 @@ const (
 	VMStatusStopped = "STOPPED"
 	VMStatusFailed  = "FAILED"
 
-	SessionTypeManual = "manual"
-	SessionTypeScript = "script"
+	SandboxTypeManual = "manual"
+	SandboxTypeScript = "script"
 )
 
-type SessionTag struct {
+type SandboxTag struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
-type SessionEnvVar struct {
+type SandboxEnvVar struct {
 	Name   string `json:"name"`
 	Value  string `json:"value,omitempty"`
 	Secret bool   `json:"secret,omitempty"`
 }
 
-func SessionEnvMap(groups ...[]SessionEnvVar) map[string]string {
-	var merged []SessionEnvVar
+func SandboxEnvMap(groups ...[]SandboxEnvVar) map[string]string {
+	var merged []SandboxEnvVar
 	for _, items := range groups {
 		merged = append(merged, items...)
 	}
@@ -49,11 +50,11 @@ func SessionEnvMap(groups ...[]SessionEnvVar) map[string]string {
 	return env
 }
 
-func NormalizeEnvItems(items []SessionEnvVar) []SessionEnvVar {
+func NormalizeEnvItems(items []SandboxEnvVar) []SandboxEnvVar {
 	if len(items) == 0 {
 		return nil
 	}
-	merged := make(map[string]SessionEnvVar, len(items))
+	merged := make(map[string]SandboxEnvVar, len(items))
 	for _, item := range items {
 		name := strings.TrimSpace(item.Name)
 		if name == "" {
@@ -70,15 +71,15 @@ func NormalizeEnvItems(items []SessionEnvVar) []SessionEnvVar {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	result := make([]SessionEnvVar, 0, len(keys))
+	result := make([]SandboxEnvVar, 0, len(keys))
 	for _, key := range keys {
 		result = append(result, merged[key])
 	}
 	return result
 }
 
-func MergeEnvItems(globalItems, sessionItems []SessionEnvVar) []SessionEnvVar {
-	merged := make(map[string]SessionEnvVar, len(globalItems)+len(sessionItems))
+func MergeEnvItems(globalItems, sessionItems []SandboxEnvVar) []SandboxEnvVar {
+	merged := make(map[string]SandboxEnvVar, len(globalItems)+len(sessionItems))
 	for _, item := range NormalizeEnvItems(globalItems) {
 		merged[item.Name] = item
 	}
@@ -93,14 +94,14 @@ func MergeEnvItems(globalItems, sessionItems []SessionEnvVar) []SessionEnvVar {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	result := make([]SessionEnvVar, 0, len(keys))
+	result := make([]SandboxEnvVar, 0, len(keys))
 	for _, key := range keys {
 		result = append(result, merged[key])
 	}
 	return result
 }
 
-type SessionSummary struct {
+type SandboxSummary struct {
 	ID            string       `json:"id"`
 	ShortID       string       `json:"short_id,omitempty"`
 	Title         string       `json:"title"`
@@ -116,11 +117,11 @@ type SessionSummary struct {
 	UpdatedAt     time.Time    `json:"updated_at"`
 	CellCount     int          `json:"cell_count"`
 	EventCount    int          `json:"event_count"`
-	Tags          []SessionTag `json:"tags,omitempty"`
+	Tags          []SandboxTag `json:"tags,omitempty"`
 }
 
-type SessionListOptions struct {
-	SessionType        string
+type SandboxListOptions struct {
+	SandboxType        string
 	TriggerSourceQuery string
 	TitleQuery         string
 	WorkspaceQuery     string
@@ -134,40 +135,40 @@ type SessionListOptions struct {
 	Limit              int
 }
 
-type SessionListResult struct {
-	Sessions   []*Session
+type SandboxListResult struct {
+	Sandboxes  []*Sandbox
 	TotalCount int
 	HasMore    bool
 	NextOffset int
 }
 
-type SessionWorkspace struct {
+type SandboxWorkspace struct {
 	ID         string `json:"id"`
 	Name       string `json:"name,omitempty"`
 	Type       string `json:"type,omitempty"`
 	ConfigJSON string `json:"config_json,omitempty"`
 }
 
-type Session struct {
-	Summary          SessionSummary       `json:"summary"`
+type Sandbox struct {
+	Summary          SandboxSummary       `json:"summary"`
 	BaseWorkspace    string               `json:"base_workspace,omitempty"`
 	WorkspaceID      string               `json:"workspace_id,omitempty"`
-	Workspace        *SessionWorkspace    `json:"workspace,omitempty"`
-	EnvItems         []SessionEnvVar      `json:"env_items,omitempty"`
-	VolumeMounts     []SessionVolumeMount `json:"volume_mounts,omitempty"`
-	RuntimeEnvItems  []SessionEnvVar      `json:"-"`
-	ProviderEnvItems []SessionEnvVar      `json:"-"`
+	Workspace        *SandboxWorkspace    `json:"workspace,omitempty"`
+	EnvItems         []SandboxEnvVar      `json:"env_items,omitempty"`
+	VolumeMounts     []SandboxVolumeMount `json:"volume_mounts,omitempty"`
+	RuntimeEnvItems  []SandboxEnvVar      `json:"-"`
+	ProviderEnvItems []SandboxEnvVar      `json:"-"`
 }
 
-func RestoreSessionTransientFields(dst, src *Session) {
+func RestoreSandboxTransientFields(dst, src *Sandbox) {
 	if dst == nil || src == nil {
 		return
 	}
 	if len(src.RuntimeEnvItems) > 0 {
-		dst.RuntimeEnvItems = append([]SessionEnvVar(nil), src.RuntimeEnvItems...)
+		dst.RuntimeEnvItems = append([]SandboxEnvVar(nil), src.RuntimeEnvItems...)
 	}
 	if len(src.ProviderEnvItems) > 0 {
-		dst.ProviderEnvItems = append([]SessionEnvVar(nil), src.ProviderEnvItems...)
+		dst.ProviderEnvItems = append([]SandboxEnvVar(nil), src.ProviderEnvItems...)
 	}
 }
 
@@ -182,29 +183,73 @@ type WorkspaceConfig struct {
 }
 
 type NotebookCell struct {
-	ID             string           `json:"id"`
-	Type           string           `json:"type,omitempty"`
-	Source         string           `json:"source"`
-	Stdout         string           `json:"stdout"`
-	Stderr         string           `json:"stderr"`
-	Output         string           `json:"output"`
-	ExitCode       int              `json:"exit_code"`
-	Success        bool             `json:"success"`
-	Running        bool             `json:"running,omitempty"`
-	CreatedAt      time.Time        `json:"created_at"`
-	Agent          string           `json:"agent,omitempty"`
-	AgentSessionID string           `json:"agent_session_id,omitempty"`
-	StopReason     string           `json:"stop_reason,omitempty"`
-	AgentResume    *AgentResumeInfo `json:"agent_resume,omitempty"`
+	ID            string           `json:"id"`
+	Type          string           `json:"type,omitempty"`
+	Source        string           `json:"source"`
+	Stdout        string           `json:"stdout"`
+	Stderr        string           `json:"stderr"`
+	Output        string           `json:"output"`
+	ExitCode      int              `json:"exit_code"`
+	Success       bool             `json:"success"`
+	Running       bool             `json:"running,omitempty"`
+	CreatedAt     time.Time        `json:"created_at"`
+	Agent         string           `json:"agent,omitempty"`
+	AgentThreadID string           `json:"agent_thread_id,omitempty"`
+	StopReason    string           `json:"stop_reason,omitempty"`
+	AgentResume   *AgentResumeInfo `json:"agent_resume,omitempty"`
+}
+
+func (c *NotebookCell) UnmarshalJSON(data []byte) error {
+	type notebookCellAlias NotebookCell
+	var decoded struct {
+		notebookCellAlias
+		LegacyAgentSessionID string `json:"agent_session_id"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*c = NotebookCell(decoded.notebookCellAlias)
+	if c.AgentThreadID == "" {
+		c.AgentThreadID = decoded.LegacyAgentSessionID
+	}
+	return nil
 }
 
 type AgentResumeInfo struct {
-	Provider            string    `json:"provider,omitempty"`
-	SessionID           string    `json:"session_id,omitempty"`
-	SessionStatePath    string    `json:"session_state_path,omitempty"`
-	SessionManifestPath string    `json:"session_manifest_path,omitempty"`
-	SessionJSONLPaths   []string  `json:"session_jsonl_paths,omitempty"`
-	UpdatedAt           time.Time `json:"updated_at,omitempty"`
+	Provider           string    `json:"provider,omitempty"`
+	ThreadID           string    `json:"thread_id,omitempty"`
+	ThreadStatePath    string    `json:"thread_state_path,omitempty"`
+	ThreadManifestPath string    `json:"thread_manifest_path,omitempty"`
+	ProviderLogPaths   []string  `json:"provider_log_paths,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at,omitempty"`
+}
+
+func (i *AgentResumeInfo) UnmarshalJSON(data []byte) error {
+	type agentResumeInfoAlias AgentResumeInfo
+	var decoded struct {
+		agentResumeInfoAlias
+		LegacySessionID           string   `json:"session_id"`
+		LegacySessionStatePath    string   `json:"session_state_path"`
+		LegacySessionManifestPath string   `json:"session_manifest_path"`
+		LegacySessionJSONLPaths   []string `json:"session_jsonl_paths"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*i = AgentResumeInfo(decoded.agentResumeInfoAlias)
+	if i.ThreadID == "" {
+		i.ThreadID = decoded.LegacySessionID
+	}
+	if i.ThreadStatePath == "" {
+		i.ThreadStatePath = decoded.LegacySessionStatePath
+	}
+	if i.ThreadManifestPath == "" {
+		i.ThreadManifestPath = decoded.LegacySessionManifestPath
+	}
+	if len(i.ProviderLogPaths) == 0 && len(decoded.LegacySessionJSONLPaths) > 0 {
+		i.ProviderLogPaths = append([]string(nil), decoded.LegacySessionJSONLPaths...)
+	}
+	return nil
 }
 
 type StdioStream string
@@ -226,7 +271,7 @@ type ExecChunk struct {
 	Stream StdioStream
 }
 
-type SessionEvent struct {
+type SandboxEvent struct {
 	ID        string    `json:"id"`
 	Type      string    `json:"type"`
 	Level     string    `json:"level"`
@@ -235,16 +280,32 @@ type SessionEvent struct {
 }
 
 type AgentRun struct {
-	ID             string    `json:"id"`
-	Agent          string    `json:"agent"`
-	Message        string    `json:"message"`
-	Output         string    `json:"output"`
-	ExitCode       int       `json:"exit_code"`
-	Success        bool      `json:"success"`
-	Running        bool      `json:"running,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	AgentSessionID string    `json:"agent_session_id,omitempty"`
-	StopReason     string    `json:"stop_reason,omitempty"`
+	ID            string    `json:"id"`
+	Agent         string    `json:"agent"`
+	Message       string    `json:"message"`
+	Output        string    `json:"output"`
+	ExitCode      int       `json:"exit_code"`
+	Success       bool      `json:"success"`
+	Running       bool      `json:"running,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	AgentThreadID string    `json:"agent_thread_id,omitempty"`
+	StopReason    string    `json:"stop_reason,omitempty"`
+}
+
+func (r *AgentRun) UnmarshalJSON(data []byte) error {
+	type agentRunAlias AgentRun
+	var decoded struct {
+		agentRunAlias
+		LegacyAgentSessionID string `json:"agent_session_id"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = AgentRun(decoded.agentRunAlias)
+	if r.AgentThreadID == "" {
+		r.AgentThreadID = decoded.LegacyAgentSessionID
+	}
+	return nil
 }
 
 type ExecResult struct {
@@ -330,7 +391,7 @@ type ProxyState struct {
 	Exposed    bool   `json:"exposed,omitempty"`
 }
 
-type SessionVMInfo struct {
+type SandboxVMInfo struct {
 	BoxID      string
 	JupyterURL string
 	ProxyState *ProxyState
@@ -351,6 +412,6 @@ type AgentRunResult struct {
 	Transcript    string
 	Success       bool
 	ExitCode      int
-	SessionID     string
+	ThreadID      string
 	StopReason    string
 }

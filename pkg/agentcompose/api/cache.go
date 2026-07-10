@@ -165,8 +165,8 @@ func RuntimeCacheDomainFromProto(domain agentcomposev2.CacheDomain) (runtimecach
 		return runtimecache.DomainMaterializedImageCache, nil
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE:
 		return runtimecache.DomainRuntimeDerivedCache, nil
-	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE:
-		return runtimecache.DomainSessionEphemeralState, nil
+	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE:
+		return runtimecache.DomainSandboxEphemeralState, nil
 	default:
 		return "", fmt.Errorf("%w: unknown domain %d", runtimecache.ErrInvalidFilter, domain)
 	}
@@ -180,8 +180,8 @@ func RuntimeCacheDomainToProto(domain runtimecache.Domain) agentcomposev2.CacheD
 		return agentcomposev2.CacheDomain_CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE
 	case runtimecache.DomainRuntimeDerivedCache:
 		return agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE
-	case runtimecache.DomainSessionEphemeralState:
-		return agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE
+	case runtimecache.DomainSandboxEphemeralState:
+		return agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE
 	default:
 		return agentcomposev2.CacheDomain_CACHE_DOMAIN_UNSPECIFIED
 	}
@@ -238,7 +238,6 @@ func RuntimeCacheItemToProto(item runtimecache.Item) *agentcomposev2.CacheItem {
 		ImageId:        item.ImageID,
 		ImageRef:       item.ImageRef,
 		ResolvedRef:    item.ResolvedRef,
-		SessionId:      item.SessionID,
 		SandboxId:      item.SandboxID,
 		Status:         RuntimeCacheStatusToProto(item.Status),
 		Removable:      item.Removable,

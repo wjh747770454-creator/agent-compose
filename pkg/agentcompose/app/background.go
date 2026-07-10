@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"agent-compose/pkg/agentcompose/adapters"
 	"agent-compose/pkg/capproxy"
 	"agent-compose/pkg/events"
 	"agent-compose/pkg/execution"
@@ -17,42 +18,47 @@ import (
 	"agent-compose/pkg/storage/sessionstore"
 )
 
-const stalePendingSessionLastError = "session startup interrupted before runtime reached running state"
+const stalePendingSandboxLastError = "sandbox startup interrupted before runtime reached running state"
 const staleProjectRunError = "daemon interrupted project run before reaching terminal state"
 
 type runtimeReconciler interface {
-	ReconcileRuntimeState(context.Context, *domain.Session) (*domain.Session, error)
+	ReconcileRuntimeState(context.Context, *domain.Sandbox) (*domain.Sandbox, error)
 }
 
 type backgroundLoaderManager interface {
 	Start()
 }
 
-func startBackgroundManagers(ctx context.Context, sessions *sessionstore.Store, configDB *configstore.ConfigStore, bridge runtimeReconciler, loaders backgroundLoaderManager, events *events.Dispatcher, capProxy *capproxy.Server) error {
+func startBackgroundManagers(ctx context.Context, sandboxes *sessionstore.Store, configDB *configstore.ConfigStore, bridge runtimeReconciler, loaders backgroundLoaderManager, events *events.Dispatcher, capProxy *capproxy.Server, capTokens *adapters.CapabilitySandboxResolver) error {
 	startedAt := time.Now().UTC()
 	reconcileCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := reconcilePersistedSessions(reconcileCtx, sessions, configDB, bridge, startedAt); err != nil {
-		slog.Warn("failed to reconcile persisted session state on startup", "error", err)
+	if err := reconcilePersistedSandboxes(reconcileCtx, sandboxes, configDB, bridge, startedAt); err != nil {
+		slog.Warn("failed to reconcile persisted sandbox state on startup", "error", err)
+	}
+	if capTokens != nil {
+		if err := capTokens.Rebuild(reconcileCtx); err != nil {
+			slog.Warn("failed to rebuild capability sandbox token index on startup", "error", err)
+		}
 	}
 	loaders.Start()
 	events.Start()
 	return startCapabilityProxy(ctx, capProxy)
 }
 
-func reconcilePersistedSessions(ctx context.Context, store *sessionstore.Store, configDB *configstore.ConfigStore, bridge runtimeReconciler, startedAt time.Time) error {
-	result, err := store.ListSessions(ctx, domain.SessionListOptions{Limit: 1 << 30})
+func reconcilePersistedSandboxes(ctx context.Context, store *sessionstore.Store, configDB *configstore.ConfigStore, bridge runtimeReconciler, startedAt time.Time) error {
+	result, err := store.ListSandboxes(ctx, domain.SandboxListOptions{Limit: 1 << 30})
 	if err != nil {
 		return err
 	}
-	for _, session := range result.Sessions {
-		reconciled, err := reconcilePendingSessionState(ctx, store, session, startedAt)
+	for _, session := range result.Sandboxes {
+		reconciled, err := reconcilePendingSandboxState(ctx, store, session, startedAt)
 		if err != nil {
-			slog.Warn("failed to reconcile pending session state", "session_id", session.Summary.ID, "error", err)
+			slog.Warn("failed to reconcile pending sandbox state", "sandbox_id", session.Summary.ID, "error", err)
 			continue
 		}
 		if _, err := bridge.ReconcileRuntimeState(ctx, reconciled); err != nil {
-			slog.Warn("failed to reconcile session runtime state", "session_id", session.Summary.ID, "error", err)
+			slog.Warn("failed to reconcile sandbox runtime state", "sandbox_id", session.Summary.ID, "error", err)
 		}
 	}
 	if err := reconcilePersistedProjectRuns(ctx, configDB, startedAt); err != nil {
@@ -61,7 +67,7 @@ func reconcilePersistedSessions(ctx context.Context, store *sessionstore.Store, 
 	return nil
 }
 
-func reconcilePendingSessionState(ctx context.Context, store *sessionstore.Store, session *domain.Session, startedAt time.Time) (*domain.Session, error) {
+func reconcilePendingSandboxState(ctx context.Context, store *sessionstore.Store, session *domain.Sandbox, startedAt time.Time) (*domain.Sandbox, error) {
 	if session == nil || session.Summary.VMStatus != domain.VMStatusPending {
 		return session, nil
 	}
@@ -79,23 +85,23 @@ func reconcilePendingSessionState(ctx context.Context, store *sessionstore.Store
 	vmState.StoppedAt = now
 	vmState.BoxID = ""
 	if strings.TrimSpace(vmState.LastError) == "" {
-		vmState.LastError = stalePendingSessionLastError
+		vmState.LastError = stalePendingSandboxLastError
 	}
 	if err := store.SaveVMState(session.Summary.ID, vmState); err != nil {
 		return nil, err
 	}
 	session.Summary.VMStatus = domain.VMStatusFailed
-	if err := store.UpdateSession(ctx, session); err != nil {
+	if err := store.UpdateSandbox(ctx, session); err != nil {
 		return nil, err
 	}
-	_ = store.AddEvent(ctx, session.Summary.ID, domain.SessionEvent{
+	_ = store.AddEvent(ctx, session.Summary.ID, domain.SandboxEvent{
 		ID:        uuid.NewString(),
-		Type:      "session.startup_interrupted",
+		Type:      "sandbox.startup_interrupted",
 		Level:     "warn",
-		Message:   "session marked failed after a previous startup was interrupted before the VM became ready",
+		Message:   "sandbox marked failed after a previous startup was interrupted before the VM became ready",
 		CreatedAt: now,
 	})
-	return store.GetSession(ctx, session.Summary.ID)
+	return store.GetSandbox(ctx, session.Summary.ID)
 }
 
 func reconcilePersistedProjectRuns(ctx context.Context, configDB *configstore.ConfigStore, startedAt time.Time) error {

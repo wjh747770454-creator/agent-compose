@@ -52,15 +52,15 @@ func TopicEventToJSON(item domain.TopicEventRecord) TopicEventJSON {
 	return out
 }
 
-func EventSessionsResponseFor(item domain.TopicEventRecord, links []domain.EventSessionTraceItem) EventSessionsResponse {
-	resp := EventSessionsResponse{
+func EventSandboxesResponseFor(item domain.TopicEventRecord, links []domain.EventSandboxTraceItem) EventSandboxesResponse {
+	resp := EventSandboxesResponse{
 		EventID:       item.ID,
 		CorrelationID: item.CorrelationID,
-		Sessions:      make([]EventSessionJSON, 0, len(links)),
+		Sandboxes:     make([]EventSandboxJSON, 0, len(links)),
 	}
 	for _, link := range links {
-		resp.Sessions = append(resp.Sessions, EventSessionJSON{
-			SessionID:     link.SessionID,
+		resp.Sandboxes = append(resp.Sandboxes, EventSandboxJSON{
+			SandboxID:     link.SandboxID,
 			Relation:      link.Relation,
 			LoaderID:      link.LoaderID,
 			RunID:         link.RunID,

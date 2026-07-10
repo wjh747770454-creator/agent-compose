@@ -16,7 +16,7 @@ describe("commander CLI", () => {
   it("prints the prefixed result for prompt command", async () => {
     const runPrompt = vi.spyOn(promptModule, "runPromptCommand").mockResolvedValue({
       provider: "codex",
-      sessionId: "s1",
+      threadId: "s1",
       stopReason: "completed",
       finalText: "done",
       json: null,
@@ -57,7 +57,7 @@ describe("commander CLI", () => {
       model: "anthropic/claude-sonnet-4-5",
       outputSchemaFile: "/tmp/schema.json",
     });
-    expect(stdio.stdout).toBe(`${RESULT_PREFIX}{"provider":"codex","sessionId":"s1","stopReason":"completed","finalText":"done","json":null,"transcript":"done","stderr":""}\n`);
+    expect(stdio.stdout).toBe(`${RESULT_PREFIX}{"provider":"codex","threadId":"s1","stopReason":"completed","finalText":"done","json":null,"transcript":"done","stderr":""}\n`);
     expect(stdio.stderr).toBe("");
   });
 
@@ -185,7 +185,7 @@ describe("commander CLI", () => {
   it("main parses argv through the configured program", async () => {
     vi.spyOn(promptModule, "runPromptCommand").mockResolvedValue({
       provider: "codex",
-      sessionId: "s2",
+      threadId: "s2",
       stopReason: "completed",
       finalText: "ok",
       json: null,
@@ -198,7 +198,7 @@ describe("commander CLI", () => {
     } finally {
       stdio.restore();
     }
-    expect(stdio.stdout).toContain("\"sessionId\":\"s2\"");
+    expect(stdio.stdout).toContain("\"threadId\":\"s2\"");
   });
 
   it("recognizes a symlinked bin path as the main module", async () => {
@@ -228,7 +228,7 @@ describe("commander CLI", () => {
       await fs.writeFile(systemPromptPath, "system body", "utf8");
       const runPrompt = vi.fn().mockResolvedValue({
         provider: "gemini",
-        sessionId: "",
+        threadId: "",
         stopReason: "completed",
         finalText: "ok",
         transcript: "ok",
@@ -285,7 +285,7 @@ describe("commander CLI", () => {
 
       const runPrompt = vi.fn().mockResolvedValue({
         provider: "codex",
-        sessionId: "",
+        threadId: "",
         stopReason: "completed",
         finalText: "ok",
         transcript: "ok",

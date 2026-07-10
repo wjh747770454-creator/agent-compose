@@ -1,6 +1,6 @@
 # @chaitin-ai/agent-compose-runtime
 
-`@chaitin-ai/agent-compose-runtime` is the guest-side runtime package used by agent-compose agent sessions. It exposes the compatible CLI entrypoint:
+`@chaitin-ai/agent-compose-runtime` is the guest-side runtime package used by agent-compose agent sandboxes. It exposes the compatible CLI entrypoint:
 
 ```sh
 agent-compose-runtime prompt \
@@ -43,4 +43,4 @@ The TypeScript source lives in `src/`:
 - `system-context.ts`: agent identity + MPI composition.
 - `runners/`: provider adapters for Codex, Claude, and Gemini.
 - `mpi.ts`: MPI catalog discovery and context formatting.
-- `session-state.ts`: provider resume state persistence.
+- `session-state.ts`: provider thread resume state persistence.

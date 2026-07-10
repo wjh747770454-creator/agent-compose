@@ -21,8 +21,8 @@ func testRuntimeMountConfig() *appconfig.Config {
 	}
 }
 
-func testRuntimeMountSession(root string) *Session {
-	return &Session{Summary: SessionSummary{
+func testRuntimeMountSandbox(root string) *Sandbox {
+	return &Sandbox{Summary: SandboxSummary{
 		ID:            "session-1",
 		WorkspacePath: filepath.Join(root, "workspace"),
 	}}
@@ -39,40 +39,40 @@ func TestRuntimeMountEntriesDefineSharedLogicalMountList(t *testing.T) {
 		got[entry.guestPath] = entry
 	}
 	want := map[string]struct {
-		sessionPath string
+		sandboxPath string
 		isFile      bool
 		exposure    directoryOnlyExposure
 	}{
-		"/workspace":                {sessionPath: "workspace", exposure: directoryOnlyExposureSymlink},
-		"/data/state":               {sessionPath: "state", exposure: directoryOnlyExposureAlreadyInData},
-		"/data/runtime":             {sessionPath: "runtime", exposure: directoryOnlyExposureAlreadyInData},
-		"/data/logs":                {sessionPath: "logs", exposure: directoryOnlyExposureAlreadyInData},
-		"/root/.codex":              {sessionPath: "home/.codex", exposure: directoryOnlyExposureSymlink},
-		"/root/.claude":             {sessionPath: "home/.claude", exposure: directoryOnlyExposureSymlink},
-		"/root/.opencode":           {sessionPath: "home/.opencode", exposure: directoryOnlyExposureSymlink},
-		"/root/.claude.json":        {sessionPath: "home/.claude.json", isFile: true, exposure: directoryOnlyExposureSymlink},
-		"/root/.gitconfig":          {sessionPath: "home/.gitconfig", isFile: true, exposure: directoryOnlyExposureSymlink},
-		"/root/.gemini":             {sessionPath: "home/.gemini", exposure: directoryOnlyExposureSymlink},
-		"/root/.config/claude":      {sessionPath: "home/.config/claude", exposure: directoryOnlyExposureSymlink},
-		"/root/.config/Claude":      {sessionPath: "home/.config/Claude", exposure: directoryOnlyExposureSymlink},
-		"/root/.config/gemini":      {sessionPath: "home/.config/gemini", exposure: directoryOnlyExposureSymlink},
-		"/root/.config/opencode":    {sessionPath: "home/.config/opencode", exposure: directoryOnlyExposureSymlink},
-		"/root/.local/share/gemini": {sessionPath: "home/.local/share/gemini", exposure: directoryOnlyExposureSymlink},
+		"/workspace":                {sandboxPath: "workspace", exposure: directoryOnlyExposureSymlink},
+		"/data/state":               {sandboxPath: "state", exposure: directoryOnlyExposureAlreadyInData},
+		"/data/runtime":             {sandboxPath: "runtime", exposure: directoryOnlyExposureAlreadyInData},
+		"/data/logs":                {sandboxPath: "logs", exposure: directoryOnlyExposureAlreadyInData},
+		"/root/.codex":              {sandboxPath: "home/.codex", exposure: directoryOnlyExposureSymlink},
+		"/root/.claude":             {sandboxPath: "home/.claude", exposure: directoryOnlyExposureSymlink},
+		"/root/.opencode":           {sandboxPath: "home/.opencode", exposure: directoryOnlyExposureSymlink},
+		"/root/.claude.json":        {sandboxPath: "home/.claude.json", isFile: true, exposure: directoryOnlyExposureSymlink},
+		"/root/.gitconfig":          {sandboxPath: "home/.gitconfig", isFile: true, exposure: directoryOnlyExposureSymlink},
+		"/root/.gemini":             {sandboxPath: "home/.gemini", exposure: directoryOnlyExposureSymlink},
+		"/root/.config/claude":      {sandboxPath: "home/.config/claude", exposure: directoryOnlyExposureSymlink},
+		"/root/.config/Claude":      {sandboxPath: "home/.config/Claude", exposure: directoryOnlyExposureSymlink},
+		"/root/.config/gemini":      {sandboxPath: "home/.config/gemini", exposure: directoryOnlyExposureSymlink},
+		"/root/.config/opencode":    {sandboxPath: "home/.config/opencode", exposure: directoryOnlyExposureSymlink},
+		"/root/.local/share/gemini": {sandboxPath: "home/.local/share/gemini", exposure: directoryOnlyExposureSymlink},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("logical mount count = %d, want %d: %#v", len(got), len(want), got)
 	}
 	for guestPath, wantEntry := range want {
 		entry := got[guestPath]
-		if entry.sessionPath != wantEntry.sessionPath || entry.isFile != wantEntry.isFile || entry.directoryOnlyExposure != wantEntry.exposure {
-			t.Fatalf("logical entry %s = %#v, want sessionPath=%s isFile=%v exposure=%s", guestPath, entry, wantEntry.sessionPath, wantEntry.isFile, wantEntry.exposure)
+		if entry.sandboxPath != wantEntry.sandboxPath || entry.isFile != wantEntry.isFile || entry.directoryOnlyExposure != wantEntry.exposure {
+			t.Fatalf("logical entry %s = %#v, want sandboxPath=%s isFile=%v exposure=%s", guestPath, entry, wantEntry.sandboxPath, wantEntry.isFile, wantEntry.exposure)
 		}
 	}
 }
 
 func TestPrepareRuntimeMountManifestForDockerIncludesRequiredMountsOnly(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	manifest, err := prepareRuntimeMountManifest(testRuntimeMountConfig(), session, RuntimeDriverDocker)
 	if err != nil {
 		t.Fatalf("prepareRuntimeMountManifest returned error: %v", err)
@@ -92,7 +92,7 @@ func TestPrepareRuntimeMountManifestForDockerIncludesRequiredMountsOnly(t *testi
 	}
 	want := map[string]string{}
 	for _, entry := range runtimeMountEntries(testRuntimeMountConfig()) {
-		want[entry.guestPath] = filepath.Join(root, filepath.FromSlash(entry.sessionPath))
+		want[entry.guestPath] = filepath.Join(root, filepath.FromSlash(entry.sandboxPath))
 	}
 	if len(got) != len(want) {
 		t.Fatalf("manifest mount count = %d, want %d: %+v", len(got), len(want), got)
@@ -111,11 +111,11 @@ func TestPrepareRuntimeMountManifestForDockerIncludesRequiredMountsOnly(t *testi
 	}
 }
 
-func TestPrepareRuntimeMountManifestForDockerIncludesSessionVolumeMounts(t *testing.T) {
+func TestPrepareRuntimeMountManifestForDockerIncludesSandboxVolumeMounts(t *testing.T) {
 	root := t.TempDir()
 	volumeSource := t.TempDir()
-	session := testRuntimeMountSession(root)
-	session.VolumeMounts = []SessionVolumeMount{{
+	session := testRuntimeMountSandbox(root)
+	session.VolumeMounts = []SandboxVolumeMount{{
 		ID:       "mount-cache",
 		Type:     "volume",
 		Source:   "cache",
@@ -149,8 +149,8 @@ func TestPrepareRuntimeMountManifestForDockerPreservesVolumeMountEdges(t *testin
 	sharedSource := t.TempDir()
 	nestedSource := t.TempDir()
 	readonlySource := t.TempDir()
-	session := testRuntimeMountSession(root)
-	session.VolumeMounts = []SessionVolumeMount{
+	session := testRuntimeMountSandbox(root)
+	session.VolumeMounts = []SandboxVolumeMount{
 		{
 			ID:       "mount-shared-a",
 			Type:     "volume",
@@ -216,11 +216,11 @@ func TestPrepareRuntimeMountManifestForDockerPreservesVolumeMountEdges(t *testin
 	}
 }
 
-func TestPrepareRuntimeMountManifestForMicrosandboxIncludesSessionVolumeMounts(t *testing.T) {
+func TestPrepareRuntimeMountManifestForMicrosandboxIncludesSandboxVolumeMounts(t *testing.T) {
 	root := t.TempDir()
 	volumeSource := t.TempDir()
-	session := testRuntimeMountSession(root)
-	session.VolumeMounts = []SessionVolumeMount{{
+	session := testRuntimeMountSandbox(root)
+	session.VolumeMounts = []SandboxVolumeMount{{
 		ID:       "mount-cache",
 		Type:     "bind",
 		Source:   "./cache",
@@ -235,8 +235,8 @@ func TestPrepareRuntimeMountManifestForMicrosandboxIncludesSessionVolumeMounts(t
 	for _, mount := range manifest.Mounts {
 		got[mount.GuestPath] = mount
 	}
-	if got[directoryOnlyGuestSessionPath].HostPath != root {
-		t.Fatalf("microsandbox session mount = %+v", got[directoryOnlyGuestSessionPath])
+	if got[directoryOnlyGuestSandboxPath].HostPath != root {
+		t.Fatalf("microsandbox sandbox mount = %+v", got[directoryOnlyGuestSandboxPath])
 	}
 	if got["/cache"].HostPath != volumeSource || got["/cache"].ReadOnly {
 		t.Fatalf("microsandbox volume mount = %+v", got["/cache"])
@@ -246,8 +246,8 @@ func TestPrepareRuntimeMountManifestForMicrosandboxIncludesSessionVolumeMounts(t
 func TestPrepareRuntimeMountManifestForBoxliteUsesVolumeBridge(t *testing.T) {
 	root := t.TempDir()
 	volumeSource := t.TempDir()
-	session := testRuntimeMountSession(root)
-	session.VolumeMounts = []SessionVolumeMount{{
+	session := testRuntimeMountSandbox(root)
+	session.VolumeMounts = []SandboxVolumeMount{{
 		ID:       "mount-a8f37c92e51b4d10",
 		Type:     "bind",
 		Source:   "./cache",
@@ -276,8 +276,8 @@ func TestPrepareRuntimeMountManifestForBoxliteUsesVolumeBridge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareRuntimeMountManifest returned error: %v", err)
 	}
-	if len(manifest.Mounts) != 1 || manifest.Mounts[0].GuestPath != directoryOnlyGuestSessionPath || manifest.Mounts[0].HostPath != root {
-		t.Fatalf("boxlite manifest mounts = %+v, want single session dir mount", manifest.Mounts)
+	if len(manifest.Mounts) != 1 || manifest.Mounts[0].GuestPath != directoryOnlyGuestSandboxPath || manifest.Mounts[0].HostPath != root {
+		t.Fatalf("boxlite manifest mounts = %+v, want single sandbox dir mount", manifest.Mounts)
 	}
 	bridgePath := filepath.Join(root, "volumes", "mount-a8f37c92e51b4d10")
 	info, err := os.Stat(bridgePath)
@@ -304,8 +304,8 @@ func TestPrepareRuntimeMountManifestForBoxliteRollsBackBridgeMountsOnFailure(t *
 	root := t.TempDir()
 	firstSource := t.TempDir()
 	secondSource := t.TempDir()
-	session := testRuntimeMountSession(root)
-	session.VolumeMounts = []SessionVolumeMount{
+	session := testRuntimeMountSandbox(root)
+	session.VolumeMounts = []SandboxVolumeMount{
 		{
 			ID:       "mount-first",
 			Type:     "bind",
@@ -353,7 +353,7 @@ func TestPrepareRuntimeMountManifestForBoxliteRollsBackBridgeMountsOnFailure(t *
 
 func TestPrepareRuntimeMountManifestIgnoresCustomGuestHomePath(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	config := testRuntimeMountConfig()
 	config.GuestHomePath = "/home/ignored"
 	manifest, err := prepareRuntimeMountManifest(config, session, RuntimeDriverDocker)
@@ -390,7 +390,7 @@ func TestPrepareRuntimeMountManifestIgnoresCustomGuestHomePath(t *testing.T) {
 
 func TestPrepareRuntimeMountManifestCreatesSourcesAndWritesFile(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	manifest, err := prepareRuntimeMountManifest(testRuntimeMountConfig(), session, RuntimeDriverDocker)
 	if err != nil {
 		t.Fatalf("prepareRuntimeMountManifest returned error: %v", err)
@@ -428,11 +428,11 @@ func TestPrepareRuntimeMountManifestCreatesSourcesAndWritesFile(t *testing.T) {
 	}
 }
 
-func TestPrepareRuntimeMountManifestForDirectoryOnlyDriversMountsSingleSessionDirectory(t *testing.T) {
+func TestPrepareRuntimeMountManifestForDirectoryOnlyDriversMountsSingleSandboxDirectory(t *testing.T) {
 	for _, driver := range []string{RuntimeDriverBoxlite, RuntimeDriverMicrosandbox} {
 		t.Run(driver, func(t *testing.T) {
 			root := t.TempDir()
-			session := testRuntimeMountSession(root)
+			session := testRuntimeMountSandbox(root)
 			manifest, err := prepareRuntimeMountManifest(testRuntimeMountConfig(), session, driver)
 			if err != nil {
 				t.Fatalf("prepareRuntimeMountManifest returned error: %v", err)
@@ -451,7 +451,7 @@ func TestPrepareRuntimeMountManifestForDirectoryOnlyDriversMountsSingleSessionDi
 					t.Fatalf("directory-only manifest contains file source %s", mount.HostPath)
 				}
 			}
-			want := map[string]string{directoryOnlyGuestSessionPath: root}
+			want := map[string]string{directoryOnlyGuestSandboxPath: root}
 			if len(got) != len(want) {
 				t.Fatalf("manifest mount count = %d, want %d: %+v", len(got), len(want), got)
 			}
@@ -468,22 +468,22 @@ func TestPrepareRuntimeMountManifestForDirectoryOnlyDriversMountsSingleSessionDi
 			for _, requiredDir := range []string{"workspace", "state", "runtime", "logs", "home"} {
 				info, err := os.Stat(filepath.Join(root, requiredDir))
 				if err != nil {
-					t.Fatalf("expected session dir %s to exist: %v", requiredDir, err)
+					t.Fatalf("expected sandbox dir %s to exist: %v", requiredDir, err)
 				}
 				if !info.IsDir() {
-					t.Fatalf("session path %s is not a directory", requiredDir)
+					t.Fatalf("sandbox path %s is not a directory", requiredDir)
 				}
 			}
 			for _, entry := range runtimeMountEntries(testRuntimeMountConfig()) {
 				if entry.isFile {
 					continue
 				}
-				info, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.sessionPath)))
+				info, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.sandboxPath)))
 				if err != nil {
-					t.Fatalf("expected logical directory source %s to exist: %v", entry.sessionPath, err)
+					t.Fatalf("expected logical directory source %s to exist: %v", entry.sandboxPath, err)
 				}
 				if !info.IsDir() {
-					t.Fatalf("logical source %s is not a directory", entry.sessionPath)
+					t.Fatalf("logical source %s is not a directory", entry.sandboxPath)
 				}
 			}
 			for _, requiredFile := range []string{".claude.json", ".gitconfig"} {
@@ -499,8 +499,8 @@ func TestPrepareRuntimeMountManifestForDirectoryOnlyDriversMountsSingleSessionDi
 	}
 }
 
-func TestDirectoryOnlyGuestSessionBootstrapUsesDataMountRoot(t *testing.T) {
-	command := directoryOnlyGuestSessionBootstrapCommand(testRuntimeMountConfig())
+func TestDirectoryOnlyGuestSandboxBootstrapUsesDataMountRoot(t *testing.T) {
+	command := directoryOnlyGuestSandboxBootstrapCommand(testRuntimeMountConfig())
 	for _, required := range []string{
 		"test -d '/data/workspace'",
 		"test -d '/data/home'",
@@ -545,17 +545,17 @@ func TestDirectoryOnlyGuestSessionBootstrapUsesDataMountRoot(t *testing.T) {
 	assertSubstringOrder(t, command, "test -d '/root' ||", "ln -s '/data/home/.codex' '/root/.codex'")
 }
 
-func TestBoxliteDirectoryOnlyGuestSessionBootstrapIncludesVolumeSymlinks(t *testing.T) {
+func TestBoxliteDirectoryOnlyGuestSandboxBootstrapIncludesVolumeSymlinks(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
-	session.VolumeMounts = []SessionVolumeMount{{
+	session := testRuntimeMountSandbox(root)
+	session.VolumeMounts = []SandboxVolumeMount{{
 		ID:       "mount-a8f37c92e51b4d10",
 		Type:     "volume",
 		Source:   "cache",
 		Target:   "/cache",
 		HostPath: t.TempDir(),
 	}}
-	command := directoryOnlyGuestSessionBootstrapCommandForSession(testRuntimeMountConfig(), session)
+	command := directoryOnlyGuestSandboxBootstrapCommandForSandbox(testRuntimeMountConfig(), session)
 	for _, required := range []string{
 		"ln -s '/data/volumes/mount-a8f37c92e51b4d10' '/cache'",
 		"test \"$(readlink '/cache')\" = '/data/volumes/mount-a8f37c92e51b4d10'",
@@ -569,8 +569,8 @@ func TestBoxliteDirectoryOnlyGuestSessionBootstrapIncludesVolumeSymlinks(t *test
 	}
 }
 
-func TestDirectoryOnlyGuestSessionBootstrapReplacesImageHomeTargets(t *testing.T) {
-	command := directoryOnlyGuestSessionBootstrapCommand(testRuntimeMountConfig())
+func TestDirectoryOnlyGuestSandboxBootstrapReplacesImageHomeTargets(t *testing.T) {
+	command := directoryOnlyGuestSandboxBootstrapCommand(testRuntimeMountConfig())
 	for _, required := range []string{
 		"rm -rf '/root/.codex'; ln -s '/data/home/.codex' '/root/.codex'",
 		"rm -rf '/root/.claude'; ln -s '/data/home/.claude' '/root/.claude'",
@@ -579,7 +579,7 @@ func TestDirectoryOnlyGuestSessionBootstrapReplacesImageHomeTargets(t *testing.T
 		"rm -rf '/root/.gitconfig'; ln -s '/data/home/.gitconfig' '/root/.gitconfig'",
 	} {
 		if !strings.Contains(command, required) {
-			t.Fatalf("bootstrap command should replace image target with session symlink %q: %s", required, command)
+			t.Fatalf("bootstrap command should replace image target with sandbox symlink %q: %s", required, command)
 		}
 	}
 	if strings.Contains(command, "refusing to replace existing directory-only symlink target /root/.codex") {
@@ -640,7 +640,7 @@ func TestBackgroundJupyterLaunchCommandStartsBeforeJupyterLabImportProbe(t *test
 
 func TestPrepareRuntimeMountManifestRegeneratesForDriverSwitch(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	config := testRuntimeMountConfig()
 	if _, err := prepareRuntimeMountManifest(config, session, RuntimeDriverDocker); err != nil {
 		t.Fatalf("prepare docker manifest: %v", err)
@@ -668,7 +668,7 @@ func TestPrepareRuntimeMountManifestRegeneratesForDriverSwitch(t *testing.T) {
 
 func TestLoadRuntimeMountManifestValidatesExpectedDriver(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	if _, err := prepareRuntimeMountManifest(testRuntimeMountConfig(), session, RuntimeDriverDocker); err != nil {
 		t.Fatalf("prepareRuntimeMountManifest returned error: %v", err)
 	}
@@ -679,7 +679,7 @@ func TestLoadRuntimeMountManifestValidatesExpectedDriver(t *testing.T) {
 
 func TestLoadDirectoryRuntimeMountManifestRejectsFileSource(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	if _, err := prepareRuntimeMountManifest(testRuntimeMountConfig(), session, RuntimeDriverDocker); err != nil {
 		t.Fatalf("prepareRuntimeMountManifest returned error: %v", err)
 	}
@@ -702,7 +702,7 @@ func testRuntimeMountManifestDriverSpecificStartPreparationWorkflow(t *testing.T
 		GuestRuntimeRoot:   "/data/runtime",
 		GuestLogRoot:       "/data/logs",
 	}
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	if _, err := prepareRuntimeMountManifest(config, session, RuntimeDriverDocker); err != nil {
 		t.Fatalf("prepare docker manifest returned error: %v", err)
 	}
@@ -730,8 +730,8 @@ func testRuntimeMountManifestDriverSpecificStartPreparationWorkflow(t *testing.T
 	for _, mount := range boxliteManifest.Mounts {
 		boxliteMounts[mount.GuestPath] = mount.HostPath
 	}
-	if boxliteMounts[directoryOnlyGuestSessionPath] != hostSessionDir(session) {
-		t.Fatalf("boxlite session source = %q, want %q", boxliteMounts[directoryOnlyGuestSessionPath], hostSessionDir(session))
+	if boxliteMounts[directoryOnlyGuestSandboxPath] != hostSandboxDir(session) {
+		t.Fatalf("boxlite sandbox source = %q, want %q", boxliteMounts[directoryOnlyGuestSandboxPath], hostSandboxDir(session))
 	}
 	for _, guestPath := range []string{"/root/.claude.json", "/root/.gitconfig"} {
 		if boxliteMounts[guestPath] != "" {
@@ -740,11 +740,11 @@ func testRuntimeMountManifestDriverSpecificStartPreparationWorkflow(t *testing.T
 	}
 }
 
-func TestInitializeSessionHomeDefaultsCreatesWritableCodexConfig(t *testing.T) {
+func TestInitializeSandboxHomeDefaultsCreatesWritableCodexConfig(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
-	if err := initializeSessionHomeDefaults(session); err != nil {
-		t.Fatalf("initializeSessionHomeDefaults returned error: %v", err)
+	session := testRuntimeMountSandbox(root)
+	if err := initializeSandboxHomeDefaults(session); err != nil {
+		t.Fatalf("initializeSandboxHomeDefaults returned error: %v", err)
 	}
 	codexConfig := filepath.Join(root, "home", ".codex", "config.toml")
 	info, err := os.Stat(codexConfig)
@@ -759,9 +759,9 @@ func TestInitializeSessionHomeDefaultsCreatesWritableCodexConfig(t *testing.T) {
 	}
 }
 
-func TestInitializeSessionHomeDefaultsDoesNotOverwriteExistingTargets(t *testing.T) {
+func TestInitializeSandboxHomeDefaultsDoesNotOverwriteExistingTargets(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	codexConfig := filepath.Join(root, "home", ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(codexConfig), 0o755); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
@@ -773,8 +773,8 @@ func TestInitializeSessionHomeDefaultsDoesNotOverwriteExistingTargets(t *testing
 	if err := os.WriteFile(gitconfig, []byte("[user]\n\tname = Custom\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	if err := initializeSessionHomeDefaults(session); err != nil {
-		t.Fatalf("initializeSessionHomeDefaults returned error: %v", err)
+	if err := initializeSandboxHomeDefaults(session); err != nil {
+		t.Fatalf("initializeSandboxHomeDefaults returned error: %v", err)
 	}
 	assertFileContent(t, codexConfig, "custom = true\n")
 	assertFileContent(t, gitconfig, "[user]\n\tname = Custom\n")
@@ -785,7 +785,7 @@ func TestInitializeSessionHomeDefaultsDoesNotOverwriteExistingTargets(t *testing
 
 func TestLoadRuntimeMountManifestValidatesContent(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	path := runtimeMountManifestPath(session)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
@@ -800,7 +800,7 @@ func TestLoadRuntimeMountManifestValidatesContent(t *testing.T) {
 
 func TestRuntimeMountManifestExportedWrappers(t *testing.T) {
 	root := t.TempDir()
-	session := testRuntimeMountSession(root)
+	session := testRuntimeMountSandbox(root)
 	config := testRuntimeMountConfig()
 
 	dockerManifest, err := PrepareRuntimeMountManifest(config, session, RuntimeDriverDocker)

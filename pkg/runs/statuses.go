@@ -8,45 +8,42 @@ import (
 	domain "agent-compose/pkg/model"
 )
 
-type ProjectSessionRunStore interface {
-	ListProjectSessionRuns(context.Context, domain.ProjectSessionRelationFilter) ([]domain.ProjectRunRecord, error)
+type ProjectSandboxRunStore interface {
+	ListProjectSandboxRuns(context.Context, domain.ProjectSandboxRelationFilter) ([]domain.ProjectRunRecord, error)
 }
 
-type SessionStore interface {
-	GetSession(context.Context, string) (*domain.Session, error)
+type SandboxStore interface {
+	GetSandbox(context.Context, string) (*domain.Sandbox, error)
 }
 
-func ListProjectSessionStatuses(ctx context.Context, runStore ProjectSessionRunStore, sessionStore SessionStore, filter domain.ProjectSessionRelationFilter) ([]domain.ProjectSessionStatus, error) {
+func ListProjectSandboxStatuses(ctx context.Context, runStore ProjectSandboxRunStore, sandboxStore SandboxStore, filter domain.ProjectSandboxRelationFilter) ([]domain.ProjectSandboxStatus, error) {
 	if runStore == nil {
 		return nil, fmt.Errorf("config store is required")
 	}
-	if sessionStore == nil {
-		return nil, fmt.Errorf("session store is required")
+	if sandboxStore == nil {
+		return nil, fmt.Errorf("sandbox store is required")
 	}
-	runs, err := runStore.ListProjectSessionRuns(ctx, filter)
+	runs, err := runStore.ListProjectSandboxRuns(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
-	items := make([]domain.ProjectSessionStatus, 0, len(runs))
-	seenSessions := make(map[string]struct{}, len(runs))
+	items := make([]domain.ProjectSandboxStatus, 0, len(runs))
+	seenSandboxes := make(map[string]struct{}, len(runs))
 	for _, run := range runs {
-		sessionID := strings.TrimSpace(run.SandboxID)
-		if sessionID == "" {
-			sessionID = strings.TrimSpace(run.SessionID)
-		}
-		if sessionID == "" {
+		sandboxID := strings.TrimSpace(run.SandboxID)
+		if sandboxID == "" {
 			continue
 		}
-		if _, ok := seenSessions[sessionID]; ok {
+		if _, ok := seenSandboxes[sandboxID]; ok {
 			continue
 		}
-		seenSessions[sessionID] = struct{}{}
-		item := domain.ProjectSessionStatus{Run: run}
-		session, err := sessionStore.GetSession(ctx, sessionID)
+		seenSandboxes[sandboxID] = struct{}{}
+		item := domain.ProjectSandboxStatus{Run: run}
+		sandbox, err := sandboxStore.GetSandbox(ctx, sandboxID)
 		if err != nil {
-			item.SessionMissing = true
+			item.SandboxMissing = true
 		} else {
-			item.Session = session
+			item.Sandbox = sandbox
 		}
 		items = append(items, item)
 	}

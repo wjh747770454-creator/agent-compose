@@ -16,24 +16,24 @@ import (
 	"agent-compose/pkg/storage/sessionstore"
 )
 
-type SessionDriver struct {
+type SandboxDriver struct {
 	Config   *appconfig.Config
 	Store    *sessionstore.Store
 	ConfigDB *configstore.ConfigStore
 	Runtimes RuntimeProvider
 }
 
-var ensureSessionLLMFacadeConfig = runtimefacade.EnsureSessionLLMFacadeConfig
+var ensureSandboxLLMFacadeConfig = runtimefacade.EnsureSessionLLMFacadeConfig
 
-func NewSessionDriver(config *appconfig.Config, store *sessionstore.Store, configDB *configstore.ConfigStore, runtimes RuntimeProvider) *SessionDriver {
-	return &SessionDriver{Config: config, Store: store, ConfigDB: configDB, Runtimes: runtimes}
+func NewSandboxDriver(config *appconfig.Config, store *sessionstore.Store, configDB *configstore.ConfigStore, runtimes RuntimeProvider) *SandboxDriver {
+	return &SandboxDriver{Config: config, Store: store, ConfigDB: configDB, Runtimes: runtimes}
 }
 
-func (d *SessionDriver) StartSessionVM(ctx context.Context, session *domain.Session) error {
-	ctx, cancel := context.WithTimeout(ctx, d.Config.SessionStartTimeout)
+func (d *SandboxDriver) StartSandboxVM(ctx context.Context, session *domain.Sandbox) error {
+	ctx, cancel := context.WithTimeout(ctx, d.Config.SandboxStartTimeout)
 	defer cancel()
 
-	driver, err := driverpkg.ResolveSessionRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
+	driver, err := driverpkg.ResolveSandboxRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
 	if err != nil {
 		return err
 	}
@@ -54,13 +54,13 @@ func (d *SessionDriver) StartSessionVM(ctx context.Context, session *domain.Sess
 	vmState.Mode = driver
 	vmState.BoxName = firstNonEmpty(vmState.BoxName, session.Summary.RuntimeRef)
 	vmState.RuntimeHome = firstNonEmpty(vmState.RuntimeHome, driverpkg.RuntimeHomeForDriver(d.Config, driver))
-	if err := d.prepareSessionStart(ctx, driver, session, &vmState); err != nil {
+	if err := d.prepareSandboxStart(ctx, driver, session, &vmState); err != nil {
 		vmState.LastError = err.Error()
 		_ = d.Store.SaveVMState(session.Summary.ID, vmState)
 		return err
 	}
 
-	info, err := runtime.EnsureSession(ctx, session, vmState, proxyState)
+	info, err := runtime.EnsureSandbox(ctx, session, vmState, proxyState)
 	if err != nil {
 		vmState.LastError = err.Error()
 		vmState.StoppedAt = time.Time{}
@@ -68,10 +68,10 @@ func (d *SessionDriver) StartSessionVM(ctx context.Context, session *domain.Sess
 		return err
 	}
 
-	return d.saveSessionStartInfo(session, vmState, proxyState, info)
+	return d.saveSandboxStartInfo(session, vmState, proxyState, info)
 }
 
-func (d *SessionDriver) saveSessionStartInfo(session *domain.Session, vmState domain.VMState, proxyState domain.ProxyState, info domain.SessionVMInfo) error {
+func (d *SandboxDriver) saveSandboxStartInfo(session *domain.Sandbox, vmState domain.VMState, proxyState domain.ProxyState, info domain.SandboxVMInfo) error {
 	vmState, proxyState = sessions.ApplySessionStartInfo(vmState, proxyState, info, time.Now())
 	if err := d.Store.SaveVMState(session.Summary.ID, vmState); err != nil {
 		return err
@@ -79,12 +79,12 @@ func (d *SessionDriver) saveSessionStartInfo(session *domain.Session, vmState do
 	return d.Store.SaveProxyState(session.Summary.ID, proxyState)
 }
 
-func (d *SessionDriver) StopSessionVM(ctx context.Context, session *domain.Session) error {
-	driver, err := driverpkg.ResolveSessionRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
+func (d *SandboxDriver) StopSandboxVM(ctx context.Context, session *domain.Sandbox) error {
+	driver, err := driverpkg.ResolveSandboxRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, driverpkg.SessionStopContextTimeout(driver, d.Config.SessionStopTimeout))
+	ctx, cancel := context.WithTimeout(ctx, driverpkg.SandboxStopContextTimeout(driver, d.Config.SandboxStopTimeout))
 	defer cancel()
 
 	runtime, err := d.Runtimes.ForDriver(driver)
@@ -96,7 +96,7 @@ func (d *SessionDriver) StopSessionVM(ctx context.Context, session *domain.Sessi
 	if err != nil {
 		return err
 	}
-	missing, err := runtime.StopSession(ctx, session, vmState)
+	missing, err := runtime.StopSandbox(ctx, session, vmState)
 	if err != nil {
 		vmState.LastError = err.Error()
 		_ = d.Store.SaveVMState(session.Summary.ID, vmState)
@@ -109,21 +109,21 @@ func (d *SessionDriver) StopSessionVM(ctx context.Context, session *domain.Sessi
 		vmState.BoxID = ""
 	}
 	if d.ConfigDB != nil {
-		if err := d.ConfigDB.RevokeLLMFacadeTokensForSession(ctx, session.Summary.ID); err != nil {
+		if err := d.ConfigDB.RevokeLLMFacadeTokensForSandbox(ctx, session.Summary.ID); err != nil {
 			return err
 		}
 	}
 	return d.Store.SaveVMState(session.Summary.ID, vmState)
 }
 
-func (d *SessionDriver) prepareSessionStart(ctx context.Context, driver string, session *domain.Session, vmState *domain.VMState) error {
-	prepared, err := driverpkg.PrepareSessionStart(ctx, d.Config, driver, execution.ToDriverSession(session), execution.ToDriverVMState(*vmState))
+func (d *SandboxDriver) prepareSandboxStart(ctx context.Context, driver string, session *domain.Sandbox, vmState *domain.VMState) error {
+	prepared, err := driverpkg.PrepareSandboxStart(ctx, d.Config, driver, execution.ToDriverSandbox(session), execution.ToDriverVMState(*vmState))
 	if err != nil {
 		return err
 	}
 	managedEnv := map[string]string{}
 	for _, agent := range []string{"codex", "claude"} {
-		agentEnv, err := ensureSessionLLMFacadeConfig(ctx, d.Config, facadeStoreFor(d.ConfigDB), session, agent, "", "session", "")
+		agentEnv, err := ensureSandboxLLMFacadeConfig(ctx, d.Config, facadeStoreFor(d.ConfigDB), session, agent, "", "session", "")
 		if err != nil {
 			if agent == "claude" && runtimefacade.IsOptionalConfigError(err) {
 				continue

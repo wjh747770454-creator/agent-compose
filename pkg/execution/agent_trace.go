@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 )
 
-func AgentTraceEvents(transcript string, createdAt time.Time) []domain.SessionEvent {
+func AgentTraceEvents(transcript string, createdAt time.Time) []domain.SandboxEvent {
 	lines := strings.Split(transcript, "\n")
-	events := make([]domain.SessionEvent, 0)
+	events := make([]domain.SandboxEvent, 0)
 	for index := 0; index < len(lines); index++ {
 		line := strings.TrimSpace(lines[index])
 		eventType, name, ok := ParseAgentTraceMarker(line)
@@ -27,7 +27,7 @@ func AgentTraceEvents(transcript string, createdAt time.Time) []domain.SessionEv
 				message += "\n" + strings.TrimSpace(details)
 			}
 		}
-		events = append(events, domain.SessionEvent{
+		events = append(events, domain.SandboxEvent{
 			ID:        uuid.NewString(),
 			Type:      eventType,
 			Level:     "info",

@@ -1321,7 +1321,7 @@ agents:
 							Changes: []*agentcomposev2.ProjectChange{
 								{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_REMOVED, ResourceType: "project", ResourceId: "project-down", Name: "cli-down-demo", Message: "removed by project down"},
 								{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "project_scheduler", ResourceId: "scheduler-reviewer", Name: "reviewer", Message: "disabled by project down"},
-								{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "session", ResourceId: "session-1", Name: "reviewer run", Message: "stopped by project down"},
+								{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "sandbox", ResourceId: "session-1", Name: "reviewer run", Message: "stopped by project down"},
 							},
 						}), nil
 					}
@@ -1366,7 +1366,7 @@ agents:
 					return connect.NewResponse(&agentcomposev2.RemoveProjectResponse{
 						Project: testCLIProject("project-down", "cli-down-demo", "compose.yml"),
 						Changes: []*agentcomposev2.ProjectChange{
-							{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "session", ResourceId: "session-1", Name: "reviewer run", Message: "stopped by project down"},
+							{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "sandbox", ResourceId: "session-1", Name: "reviewer run", Message: "stopped by project down"},
 						},
 					}), nil
 				},
@@ -1390,11 +1390,11 @@ agents:
 			"    \"scheduler_count\": 1\n" +
 			"  },\n" +
 			"  \"status\": \"down\",\n" +
-			"  \"failed_session_stops\": 0,\n" +
+			"  \"failed_sandbox_stops\": 0,\n" +
 			"  \"changes\": [\n" +
 			"    {\n" +
 			"      \"action\": \"updated\",\n" +
-			"      \"resource_type\": \"session\",\n" +
+			"      \"resource_type\": \"sandbox\",\n" +
 			"      \"id\": \"session-1\",\n" +
 			"      \"short_id\": \"session-1\",\n" +
 			"      \"name\": \"reviewer run\",\n" +
@@ -1413,8 +1413,8 @@ agents:
 					return connect.NewResponse(&agentcomposev2.RemoveProjectResponse{
 						Project: testCLIProject("project-down", "cli-down-demo", "compose.yml"),
 						Changes: []*agentcomposev2.ProjectChange{
-							{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "session", ResourceId: "session-ok", Name: "reviewer ok", Message: "stopped by project down"},
-							{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UNCHANGED, ResourceType: "session", ResourceId: "session-failed", Name: "reviewer failed", Message: "failed to stop by project down: forced stop failure"},
+							{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UPDATED, ResourceType: "sandbox", ResourceId: "session-ok", Name: "reviewer ok", Message: "stopped by project down"},
+							{Action: agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UNCHANGED, ResourceType: "sandbox", ResourceId: "session-failed", Name: "reviewer failed", Message: "failed to stop by project down: forced stop failure"},
 						},
 					}), nil
 				},
@@ -1449,10 +1449,10 @@ agents:
 	server := newRunServiceStubServer(t, runServiceStub{
 		runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
 			sawRequest = true
-			if req.Msg.GetAgentName() != "reviewer" || req.Msg.GetPrompt() != "check this" || req.Msg.GetSessionId() != "session-reuse" || req.Msg.GetTriggerId() != "" {
+			if req.Msg.GetAgentName() != "reviewer" || req.Msg.GetPrompt() != "check this" || req.Msg.GetSandboxId() != "session-reuse" || req.Msg.GetTriggerId() != "" {
 				t.Fatalf("RunAgentStream request = %#v", req.Msg)
 			}
-			if req.Msg.GetSource() != agentcomposev2.RunSource_RUN_SOURCE_MANUAL || req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING {
+			if req.Msg.GetSource() != agentcomposev2.RunSource_RUN_SOURCE_MANUAL || req.Msg.GetCleanupPolicy() != agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING {
 				t.Fatalf("RunAgentStream source/cleanup = %#v", req.Msg)
 			}
 			if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
@@ -1476,7 +1476,7 @@ agents:
 					ProjectId: req.Msg.GetProjectId(),
 					AgentName: "reviewer",
 					Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-					SessionId: "session-reuse",
+					SandboxId: "session-reuse",
 				},
 			})
 		},
@@ -1531,7 +1531,7 @@ agents:
 			startRun: func(ctx context.Context, req *connect.Request[agentcomposev2.StartRunRequest]) (*connect.Response[agentcomposev2.StartRunResponse], error) {
 				sawStart = true
 				runReq := req.Msg.GetRun()
-				if runReq.GetAgentName() != "reviewer" || runReq.GetCommand() != "echo detached" || runReq.GetSessionId() != "" || runReq.GetDriver() != "microsandbox" {
+				if runReq.GetAgentName() != "reviewer" || runReq.GetCommand() != "echo detached" || runReq.GetSandboxId() != "" || runReq.GetDriver() != "microsandbox" {
 					t.Fatalf("StartRun request = %#v", runReq)
 				}
 				if runReq.GetSource() != agentcomposev2.RunSource_RUN_SOURCE_MANUAL {
@@ -1544,7 +1544,7 @@ agents:
 						ProjectName: "cli-run-detach",
 						AgentName:   "reviewer",
 						Status:      agentcomposev2.RunStatus_RUN_STATUS_PENDING,
-						SessionId:   "sandbox-detached",
+						SandboxId:   "sandbox-detached",
 						Source:      agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
 					},
 					Warnings: []string{"detached warning"},
@@ -1599,7 +1599,7 @@ agents:
 						ProjectName: "cli-run-detach-json",
 						AgentName:   "reviewer",
 						Status:      agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
-						SessionId:   "sandbox-json",
+						SandboxId:   "sandbox-json",
 						Source:      agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
 						Warnings:    []string{"summary warning"},
 					},
@@ -1648,7 +1648,7 @@ agents:
 					ProjectId: req.Msg.GetRun().GetProjectId(),
 					AgentName: "reviewer",
 					Status:    agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
-					SessionId: "sandbox-detached-logs",
+					SandboxId: "sandbox-detached-logs",
 					Source:    agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
 				}, Started: true}), nil
 			},
@@ -1709,7 +1709,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-jupyter",
+						SandboxId: "sandbox-jupyter",
 					},
 				})
 			},
@@ -1767,7 +1767,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-command",
+						SandboxId: "sandbox-command",
 					},
 				})
 			},
@@ -1808,11 +1808,11 @@ agents:
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
 				prompts = append(prompts, req.Msg.GetPrompt())
-				sessions = append(sessions, req.Msg.GetSessionId())
+				sessions = append(sessions, req.Msg.GetSandboxId())
 				if req.Msg.GetCommand() != "" || req.Msg.GetTriggerId() != "" {
 					t.Fatalf("RunAgentStream interactive prompt request = %#v", req.Msg)
 				}
-				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING {
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING {
 					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
 				}
 				runID := fmt.Sprintf("run-repl-%d", len(prompts))
@@ -1831,7 +1831,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-repl",
+						SandboxId: "sandbox-repl",
 					},
 				})
 			},
@@ -1872,7 +1872,7 @@ agents:
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
 				drivers = append(drivers, req.Msg.GetDriver())
 				prompts = append(prompts, req.Msg.GetPrompt())
-				sessions = append(sessions, req.Msg.GetSessionId())
+				sessions = append(sessions, req.Msg.GetSandboxId())
 				if req.Msg.GetCommand() != "" || req.Msg.GetTriggerId() != "" {
 					t.Fatalf("RunAgentStream interactive prompt request = %#v", req.Msg)
 				}
@@ -1892,7 +1892,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-driver-repl",
+						SandboxId: "sandbox-driver-repl",
 					},
 				})
 			},
@@ -1934,11 +1934,11 @@ agents:
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
 				commands = append(commands, req.Msg.GetCommand())
-				sessions = append(sessions, req.Msg.GetSessionId())
+				sessions = append(sessions, req.Msg.GetSandboxId())
 				if req.Msg.GetPrompt() != "" || req.Msg.GetTriggerId() != "" {
 					t.Fatalf("RunAgentStream interactive command request = %#v", req.Msg)
 				}
-				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING {
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING {
 					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
 				}
 				runID := fmt.Sprintf("run-command-repl-%d", len(commands))
@@ -1957,7 +1957,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-command-repl",
+						SandboxId: "sandbox-command-repl",
 					},
 				})
 			},
@@ -2002,7 +2002,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-repl-rm",
+						SandboxId: "sandbox-repl-rm",
 					},
 				})
 			},
@@ -2041,8 +2041,8 @@ agents:
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
-				if req.Msg.GetSessionId() != "sandbox-existing" {
-					t.Fatalf("RunAgentStream session = %q, want sandbox-existing", req.Msg.GetSessionId())
+				if req.Msg.GetSandboxId() != "sandbox-existing" {
+					t.Fatalf("RunAgentStream sandbox = %q, want sandbox-existing", req.Msg.GetSandboxId())
 				}
 				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
 					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
@@ -2052,7 +2052,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-existing",
+						SandboxId: "sandbox-existing",
 					},
 				})
 			},
@@ -2110,7 +2110,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-default-provider",
+						SandboxId: "sandbox-default-provider",
 					},
 				})
 			},
@@ -2266,7 +2266,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-scheduler-trigger",
+						SandboxId: "sandbox-scheduler-trigger",
 					},
 				})
 			},
@@ -2518,7 +2518,7 @@ agents:
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
-				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION {
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION {
 					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
 				}
 				if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
@@ -2536,7 +2536,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-rm",
+						SandboxId: "sandbox-rm",
 					},
 				})
 			},
@@ -2566,7 +2566,7 @@ agents:
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
-				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION {
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION {
 					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
 				}
 				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
@@ -2621,7 +2621,7 @@ agents:
 					ProjectId: req.Msg.GetProjectId(),
 					AgentName: "reviewer",
 					Status:    agentcomposev2.RunStatus_RUN_STATUS_FAILED,
-					SessionId: "session-failed",
+					SandboxId: "session-failed",
 					ExitCode:  7,
 					Error:     "agent execution failed",
 				},
@@ -2657,7 +2657,7 @@ agents:
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
-				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION {
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION {
 					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
 				}
 				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
@@ -2668,7 +2668,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_FAILED,
-						SessionId: "sandbox-failed",
+						SandboxId: "sandbox-failed",
 						ExitCode:  9,
 						Error:     "failed before cleanup",
 					},
@@ -2700,7 +2700,7 @@ agents:
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
-				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION {
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION {
 					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
 				}
 				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
@@ -2711,7 +2711,7 @@ agents:
 						ProjectId: req.Msg.GetProjectId(),
 						AgentName: "reviewer",
 						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SessionId: "sandbox-rm-error",
+						SandboxId: "sandbox-rm-error",
 					},
 				})
 			},
@@ -2747,12 +2747,12 @@ agents:
 		listRuns: func(ctx context.Context, req *connect.Request[agentcomposev2.ListRunsRequest]) (*connect.Response[agentcomposev2.ListRunsResponse], error) {
 			switch req.Msg.GetLimit() {
 			case 200:
-				if req.Msg.GetSessionId() != "" || req.Msg.GetSandboxId() != "" {
+				if req.Msg.GetSandboxId() != "" {
 					t.Fatalf("ListRuns resolver request = %#v", req.Msg)
 				}
 			case 20:
 				sawFilteredList = true
-				if req.Msg.GetAgentName() != "reviewer" || req.Msg.GetSandboxId() != sandboxID || req.Msg.GetSessionId() != "" {
+				if req.Msg.GetAgentName() != "reviewer" || req.Msg.GetSandboxId() != sandboxID {
 					t.Fatalf("ListRuns filtered request = %#v", req.Msg)
 				}
 			default:
@@ -2824,7 +2824,7 @@ agents:
 				ProjectId: req.Msg.GetProjectId(),
 				AgentName: "reviewer",
 				Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-				SessionId: "session-tail",
+				SandboxId: "session-tail",
 			}}}), nil
 		},
 		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -2883,14 +2883,14 @@ agents:
 					ProjectId: req.Msg.GetProjectId(),
 					AgentName: "reviewer",
 					Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-					SessionId: "session-reviewer",
+					SandboxId: "session-reviewer",
 				},
 				{
 					RunId:     "run-writer",
 					ProjectId: req.Msg.GetProjectId(),
 					AgentName: "writer",
 					Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-					SessionId: "session-writer",
+					SandboxId: "session-writer",
 				},
 			}}), nil
 		},
@@ -3042,7 +3042,7 @@ agents:
 				ProjectId: req.Msg.GetProjectId(),
 				AgentName: "reviewer",
 				Status:    agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
-				SessionId: "session-follow",
+				SandboxId: "session-follow",
 			}}}), nil
 		},
 		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -3109,7 +3109,7 @@ agents:
 				ProjectId: req.Msg.GetProjectId(),
 				AgentName: "reviewer",
 				Status:    agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
-				SessionId: "session-follow-empty",
+				SandboxId: "session-follow-empty",
 			}}}), nil
 		},
 		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -3221,8 +3221,8 @@ agents:
 	t.Setenv("AGENT_COMPOSE_SOCKET", socketPath)
 	t.Setenv("AGENT_COMPOSE_HOST", "")
 	t.Setenv("RUNTIME_DRIVER", config.RuntimeDriverDocker)
-	t.Setenv("SESSION_START_TIMEOUT", "1s")
-	t.Setenv("SESSION_STOP_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_START_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_STOP_TIMEOUT", "1s")
 	t.Setenv("LLM_API_ENDPOINT", "")
 	t.Setenv("BOXLITE_HOME", filepath.Join(root, "boxlite"))
 	t.Setenv("BOXLITE_RUNTIME_DIR", filepath.Join(root, "boxlite-runtime"))
@@ -3288,7 +3288,7 @@ agents:
 			ProjectId: project.GetSummary().GetProjectId(),
 			AgentName: "reviewer",
 			Status:    agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
-			SessionId: "session-running",
+			SandboxId: "session-running",
 			CreatedAt: "2026-06-11T00:00:00Z",
 			UpdatedAt: "2026-06-11T00:00:01Z",
 		},
@@ -3297,7 +3297,7 @@ agents:
 			ProjectId: project.GetSummary().GetProjectId(),
 			AgentName: "worker",
 			Status:    agentcomposev2.RunStatus_RUN_STATUS_FAILED,
-			SessionId: "session-error",
+			SandboxId: "session-error",
 			CreatedAt: "2026-06-11T00:00:02Z",
 			UpdatedAt: "2026-06-11T00:00:03Z",
 		},
@@ -3338,10 +3338,10 @@ agents:
 	if decoded.Project.Name != "cli-ps-demo" || len(decoded.Sandboxes) != 1 {
 		t.Fatalf("ps JSON project/sandboxes = %#v", decoded)
 	}
-	if decoded.Sandboxes[0].ID != "session-running" || decoded.Sandboxes[0].Agent != "reviewer" || decoded.Sandboxes[0].Status != "running" || decoded.Sandboxes[0].RunID != "run-running" {
+	if decoded.Sandboxes[0].SandboxID != "session-running" || decoded.Sandboxes[0].Agent != "reviewer" || decoded.Sandboxes[0].Status != "running" || decoded.Sandboxes[0].RunID != "run-running" {
 		t.Fatalf("ps sandbox JSON = %#v", decoded.Sandboxes[0])
 	}
-	if stdout == "" || !strings.Contains(stdout, `"id"`) || strings.Contains(stdout, `"session_id"`) {
+	if stdout == "" || !strings.Contains(stdout, `"sandbox_id"`) || !strings.Contains(stdout, `"sandbox_short_id"`) || strings.Contains(stdout, `"session_id"`) {
 		t.Fatalf("ps JSON sandbox field shape = %q", stdout)
 	}
 
@@ -3517,7 +3517,7 @@ agents:
 		t.Helper()
 		result := map[string]bool{}
 		for _, sandbox := range output.Matched {
-			result[sandbox.ID] = true
+			result[sandbox.SandboxID] = true
 		}
 		return result
 	}
@@ -3677,11 +3677,11 @@ agents:
 			}
 			var skipped []string
 			for _, item := range decoded.Skipped {
-				skipped = append(skipped, item.Sandbox)
+				skipped = append(skipped, item.SandboxID)
 				if !strings.Contains(item.Reason, "remove failed") {
 					t.Fatalf("skipped reason = %q", item.Reason)
 				}
-				if item.Sandbox == "session-remove-b" && (item.Agent != "worker" || item.Status != "failed") {
+				if item.SandboxID == "session-remove-b" && (item.Agent != "worker" || item.Status != "failed") {
 					t.Fatalf("skipped metadata = %#v, want worker/failed context", item)
 				}
 			}
@@ -3692,7 +3692,7 @@ agents:
 				t.Fatalf("RemoveSandbox calls = %#v, want %#v", removed, tc.wantRemoveSeq)
 			}
 			for _, item := range decoded.Matched {
-				if item.ID == "session-running" || item.ID == "session-foreign" {
+				if item.SandboxID == "session-running" || item.SandboxID == "session-foreign" {
 					t.Fatalf("matched unsafe/unowned sandbox in forced prune: %#v", decoded.Matched)
 				}
 			}
@@ -3924,7 +3924,7 @@ agents:
 				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(projectID, req.Msg.GetRunId(), "reviewer", sandboxID, agentcomposev2.RunStatus_RUN_STATUS_RUNNING, 0, "ok")}), nil
 			},
 			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
-				runSandbox = req.Msg.GetSessionId()
+				runSandbox = req.Msg.GetSandboxId()
 				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
 					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
 					RunId:     runID,
@@ -3947,12 +3947,12 @@ agents:
 		},
 		exec: execServiceStub{
 			execStream: func(ctx context.Context, req *connect.Request[agentcomposev2.ExecRequest], stream *connect.ServerStream[agentcomposev2.ExecStreamResponse]) error {
-				execSandbox = req.Msg.GetSessionId()
+				execSandbox = req.Msg.GetSandboxId()
 				return stream.Send(&agentcomposev2.ExecStreamResponse{
 					EventType: agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_COMPLETED,
 					Result: &agentcomposev2.ExecResult{
 						ExecId:    "exec-short",
-						SessionId: req.Msg.GetSessionId(),
+						SandboxId: req.Msg.GetSandboxId(),
 						Command:   req.Msg.GetCommand(),
 						Success:   true,
 					},
@@ -4005,9 +4005,9 @@ func TestIntegrationCLIResumeSandboxesJSON(t *testing.T) {
 		t.Fatalf("resume JSON decode failed: %v\n%s", err, stdout)
 	}
 	if len(decoded.Results) != 2 ||
-		decoded.Results[0].Sandbox != "sandbox-a" ||
+		decoded.Results[0].SandboxID != "sandbox-a" ||
 		decoded.Results[0].Status != "resumed" ||
-		decoded.Results[1].Sandbox != "sandbox-b" ||
+		decoded.Results[1].SandboxID != "sandbox-b" ||
 		decoded.Results[1].Status != "resumed" {
 		t.Fatalf("resume JSON = %#v", decoded)
 	}
@@ -4062,7 +4062,7 @@ func TestIntegrationCLIStatsTableAndJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonOut), &decoded); err != nil {
 		t.Fatalf("stats JSON decode failed: %v\n%s", err, jsonOut)
 	}
-	if decoded.ID != "sandbox-stats" || decoded.Driver != "docker" || decoded.MemoryLimitBytes.Status != "unknown" || decoded.MemoryLimitBytes.Value != nil {
+	if decoded.SandboxID != "sandbox-stats" || decoded.Driver != "docker" || decoded.MemoryLimitBytes.Status != "unknown" || decoded.MemoryLimitBytes.Value != nil {
 		t.Fatalf("stats JSON = %#v", decoded)
 	}
 	if decoded.CPUPercent.Value == nil || *decoded.CPUPercent.Value != 12.5 {
@@ -4090,9 +4090,9 @@ agents:
 		testCLISessionSummary("session-foreign", "RUNNING", "foreign-project", "reviewer", "run-foreign"),
 	}
 	runs := []*agentcomposev2.RunSummary{
-		{RunId: "run-one", ProjectId: project.GetSummary().GetProjectId(), AgentName: "reviewer", Status: agentcomposev2.RunStatus_RUN_STATUS_RUNNING, SessionId: "session-one", UpdatedAt: "2026-06-11T00:00:01Z"},
-		{RunId: "run-two", ProjectId: project.GetSummary().GetProjectId(), AgentName: "worker", Status: agentcomposev2.RunStatus_RUN_STATUS_RUNNING, SessionId: "session-two", UpdatedAt: "2026-06-11T00:00:02Z"},
-		{RunId: "run-stopped", ProjectId: project.GetSummary().GetProjectId(), AgentName: "reviewer", Status: agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, SessionId: "session-stopped", UpdatedAt: "2026-06-11T00:00:03Z"},
+		{RunId: "run-one", ProjectId: project.GetSummary().GetProjectId(), AgentName: "reviewer", Status: agentcomposev2.RunStatus_RUN_STATUS_RUNNING, SandboxId: "session-one", UpdatedAt: "2026-06-11T00:00:01Z"},
+		{RunId: "run-two", ProjectId: project.GetSummary().GetProjectId(), AgentName: "worker", Status: agentcomposev2.RunStatus_RUN_STATUS_RUNNING, SandboxId: "session-two", UpdatedAt: "2026-06-11T00:00:02Z"},
+		{RunId: "run-stopped", ProjectId: project.GetSummary().GetProjectId(), AgentName: "reviewer", Status: agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, SandboxId: "session-stopped", UpdatedAt: "2026-06-11T00:00:03Z"},
 	}
 	var statsCalls []string
 	server := newComposeServiceStubServer(t, composeServiceStubs{
@@ -4160,7 +4160,7 @@ agents:
 	if decoded.Project.Name != "cli-stats-demo" || len(decoded.Stats) != 2 {
 		t.Fatalf("stats JSON project/stats = %#v", decoded)
 	}
-	if decoded.Stats[0].ID != "session-one" || decoded.Stats[1].ID != "session-two" {
+	if decoded.Stats[0].SandboxID != "session-one" || decoded.Stats[1].SandboxID != "session-two" {
 		t.Fatalf("stats JSON order = %#v", decoded.Stats)
 	}
 	if strings.Contains(jsonOut, "session-stopped") || strings.Contains(jsonOut, "session-foreign") {
@@ -4281,7 +4281,7 @@ func TestIntegrationCLIRemoveSandboxes(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonOut), &decoded); err != nil {
 		t.Fatalf("rm JSON decode failed: %v\n%s", err, jsonOut)
 	}
-	if len(decoded.Results) != 2 || decoded.Results[0].Sandbox != "sandbox-b" || decoded.Results[0].Status != "removed" || decoded.Results[1].Sandbox != "sandbox-c" {
+	if len(decoded.Results) != 2 || decoded.Results[0].SandboxID != "sandbox-b" || decoded.Results[0].Status != "removed" || decoded.Results[1].SandboxID != "sandbox-c" {
 		t.Fatalf("rm JSON = %#v", decoded)
 	}
 	if len(removed) != 3 || removed[1].force || removed[2].force {
@@ -4376,13 +4376,13 @@ agents:
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		exec: execServiceStub{
 			execStream: func(ctx context.Context, req *connect.Request[agentcomposev2.ExecRequest], stream *connect.ServerStream[agentcomposev2.ExecStreamResponse]) error {
-				if req.Msg.GetSessionId() == "sandbox-exec" {
+				if req.Msg.GetSandboxId() == "sandbox-exec" {
 					sawSandbox = true
 					if req.Msg.GetCommand().GetCommand() != "bash" || req.Msg.GetCommand().GetArgs()[0] != "-lc" {
 						t.Fatalf("ExecStream sandbox request = %#v", req.Msg)
 					}
 				}
-				if req.Msg.GetSessionId() == "sandbox-command" {
+				if req.Msg.GetSandboxId() == "sandbox-command" {
 					sawCommand = true
 					if req.Msg.GetCommand().GetCommand() != "bash" || len(req.Msg.GetCommand().GetArgs()) != 2 || req.Msg.GetCommand().GetArgs()[0] != "-lc" || req.Msg.GetCommand().GetArgs()[1] != "git status --short" {
 						t.Fatalf("ExecStream --command request = %#v", req.Msg)
@@ -4397,7 +4397,7 @@ agents:
 				if err := stream.Send(&agentcomposev2.ExecStreamResponse{
 					EventType:  agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_OUTPUT,
 					ExecId:     "exec-cli",
-					SessionId:  "session-exec",
+					SandboxId:  "session-exec",
 					RunId:      "run-exec",
 					Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT, Text: "exec stdout"},
 				}); err != nil {
@@ -4406,7 +4406,7 @@ agents:
 				if err := stream.Send(&agentcomposev2.ExecStreamResponse{
 					EventType:  agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_OUTPUT,
 					ExecId:     "exec-cli",
-					SessionId:  "session-exec",
+					SandboxId:  "session-exec",
 					RunId:      "run-exec",
 					Transcript: &agentcomposev2.TranscriptEvent{Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDERR, Text: "exec stderr"},
 				}); err != nil {
@@ -4415,11 +4415,11 @@ agents:
 				return stream.Send(&agentcomposev2.ExecStreamResponse{
 					EventType: agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_COMPLETED,
 					ExecId:    "exec-cli",
-					SessionId: "session-exec",
+					SandboxId: "session-exec",
 					RunId:     "run-exec",
 					Result: &agentcomposev2.ExecResult{
 						ExecId:    "exec-cli",
-						SessionId: "session-exec",
+						SandboxId: "session-exec",
 						RunId:     "run-exec",
 						Command:   req.Msg.GetCommand(),
 						Cwd:       req.Msg.GetCwd(),
@@ -4543,7 +4543,7 @@ agents:
 	}
 }
 
-func TestIntegrationCLIExecAmbiguousSessionIsUsageError(t *testing.T) {
+func TestIntegrationCLIExecAmbiguousSandboxIsUsageError(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-exec-ambiguous
 agents:
@@ -4553,7 +4553,7 @@ agents:
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		exec: execServiceStub{
 			execStream: func(ctx context.Context, req *connect.Request[agentcomposev2.ExecRequest], stream *connect.ServerStream[agentcomposev2.ExecStreamResponse]) error {
-				return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("multiple running sessions found for project cli-exec-ambiguous agent reviewer"))
+				return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("multiple running sandboxes found for project cli-exec-ambiguous agent reviewer"))
 			},
 		},
 	})
@@ -4563,7 +4563,7 @@ agents:
 	if exitCode != exitCodeUsage {
 		t.Fatalf("exec ambiguous exit code = %d, want %d; stderr=%q", exitCode, exitCodeUsage, stderr)
 	}
-	if stdout != "" || !strings.Contains(stderr, "multiple running sessions") {
+	if stdout != "" || !strings.Contains(stderr, "multiple running sandboxes") {
 		t.Fatalf("exec ambiguous stdout/stderr = %q / %q", stdout, stderr)
 	}
 }
@@ -4599,7 +4599,7 @@ agents:
 					ProjectId: req.Msg.GetProjectId(),
 					AgentName: "reviewer",
 					Status:    agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
-					SessionId: "session-inspect",
+					SandboxId: "session-inspect",
 				}}}), nil
 			},
 			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -4654,11 +4654,11 @@ agents:
 	if sandboxCode != 0 || sandboxErr != "" {
 		t.Fatalf("inspect sandbox code/stderr = %d / %q", sandboxCode, sandboxErr)
 	}
-	var sandboxDecoded composeSessionOutput
+	var sandboxDecoded composeSandboxOutput
 	if err := json.Unmarshal([]byte(sandboxOut), &sandboxDecoded); err != nil {
 		t.Fatalf("inspect sandbox JSON decode failed: %v\n%s", err, sandboxOut)
 	}
-	if sandboxDecoded.ID != "session-inspect" || sandboxDecoded.VMStatus != "running" || sandboxDecoded.Tags["project"] == "" {
+	if sandboxDecoded.SandboxID != "session-inspect" || sandboxDecoded.VMStatus != "running" || sandboxDecoded.Tags["project"] == "" {
 		t.Fatalf("inspect sandbox JSON = %#v", sandboxDecoded)
 	}
 
@@ -4669,12 +4669,15 @@ agents:
 	if !strings.Contains(sessionErr, "deprecated") || !strings.Contains(sessionErr, "will be removed") || !strings.Contains(sessionErr, "agent-compose inspect sandbox") {
 		t.Fatalf("inspect session stderr missing deprecated warning: %q", sessionErr)
 	}
-	var sessionDecoded composeSessionOutput
+	var sessionDecoded composeSandboxOutput
 	if err := json.Unmarshal([]byte(sessionOut), &sessionDecoded); err != nil {
 		t.Fatalf("inspect session JSON decode failed: %v\n%s", err, sessionOut)
 	}
-	if sessionDecoded.ID != "session-inspect" || sessionDecoded.VMStatus != "running" || sessionDecoded.Tags["project"] == "" {
+	if sessionDecoded.SandboxID != "session-inspect" || sessionDecoded.VMStatus != "running" || sessionDecoded.Tags["project"] == "" {
 		t.Fatalf("inspect session JSON = %#v", sessionDecoded)
+	}
+	if !reflect.DeepEqual(sessionDecoded, sandboxDecoded) {
+		t.Fatalf("inspect session alias JSON differs from sandbox JSON:\nsession=%#v\nsandbox=%#v", sessionDecoded, sandboxDecoded)
 	}
 }
 
@@ -4897,15 +4900,11 @@ func TestIntegrationCLICacheListFilterValuesAndUsageErrors(t *testing.T) {
 		{
 			name:   "type",
 			flag:   "--type",
-			values: []string{"oci", "materialized", "runtime", "sandbox", "session"},
+			values: []string{"oci", "materialized", "runtime", "sandbox"},
 			assert: func(t *testing.T, filter *agentcomposev2.CacheFilter, value string) {
 				t.Helper()
-				want := value
-				if value == "sandbox" {
-					want = "session"
-				}
-				if filter.GetType() != want {
-					t.Fatalf("type filter = %q, want %q", filter.GetType(), want)
+				if filter.GetType() != value {
+					t.Fatalf("type filter = %q, want %q", filter.GetType(), value)
 				}
 			},
 		},
@@ -5110,16 +5109,16 @@ func TestComposeSandboxPruneOutputJSONShape(t *testing.T) {
 	output := composeSandboxPruneOutput{
 		DryRun: true,
 		Matched: []composePSSandboxOutput{{
-			ID:        "sandbox-match",
-			ShortID:   "sandbox-match",
-			Agent:     "worker",
-			Status:    "stopped",
-			UpdatedAt: "2026-06-11T00:00:00Z",
-			Driver:    "boxlite",
+			SandboxID:      "sandbox-match",
+			SandboxShortID: "sandbox-match",
+			Agent:          "worker",
+			Status:         "stopped",
+			UpdatedAt:      "2026-06-11T00:00:00Z",
+			Driver:         "boxlite",
 		}},
 		Removed: []string{"sandbox-removed"},
 		Skipped: []composeSandboxPruneSkipped{{
-			Sandbox:   "sandbox-skipped",
+			SandboxID: "sandbox-skipped",
 			Agent:     "worker",
 			Status:    "failed",
 			UpdatedAt: "2026-06-11T00:00:00Z",
@@ -5143,6 +5142,26 @@ func TestComposeSandboxPruneOutputJSONShape(t *testing.T) {
 	}
 	if strings.Contains(string(data), "DryRun") || strings.Contains(string(data), "Sandbox") || strings.Contains(string(data), "Reason") {
 		t.Fatalf("composeSandboxPruneOutput JSON uses Go field names: %s", data)
+	}
+	var matched []map[string]json.RawMessage
+	if err := json.Unmarshal(decoded["matched"], &matched); err != nil {
+		t.Fatalf("decode matched sandboxes: %v", err)
+	}
+	if _, ok := matched[0]["sandbox_id"]; !ok {
+		t.Fatalf("matched sandbox JSON missing sandbox_id: %s", data)
+	}
+	if _, ok := matched[0]["id"]; ok {
+		t.Fatalf("matched sandbox JSON uses id: %s", data)
+	}
+	var skipped []map[string]json.RawMessage
+	if err := json.Unmarshal(decoded["skipped"], &skipped); err != nil {
+		t.Fatalf("decode skipped sandboxes: %v", err)
+	}
+	if _, ok := skipped[0]["sandbox_id"]; !ok {
+		t.Fatalf("skipped sandbox JSON missing sandbox_id: %s", data)
+	}
+	if _, ok := skipped[0]["sandbox"]; ok {
+		t.Fatalf("skipped sandbox JSON uses sandbox: %s", data)
 	}
 	if !strings.Contains(string(data), `"updated_at"`) {
 		t.Fatalf("composeSandboxPruneOutput JSON missing skipped metadata: %s", data)
@@ -5280,7 +5299,7 @@ func TestIntegrationCLICachePruneFilterMappings(t *testing.T) {
 			assert: func(t *testing.T, req *agentcomposev2.PruneCachesRequest) {
 				t.Helper()
 				filter := req.GetFilter()
-				if filter.GetDriver() != "microsandbox" || filter.GetType() != "session" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_UNKNOWN {
+				if filter.GetDriver() != "microsandbox" || filter.GetType() != "sandbox" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_UNKNOWN {
 					t.Fatalf("filter = %#v", filter)
 				}
 			},
@@ -5486,15 +5505,15 @@ func TestIntegrationCLICacheLifecycleWithInProcessDaemon(t *testing.T) {
 	root := t.TempDir()
 	imageCacheRoot := filepath.Join(root, "images")
 	t.Setenv("DATA_ROOT", root)
-	t.Setenv("SESSION_ROOT", filepath.Join(root, "sessions"))
+	t.Setenv("SANDBOX_ROOT", filepath.Join(root, "sessions"))
 	t.Setenv("IMAGE_CACHE_ROOT", imageCacheRoot)
 	t.Setenv("HTTP_LISTEN", "")
 	t.Setenv("AGENT_COMPOSE_SOCKET", "")
 	t.Setenv("AGENT_COMPOSE_HOST", "")
 	t.Setenv("RUNTIME_DRIVER", config.RuntimeDriverDocker)
 	t.Setenv("DOCKER_IMAGE", "guest:latest")
-	t.Setenv("SESSION_START_TIMEOUT", "1s")
-	t.Setenv("SESSION_STOP_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_START_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_STOP_TIMEOUT", "1s")
 	t.Setenv("LLM_API_ENDPOINT", "")
 	t.Setenv("BOXLITE_HOME", filepath.Join(root, "boxlite"))
 	t.Setenv("BOXLITE_RUNTIME_DIR", filepath.Join(root, "boxlite-runtime"))
@@ -6381,14 +6400,14 @@ func TestCLIOutputHelpersCoverEdgeBranches(t *testing.T) {
 		Project: project,
 		Changes: []*agentcomposev2.ProjectChange{{
 			Action:       agentcomposev2.ProjectChangeAction_PROJECT_CHANGE_ACTION_UNCHANGED,
-			ResourceType: "session",
+			ResourceType: "sandbox",
 			ResourceId:   "sandbox-1",
 			Name:         "sandbox-1",
 			Message:      "stop failed",
 		}},
 	}
 	down := composeDownOutputFromResponse(removeResp)
-	if down.Status != "partial-failure" || down.FailedSessionStops != 1 {
+	if down.Status != "partial-failure" || down.FailedSandboxStops != 1 {
 		t.Fatalf("composeDownOutputFromResponse = %#v", down)
 	}
 	text.Reset()
@@ -6433,7 +6452,7 @@ func TestCLIOutputHelpersCoverEdgeBranches(t *testing.T) {
 		MemoryUsageBytes: &agentcomposev2.MetricValue{Value: &value, Unit: "bytes", Status: agentcomposev2.MetricStatus_METRIC_STATUS_UNAVAILABLE, Message: "n/a"},
 		UptimeSeconds:    &agentcomposev2.MetricValue{Value: &value, Unit: "seconds", Status: agentcomposev2.MetricStatus_METRIC_STATUS_OK},
 	})
-	if stats.CPUPercent.Status != "ok" || stats.MemoryUsageBytes.Status != "unavailable" || composeStatsOutputFromProto(nil).ID != "" {
+	if stats.CPUPercent.Status != "ok" || stats.MemoryUsageBytes.Status != "unavailable" || composeStatsOutputFromProto(nil).SandboxID != "" {
 		t.Fatalf("stats output = %#v", stats)
 	}
 	text.Reset()
@@ -6473,7 +6492,7 @@ func TestCLIOutputHelpersCoverEdgeBranches(t *testing.T) {
 	}
 
 	execOutput := composeExecOutputFromResult(&agentcomposev2.ExecResult{
-		ExecId: "exec-1", SessionId: "sandbox-1", RunId: "run-1",
+		ExecId: "exec-1", SandboxId: "sandbox-1", RunId: "run-1",
 		Command: &agentcomposev2.ExecCommand{Command: "bash", Args: []string{"-lc", "false"}},
 		Cwd:     "/workspace", ExitCode: 127, Success: false, Stdout: "out", Stderr: "err", Output: "outerr", Error: "failed",
 	})
@@ -6576,8 +6595,7 @@ func TestCLIImageCacheAndFilterHelpersCoverEdgeBranches(t *testing.T) {
 	}
 
 	cache := composeCacheOutputFromProto(testCLICache("cache-full"))
-	cache.SessionID = "session-1"
-	if cache.ID != "cache-full" || cache.Domain == "" || cache.Type == "" || cacheRefSessionText(cache) == "-" {
+	if cache.ID != "cache-full" || cache.Domain == "" || cache.Type == "" || cacheRefText(cache) == "-" {
 		t.Fatalf("cache output = %#v", cache)
 	}
 	emptyCache := composeCacheOutputFromProto(nil)
@@ -6626,7 +6644,7 @@ func TestCLIImageCacheAndFilterHelpersCoverEdgeBranches(t *testing.T) {
 	if err := writeCacheInspectText(&text, composeCacheInspectOutput{Cache: cache, Warnings: []string{"top warning"}}); err != nil {
 		t.Fatalf("writeCacheInspectText returned error: %v", err)
 	}
-	for _, want := range []string{"Cache ID", "Image:", "Sandbox:", "Last used:", "References:", "Warnings:"} {
+	for _, want := range []string{"Cache ID", "Image:", "Last used:", "References:", "Warnings:"} {
 		if !strings.Contains(text.String(), want) {
 			t.Fatalf("cache inspect text %q missing %q", text.String(), want)
 		}
@@ -6666,8 +6684,8 @@ func TestCLIImageCacheAndFilterHelpersCoverEdgeBranches(t *testing.T) {
 	text.Reset()
 	if err := writeSandboxPruneOutput(&text, false, composeSandboxPruneOutput{
 		DryRun:   true,
-		Matched:  []composePSSandboxOutput{{ID: "sandbox-1", ShortID: "sandbox-1", Agent: "reviewer", Status: "stopped", Driver: "boxlite", CreatedAt: "created"}},
-		Skipped:  []composeSandboxPruneSkipped{{Sandbox: "sandbox-2", Reason: "running"}},
+		Matched:  []composePSSandboxOutput{{SandboxID: "sandbox-1", SandboxShortID: "sandbox-1", Agent: "reviewer", Status: "stopped", Driver: "boxlite", CreatedAt: "created"}},
+		Skipped:  []composeSandboxPruneSkipped{{SandboxID: "sandbox-2", Reason: "running"}},
 		Warnings: []string{"warning"},
 	}); err != nil {
 		t.Fatalf("writeSandboxPruneOutput returned error: %v", err)
@@ -6684,7 +6702,7 @@ func TestCLIImageCacheAndFilterHelpersCoverEdgeBranches(t *testing.T) {
 	}
 	text.Reset()
 	if err := writeSandboxPruneOutput(&text, false, composeSandboxPruneOutput{
-		Matched: []composePSSandboxOutput{{ID: "sandbox-3", ShortID: "sandbox-3", Agent: "worker", Status: "stopped", Driver: "docker", UpdatedAt: "updated"}},
+		Matched: []composePSSandboxOutput{{SandboxID: "sandbox-3", SandboxShortID: "sandbox-3", Agent: "worker", Status: "stopped", Driver: "docker", UpdatedAt: "updated"}},
 		Removed: []string{"sandbox-3"},
 	}); err != nil {
 		t.Fatalf("writeSandboxPruneOutput removed returned error: %v", err)
@@ -6708,7 +6726,7 @@ func TestCLIImageCacheAndFilterHelpersCoverEdgeBranches(t *testing.T) {
 	if filter, err := cacheFilterFromOptions(composeCacheFilterOptions{}); err != nil || filter != nil {
 		t.Fatalf("empty cache filter = %#v err=%v", filter, err)
 	}
-	if filter, err := cacheFilterFromOptions(composeCacheFilterOptions{Driver: "all", Type: "sandbox", Status: "referenced"}); err != nil || filter.GetDriver() != "all" || filter.GetType() != "session" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED {
+	if filter, err := cacheFilterFromOptions(composeCacheFilterOptions{Driver: "all", Type: "sandbox", Status: "referenced"}); err != nil || filter.GetDriver() != "all" || filter.GetType() != "sandbox" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED {
 		t.Fatalf("cache filter = %#v err=%v", filter, err)
 	}
 	if filter, err := cacheFilterFromPruneOptions(composeCachePruneOptions{OlderThan: "2h"}); err != nil || filter.GetOlderThanSeconds() != 7200 {
@@ -6756,7 +6774,7 @@ func TestCLIImageCacheAndFilterHelpersCoverEdgeBranches(t *testing.T) {
 	if cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_UNSPECIFIED) != "unspecified" ||
 		cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_OCI_IMAGE_STORE) != "oci-image-store" ||
 		cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE) != "runtime-derived-cache" ||
-		cacheTypeText(agentcomposev2.CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE) != "sandbox" ||
+		cacheTypeText(agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE) != "sandbox" ||
 		cacheTypeText(agentcomposev2.CacheDomain_CACHE_DOMAIN_OCI_IMAGE_STORE) != "oci" ||
 		cacheStatusText(agentcomposev2.CacheStatus_CACHE_STATUS_ACTIVE) != "active" ||
 		cacheStatusText(agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED) != "referenced" ||
@@ -7039,7 +7057,7 @@ agents:
 					return stream.Send(&agentcomposev2.RunAgentStreamResponse{
 						EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
 						RunId:     "run-interactive-cleanup",
-						Run:       &agentcomposev2.RunSummary{RunId: "run-interactive-cleanup", ProjectId: req.Msg.GetProjectId(), AgentName: "reviewer", Status: agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, SessionId: "sandbox-cleanup"},
+						Run:       &agentcomposev2.RunSummary{RunId: "run-interactive-cleanup", ProjectId: req.Msg.GetProjectId(), AgentName: "reviewer", Status: agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, SandboxId: "sandbox-cleanup"},
 					})
 				},
 				getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -7128,15 +7146,15 @@ agents:
 			exec: execServiceStub{
 				execStream: func(ctx context.Context, req *connect.Request[agentcomposev2.ExecRequest], stream *connect.ServerStream[agentcomposev2.ExecStreamResponse]) error {
 					switch target := req.Msg.GetTarget().(type) {
-					case *agentcomposev2.ExecRequest_SessionId:
-						switch target.SessionId {
+					case *agentcomposev2.ExecRequest_SandboxId:
+						switch target.SandboxId {
 						case "no-result":
 							return nil
 						case "failed":
 							return stream.Send(&agentcomposev2.ExecStreamResponse{
 								EventType: agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_COMPLETED,
 								Result: &agentcomposev2.ExecResult{
-									ExecId: "exec-failed", SessionId: target.SessionId,
+									ExecId: "exec-failed", SandboxId: target.SandboxId,
 									Command: req.Msg.GetCommand(), ExitCode: 42, Success: false, Stderr: "boom\n",
 								},
 							})
@@ -7146,7 +7164,7 @@ agents:
 							}
 							return stream.Send(&agentcomposev2.ExecStreamResponse{
 								EventType: agentcomposev2.ExecStreamEventType_EXEC_STREAM_EVENT_TYPE_COMPLETED,
-								Result:    &agentcomposev2.ExecResult{ExecId: "exec-shell", SessionId: target.SessionId, Command: req.Msg.GetCommand(), Success: true},
+								Result:    &agentcomposev2.ExecResult{ExecId: "exec-shell", SandboxId: target.SandboxId, Command: req.Msg.GetCommand(), Success: true},
 							})
 						}
 					case *agentcomposev2.ExecRequest_RunId:
@@ -7785,8 +7803,8 @@ func newTestDaemonApp(t *testing.T, httpListen string, startBackground func(do.I
 	t.Setenv("DATA_ROOT", root)
 	t.Setenv("HTTP_LISTEN", httpListen)
 	t.Setenv("RUNTIME_DRIVER", config.RuntimeDriverDocker)
-	t.Setenv("SESSION_START_TIMEOUT", "1s")
-	t.Setenv("SESSION_STOP_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_START_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_STOP_TIMEOUT", "1s")
 	t.Setenv("LLM_API_ENDPOINT", "")
 	t.Setenv("BOXLITE_HOME", filepath.Join(root, "boxlite"))
 	t.Setenv("BOXLITE_RUNTIME_DIR", filepath.Join(root, "boxlite-runtime"))
@@ -7818,8 +7836,8 @@ func newTestDaemonAppWithSocketAndTCP(t *testing.T, socketPath string, httpListe
 	t.Setenv("HTTP_LISTEN", httpListen)
 	t.Setenv("AGENT_COMPOSE_SOCKET", socketPath)
 	t.Setenv("RUNTIME_DRIVER", config.RuntimeDriverDocker)
-	t.Setenv("SESSION_START_TIMEOUT", "1s")
-	t.Setenv("SESSION_STOP_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_START_TIMEOUT", "1s")
+	t.Setenv("SANDBOX_STOP_TIMEOUT", "1s")
 	t.Setenv("LLM_API_ENDPOINT", "")
 	t.Setenv("BOXLITE_HOME", filepath.Join(root, "boxlite"))
 	t.Setenv("BOXLITE_RUNTIME_DIR", filepath.Join(root, "boxlite-runtime"))
@@ -8477,7 +8495,7 @@ func testRunDetail(projectID, runID, agentName, sessionID string, status agentco
 			AgentName:  agentName,
 			Source:     agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
 			Status:     status,
-			SessionId:  sessionID,
+			SandboxId:  sessionID,
 			ExitCode:   exitCode,
 			StartedAt:  "2026-06-11T00:00:00Z",
 			UpdatedAt:  "2026-06-11T00:00:01Z",

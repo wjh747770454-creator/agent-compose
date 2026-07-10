@@ -43,7 +43,7 @@ func NewAgentRunner(config *appconfig.Config, store *sessionstore.Store, configD
 	return &AgentRunner{config: config, store: store, configDB: configDB, agents: agents, runtimes: runtimes}
 }
 
-func (r *AgentRunner) ExecuteAgentRun(ctx context.Context, session *domain.Session, agent, agentDefinitionID, model, runID, message, outputSchemaJSON string, stream domain.ExecStreamWriter) (domain.ExecResult, domain.AgentRunResult, error) {
+func (r *AgentRunner) ExecuteAgentRun(ctx context.Context, session *domain.Sandbox, agent, agentDefinitionID, model, runID, message, outputSchemaJSON string, stream domain.ExecStreamWriter) (domain.ExecResult, domain.AgentRunResult, error) {
 	if session.Summary.VMStatus != domain.VMStatusRunning {
 		return domain.ExecResult{}, domain.AgentRunResult{}, fmt.Errorf("session is not running")
 	}
@@ -79,7 +79,7 @@ func (r *AgentRunner) ExecuteAgentRun(ctx context.Context, session *domain.Sessi
 	if len(managedEnv) > 0 {
 		spec.Env = llms.MergeManagedExecEnv(spec.Env, managedEnv)
 		if r.configDB != nil {
-			if token := managedEnv["AGENT_COMPOSE_SESSION_TOKEN"]; token != "" {
+			if token := managedEnv["AGENT_COMPOSE_SANDBOX_TOKEN"]; token != "" {
 				defer func() { _ = r.configDB.DeleteLLMFacadeToken(context.WithoutCancel(ctx), token) }()
 			}
 		}
@@ -95,18 +95,18 @@ func (r *AgentRunner) ExecuteAgentRun(ctx context.Context, session *domain.Sessi
 	return execution.SanitizeAgentExecResult(result), parsed, nil
 }
 
-func (r *AgentRunner) ResolveAgentSystemPrompt(ctx context.Context, session *domain.Session, agentDefinitionID string) (string, error) {
+func (r *AgentRunner) ResolveAgentSystemPrompt(ctx context.Context, session *domain.Sandbox, agentDefinitionID string) (string, error) {
 	return r.resolveAgentSystemPrompt(ctx, session, agentDefinitionID)
 }
 
-func (r *AgentRunner) resolveAgentSystemPrompt(ctx context.Context, session *domain.Session, agentDefinitionID string) (string, error) {
+func (r *AgentRunner) resolveAgentSystemPrompt(ctx context.Context, session *domain.Sandbox, agentDefinitionID string) (string, error) {
 	if r == nil || r.agents == nil || session == nil {
 		return "", nil
 	}
 	agentID := strings.TrimSpace(agentDefinitionID)
 	if agentID == "" {
-		taggedAgentID := execution.SessionTagValue(session.Summary.Tags, domain.AgentSessionTagID)
-		if !domain.SessionHasAgentTag(session, taggedAgentID) {
+		taggedAgentID := execution.SessionTagValue(session.Summary.Tags, domain.AgentSandboxTagID)
+		if !domain.SandboxHasAgentTag(session, taggedAgentID) {
 			return "", nil
 		}
 		agentID = taggedAgentID
@@ -122,10 +122,10 @@ func (r *AgentRunner) resolveAgentSystemPrompt(ctx context.Context, session *dom
 	return strings.TrimSpace(agentDef.SystemPrompt), nil
 }
 
-func BuildAgentExecSpec(config *appconfig.Config, session *domain.Session, agent, model, promptPath, schemaPath string) domain.ExecSpec {
+func BuildAgentExecSpec(config *appconfig.Config, session *domain.Sandbox, agent, model, promptPath, schemaPath string) domain.ExecSpec {
 	appconfig.ApplyDefaultGuestPaths(config)
 	agentHome := config.GuestHomePath
-	env := execution.BuildSessionExecEnv(config, session, agentHome)
+	env := execution.BuildSandboxExecEnv(config, session, agentHome)
 
 	promptCommand := "agent-compose-runtime prompt" +
 		" --provider " + execution.ShellQuote(agent) +

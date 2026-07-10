@@ -55,7 +55,7 @@ func newRuntimeSmokeConfig(t *testing.T, driver string) *appconfig.Config {
 	repoRoot := runtimeSmokeRepoRoot(t)
 	config := &appconfig.Config{
 		DataRoot:                 root,
-		SessionRoot:              filepath.Join(root, "sessions"),
+		SandboxRoot:              filepath.Join(root, "sandboxes"),
 		RuntimeDriver:            driver,
 		BoxliteHome:              filepath.Join(root, "boxlite"),
 		DockerHome:               filepath.Join(root, "docker"),
@@ -77,11 +77,11 @@ func newRuntimeSmokeConfig(t *testing.T, driver string) *appconfig.Config {
 		GuestLogRoot:             "/data/logs",
 		JupyterGuestPort:         8888,
 		JupyterProxyBasePath:     "/agent-compose/session",
-		SessionStartTimeout:      3 * time.Minute,
-		SessionStopTimeout:       30 * time.Second,
+		SandboxStartTimeout:      3 * time.Minute,
+		SandboxStopTimeout:       30 * time.Second,
 	}
-	if err := os.MkdirAll(config.SessionRoot, 0o755); err != nil {
-		t.Fatalf("create session root: %v", err)
+	if err := os.MkdirAll(config.SandboxRoot, 0o755); err != nil {
+		t.Fatalf("create sandbox root: %v", err)
 	}
 	return config
 }
@@ -104,21 +104,21 @@ func runtimeSmokeRepoRoot(t *testing.T) string {
 	}
 }
 
-func newRuntimeSmokeSession(t *testing.T, _ context.Context, config *appconfig.Config, driver string) (*Session, VMState, ProxyState) {
+func newRuntimeSmokeSandbox(t *testing.T, _ context.Context, config *appconfig.Config, driver string) (*Sandbox, VMState, ProxyState) {
 	t.Helper()
-	sessionID := "runtime-mount-smoke-" + driver + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	sessionRoot := filepath.Join(config.SessionRoot, sessionID)
-	session := &Session{
-		Summary: SessionSummary{
-			ID:            sessionID,
+	sandboxID := "runtime-mount-smoke-" + driver + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	sandboxRoot := filepath.Join(config.SandboxRoot, sandboxID)
+	session := &Sandbox{
+		Summary: SandboxSummary{
+			ID:            sandboxID,
 			Driver:        driver,
 			GuestImage:    defaultGuestImageForDriver(config, driver),
-			RuntimeRef:    sessionID,
-			WorkspacePath: filepath.Join(sessionRoot, "workspace"),
+			RuntimeRef:    sandboxID,
+			WorkspacePath: filepath.Join(sandboxRoot, "workspace"),
 			CreatedAt:     time.Now().UTC(),
 			UpdatedAt:     time.Now().UTC(),
 		},
-		EnvItems: []SessionEnvVar{{Name: "SMOKE_MARKER", Value: "/data/state/runtime-mount-smoke.txt"}},
+		EnvItems: []SandboxEnvVar{{Name: "SMOKE_MARKER", Value: "/data/state/runtime-mount-smoke.txt"}},
 	}
 	if _, err := prepareRuntimeMountManifest(config, session, driver); err != nil {
 		t.Fatalf("prepareRuntimeMountManifest returned error: %v", err)
@@ -126,19 +126,19 @@ func newRuntimeSmokeSession(t *testing.T, _ context.Context, config *appconfig.C
 	vmState := VMState{
 		Driver:      driver,
 		Mode:        driver,
-		BoxName:     sessionID,
+		BoxName:     sandboxID,
 		Image:       session.Summary.GuestImage,
 		RuntimeHome: runtimeHomeForDriver(config, driver),
 	}
 	proxyState := ProxyState{
-		ProxyPath: "/jupyter/" + sessionID + "/lab",
+		ProxyPath: "/jupyter/" + sandboxID + "/lab",
 		GuestHost: "127.0.0.1",
 		GuestPort: config.JupyterGuestPort,
 	}
 	return session, vmState, proxyState
 }
 
-func assertDirectoryOnlyRuntimeSmokeManifest(t *testing.T, session *Session, driver string) {
+func assertDirectoryOnlyRuntimeSmokeManifest(t *testing.T, session *Sandbox, driver string) {
 	t.Helper()
 	manifest, err := loadDirectoryRuntimeMountManifest(session, driver)
 	if err != nil {
@@ -148,8 +148,8 @@ func assertDirectoryOnlyRuntimeSmokeManifest(t *testing.T, session *Session, dri
 	for _, mount := range manifest.Mounts {
 		mounts[mount.GuestPath] = mount.HostPath
 	}
-	if mounts[directoryOnlyGuestSessionPath] != hostSessionDir(session) {
-		t.Fatalf("session mount = %q, want %q", mounts[directoryOnlyGuestSessionPath], hostSessionDir(session))
+	if mounts[directoryOnlyGuestSandboxPath] != hostSandboxDir(session) {
+		t.Fatalf("sandbox mount = %q, want %q", mounts[directoryOnlyGuestSandboxPath], hostSandboxDir(session))
 	}
 	for _, guestPath := range []string{"/root/.claude.json", "/root/.gitconfig"} {
 		if mounts[guestPath] != "" {
@@ -158,10 +158,10 @@ func assertDirectoryOnlyRuntimeSmokeManifest(t *testing.T, session *Session, dri
 	}
 }
 
-func assertRuntimeSmokeHomeFiles(t *testing.T, ctx context.Context, runtime BoxRuntime, session *Session, vmState VMState) {
+func assertRuntimeSmokeHomeFiles(t *testing.T, ctx context.Context, runtime SandboxRuntime, session *Sandbox, vmState VMState) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
-	markerPath := filepath.Join(hostSessionDir(session), "state", "runtime-mount-smoke.txt")
+	markerPath := filepath.Join(hostSandboxDir(session), "state", "runtime-mount-smoke.txt")
 	for {
 		data, err := os.ReadFile(markerPath)
 		if err == nil && strings.TrimSpace(string(data)) == "ok" {
@@ -179,11 +179,11 @@ func assertRuntimeSmokeHomeFiles(t *testing.T, ctx context.Context, runtime BoxR
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	hostGitconfig := filepath.Join(hostSessionHome(session), ".gitconfig")
+	hostGitconfig := filepath.Join(hostSandboxHome(session), ".gitconfig")
 	if _, err := os.Stat(hostGitconfig); err != nil {
 		t.Fatalf("host gitconfig missing after guest startup: %v", err)
 	}
-	homeMarkerPath := filepath.Join(hostSessionHome(session), ".codex", "runtime-mount-smoke-home.txt")
+	homeMarkerPath := filepath.Join(hostSandboxHome(session), ".codex", "runtime-mount-smoke-home.txt")
 	for {
 		data, err := os.ReadFile(homeMarkerPath)
 		if err == nil && strings.TrimSpace(string(data)) == "ok" {

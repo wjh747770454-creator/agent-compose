@@ -2,11 +2,11 @@ package driver
 
 import "testing"
 
-func TestSessionEnvMapKeepsNonLLMSecretEnv(t *testing.T) {
-	env := sessionEnvMap([]SessionEnvVar{
+func TestSandboxEnvMapKeepsNonLLMSecretEnv(t *testing.T) {
+	env := sandboxEnvMap([]SandboxEnvVar{
 		{Name: "DATABASE_PASSWORD", Value: "db-secret", Secret: true},
 		{Name: "OPENAI_API_KEY", Value: "provider-key", Secret: true},
-	}, []SessionEnvVar{
+	}, []SandboxEnvVar{
 		{Name: "OPENAI_API_KEY", Value: "facade-token", Secret: false},
 	})
 	if env["DATABASE_PASSWORD"] != "db-secret" {

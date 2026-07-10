@@ -44,25 +44,25 @@ func TestCellArtifactsAndAgentFilesWorkflows(t *testing.T) {
 	if config := AgentConfigFromDefinition(domain.AgentDefinition{ID: " agent-1 ", Provider: " ", Model: " model "}, " codex "); config.Provider != "codex" || config.AgentDefinitionID != "agent-1" || config.Model != "model" {
 		t.Fatalf("AgentConfigFromDefinition fallback = %#v", config)
 	}
-	if config := AgentConfigFromDefinition(domain.AgentDefinition{Provider: "opencode", Model: "ignored", EnvItems: []domain.SessionEnvVar{{Name: "OPENCODE_MODEL", Value: "env-model"}}}, "codex"); config.Model != "env-model" {
+	if config := AgentConfigFromDefinition(domain.AgentDefinition{Provider: "opencode", Model: "ignored", EnvItems: []domain.SandboxEnvVar{{Name: "OPENCODE_MODEL", Value: "env-model"}}}, "codex"); config.Model != "env-model" {
 		t.Fatalf("AgentConfigFromDefinition opencode = %#v", config)
 	}
-	ApplyAgentProviderEnv(nil, []domain.SessionEnvVar{{Name: "A", Value: "1"}})
-	sessionEnvTarget := &domain.Session{EnvItems: []domain.SessionEnvVar{{Name: "A", Value: "session"}}}
-	ApplyAgentProviderEnv(sessionEnvTarget, []domain.SessionEnvVar{{Name: "A", Value: "agent"}, {Name: "B", Value: "agent"}})
-	if env := domain.SessionEnvMap(sessionEnvTarget.ProviderEnvItems); env["A"] != "session" || env["B"] != "agent" {
+	ApplyAgentProviderEnv(nil, []domain.SandboxEnvVar{{Name: "A", Value: "1"}})
+	sessionEnvTarget := &domain.Sandbox{EnvItems: []domain.SandboxEnvVar{{Name: "A", Value: "session"}}}
+	ApplyAgentProviderEnv(sessionEnvTarget, []domain.SandboxEnvVar{{Name: "A", Value: "agent"}, {Name: "B", Value: "agent"}})
+	if env := domain.SandboxEnvMap(sessionEnvTarget.ProviderEnvItems); env["A"] != "session" || env["B"] != "agent" {
 		t.Fatalf("ApplyAgentProviderEnv session env = %#v", sessionEnvTarget.ProviderEnvItems)
 	}
-	providerEnvTarget := &domain.Session{EnvItems: []domain.SessionEnvVar{{Name: "A", Value: "session"}}, ProviderEnvItems: []domain.SessionEnvVar{{Name: "A", Value: "provider"}}}
-	ApplyAgentProviderEnv(providerEnvTarget, []domain.SessionEnvVar{{Name: "A", Value: "agent"}})
-	if env := domain.SessionEnvMap(providerEnvTarget.ProviderEnvItems); env["A"] != "provider" {
+	providerEnvTarget := &domain.Sandbox{EnvItems: []domain.SandboxEnvVar{{Name: "A", Value: "session"}}, ProviderEnvItems: []domain.SandboxEnvVar{{Name: "A", Value: "provider"}}}
+	ApplyAgentProviderEnv(providerEnvTarget, []domain.SandboxEnvVar{{Name: "A", Value: "agent"}})
+	if env := domain.SandboxEnvMap(providerEnvTarget.ProviderEnvItems); env["A"] != "provider" {
 		t.Fatalf("ApplyAgentProviderEnv provider env = %#v", providerEnvTarget.ProviderEnvItems)
 	}
-	if SessionTagValue([]domain.SessionTag{{Name: " agent ", Value: " codex "}}, " agent ") != "" || SessionTagValue([]domain.SessionTag{{Name: "agent", Value: " codex "}}, "agent") != "codex" {
+	if SessionTagValue([]domain.SandboxTag{{Name: " agent ", Value: " codex "}}, " agent ") != "" || SessionTagValue([]domain.SandboxTag{{Name: "agent", Value: " codex "}}, "agent") != "codex" {
 		t.Fatalf("SessionTagValue returned unexpected value")
 	}
 
-	session := &domain.Session{Summary: domain.SessionSummary{WorkspacePath: filepath.Join(root, "session", "workspace")}}
+	session := &domain.Sandbox{Summary: domain.SandboxSummary{WorkspacePath: filepath.Join(root, "session", "workspace")}}
 	config := &appconfig.Config{GuestStateRoot: "/guest/state"}
 	promptPath, err := WriteAgentPromptFile(config, session, "codex", "hello")
 	if err != nil || !strings.HasPrefix(promptPath, "/guest/state/agents/prompts/") {
@@ -77,7 +77,7 @@ func TestCellArtifactsAndAgentFilesWorkflows(t *testing.T) {
 	if err := WriteAgentSystemPromptFile(session, ""); err != nil {
 		t.Fatalf("remove system prompt returned error: %v", err)
 	}
-	if err := WriteAgentSystemPromptFile(&domain.Session{}, "system"); err == nil {
+	if err := WriteAgentSystemPromptFile(&domain.Sandbox{}, "system"); err == nil {
 		t.Fatalf("expected missing workspace path error")
 	}
 	schemaPath, err := WriteAgentOutputSchemaFile(config, session, "codex", `{"type":"object"}`)

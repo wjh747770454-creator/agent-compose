@@ -17,20 +17,23 @@ type projectRunWorkspaceResolver struct {
 	controller *Controller
 }
 
-func (r projectRunWorkspaceResolver) ResolveProjectRunWorkspace(ctx context.Context, run domain.ProjectRunRecord, project domain.ProjectRecord, agentWorkspace *compose.WorkspaceSpec) (*domain.WorkspaceConfig, *domain.SessionWorkspace, error) {
-	workspace, err := r.controller.prepareProjectRunWorkspace(ctx, run, project, agentWorkspace)
+func (r projectRunWorkspaceResolver) ResolveProjectRunWorkspace(ctx context.Context, run domain.ProjectRunRecord, project domain.ProjectRecord, projectWorkspace, agentWorkspace *compose.WorkspaceSpec) (*domain.WorkspaceConfig, *domain.SandboxWorkspace, error) {
+	workspace, err := r.controller.prepareProjectRunWorkspace(ctx, run, project, projectWorkspace, agentWorkspace)
 	if err != nil || workspace == nil {
 		return workspace, nil, err
 	}
-	return workspace, toSessionWorkspaceSnapshot(*workspace), nil
+	return workspace, toSandboxWorkspaceSnapshot(*workspace), nil
 }
 
-func (c *Controller) prepareProjectRunWorkspace(ctx context.Context, run domain.ProjectRunRecord, project domain.ProjectRecord, agentWorkspace *compose.WorkspaceSpec) (*domain.WorkspaceConfig, error) {
+func (c *Controller) prepareProjectRunWorkspace(ctx context.Context, run domain.ProjectRunRecord, project domain.ProjectRecord, projectWorkspace, agentWorkspace *compose.WorkspaceSpec) (*domain.WorkspaceConfig, error) {
 	_ = ctx
-	if agentWorkspace == nil {
+	workspace := projectWorkspace
+	if agentWorkspace != nil {
+		workspace = agentWorkspace
+	}
+	if workspace == nil {
 		return nil, nil
 	}
-	workspace := agentWorkspace
 	provider := strings.ToLower(strings.TrimSpace(workspace.Provider))
 	switch provider {
 	case "local":
@@ -133,8 +136,8 @@ func resetFileWorkspaceSnapshotContent(config *appconfig.Config, workspaceID str
 	return nil
 }
 
-func toSessionWorkspaceSnapshot(item domain.WorkspaceConfig) *domain.SessionWorkspace {
-	return &domain.SessionWorkspace{
+func toSandboxWorkspaceSnapshot(item domain.WorkspaceConfig) *domain.SandboxWorkspace {
+	return &domain.SandboxWorkspace{
 		ID:         item.ID,
 		Name:       item.Name,
 		Type:       item.Type,

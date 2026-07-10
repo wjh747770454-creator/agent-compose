@@ -7,13 +7,13 @@ import (
 	"time"
 )
 
-type SessionEnvVar struct {
+type SandboxEnvVar struct {
 	Name   string `json:"name"`
 	Value  string `json:"value,omitempty"`
 	Secret bool   `json:"secret,omitempty"`
 }
 
-type SessionSummary struct {
+type SandboxSummary struct {
 	ID            string    `json:"id"`
 	Driver        string    `json:"driver"`
 	GuestImage    string    `json:"guest_image,omitempty"`
@@ -24,14 +24,14 @@ type SessionSummary struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-type Session struct {
-	Summary         SessionSummary       `json:"summary"`
-	EnvItems        []SessionEnvVar      `json:"env_items,omitempty"`
-	VolumeMounts    []SessionVolumeMount `json:"volume_mounts,omitempty"`
-	RuntimeEnvItems []SessionEnvVar      `json:"-"`
+type Sandbox struct {
+	Summary         SandboxSummary       `json:"summary"`
+	EnvItems        []SandboxEnvVar      `json:"env_items,omitempty"`
+	VolumeMounts    []SandboxVolumeMount `json:"volume_mounts,omitempty"`
+	RuntimeEnvItems []SandboxEnvVar      `json:"-"`
 }
 
-type SessionVolumeMount struct {
+type SandboxVolumeMount struct {
 	ID       string `json:"id,omitempty"`
 	Type     string `json:"type"`
 	Source   string `json:"source"`
@@ -131,20 +131,20 @@ type SandboxStats struct {
 
 type ExecStreamWriter func(ExecChunk)
 
-type SessionVMInfo struct {
+type SandboxVMInfo struct {
 	BoxID      string
 	JupyterURL string
 	ProxyState *ProxyState
 }
 
-type BoxRuntime interface {
-	EnsureSession(context.Context, *Session, VMState, ProxyState) (SessionVMInfo, error)
-	StopSession(context.Context, *Session, VMState) (bool, error)
-	Exec(context.Context, *Session, VMState, ExecSpec) (ExecResult, error)
-	ExecStream(context.Context, *Session, VMState, ExecSpec, ExecStreamWriter) (ExecResult, error)
+type SandboxRuntime interface {
+	EnsureSandbox(context.Context, *Sandbox, VMState, ProxyState) (SandboxVMInfo, error)
+	StopSandbox(context.Context, *Sandbox, VMState) (bool, error)
+	Exec(context.Context, *Sandbox, VMState, ExecSpec) (ExecResult, error)
+	ExecStream(context.Context, *Sandbox, VMState, ExecSpec, ExecStreamWriter) (ExecResult, error)
 }
 
-func sessionEnvMap(groups ...[]SessionEnvVar) map[string]string {
+func sandboxEnvMap(groups ...[]SandboxEnvVar) map[string]string {
 	if len(groups) == 0 {
 		return nil
 	}
@@ -185,15 +185,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func hostSessionDir(session *Session) string {
+func hostSandboxDir(session *Sandbox) string {
 	if session == nil {
 		return ""
 	}
 	return filepath.Dir(session.Summary.WorkspacePath)
 }
 
-func hostSessionHome(session *Session) string {
-	return filepath.Join(hostSessionDir(session), "home")
+func hostSandboxHome(session *Sandbox) string {
+	return filepath.Join(hostSandboxDir(session), "home")
 }
 
 func shellQuote(value string) string {

@@ -101,11 +101,16 @@ enum RunAgentStreamEventType {
   RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED = 4;
 }
 
-enum RunSessionCleanupPolicy {
-  RUN_SESSION_CLEANUP_POLICY_UNSPECIFIED = 0;
-  RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION = 1;
-  RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING = 2;
-  RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION = 3;
+enum RunSandboxCleanupPolicy {
+  reserved "RUN_SESSION_CLEANUP_POLICY_UNSPECIFIED";
+  reserved "RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION";
+  reserved "RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING";
+  reserved "RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION";
+
+  RUN_SANDBOX_CLEANUP_POLICY_UNSPECIFIED = 0;
+  RUN_SANDBOX_CLEANUP_POLICY_STOP_ON_COMPLETION = 1;
+  RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING = 2;
+  RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION = 3;
 }
 
 enum ExecStreamEventType {
@@ -149,11 +154,13 @@ enum MetricStatus {
 }
 
 enum CacheDomain {
+  reserved "CACHE_DOMAIN_SESSION_EPHEMERAL_STATE";
+
   CACHE_DOMAIN_UNSPECIFIED = 0;
   CACHE_DOMAIN_OCI_IMAGE_STORE = 1;
   CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE = 2;
   CACHE_DOMAIN_RUNTIME_DERIVED_CACHE = 3;
-  CACHE_DOMAIN_SESSION_EPHEMERAL_STATE = 4;
+  CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE = 4;
 }
 
 enum CacheStatus {
@@ -218,9 +225,11 @@ message ListProjectsResponse {
 }
 
 message RemoveProjectRequest {
+  reserved "stop_running_sessions";
+
   ProjectRef project = 1;
   bool remove_history = 2;
-  bool stop_running_sessions = 3;
+  bool stop_running_sandboxes = 3;
 }
 
 message RemoveProjectResponse {
@@ -432,13 +441,15 @@ message MicrosandboxDriverSpec {
 }
 
 message RunAgentRequest {
+  reserved 5;
+  reserved "session_id";
+
   string project_id = 1;
   string agent_name = 2;
   string prompt = 3;
   RunSource source = 4;
-  string session_id = 5;
   repeated EnvVarSpec env = 6;
-  RunSessionCleanupPolicy cleanup_policy = 7;
+  RunSandboxCleanupPolicy cleanup_policy = 7;
   string scheduler_id = 8;
   string trigger_id = 9;
   string output_schema_json = 10;
@@ -484,9 +495,11 @@ message GetRunResponse {
 }
 
 message ListRunsRequest {
+  reserved 3;
+  reserved "session_id";
+
   string project_id = 1;
   string agent_name = 2;
-  string session_id = 3;
   string scheduler_id = 4;
   RunStatus status = 5;
   RunSource source = 6;
@@ -569,6 +582,9 @@ message SandboxStats {
 }
 
 message RunSummary {
+  reserved 11;
+  reserved "session_id";
+
   string run_id = 1;
   string project_id = 2;
   string project_name = 3;
@@ -579,7 +595,6 @@ message RunSummary {
   string scheduler_id = 8;
   string trigger_id = 9;
   RunStatus status = 10;
-  string session_id = 11;
   int32 exit_code = 12;
   string error = 13;
   string started_at = 14;
@@ -607,10 +622,12 @@ message RunDetail {
 }
 
 message ExecRequest {
+  reserved "session_id";
+
   oneof target {
-    string session_id = 1;
+    string sandbox_id = 1;
     string run_id = 2;
-    ExecSessionSelector selector = 3;
+    ExecSandboxSelector selector = 3;
   }
   ExecCommand command = 4;
   string cwd = 5;
@@ -619,7 +636,7 @@ message ExecRequest {
   uint32 max_output_bytes = 8;
 }
 
-message ExecSessionSelector {
+message ExecSandboxSelector {
   string project_id = 1;
   string project_name = 2;
   string agent_name = 3;
@@ -635,9 +652,11 @@ message ExecResponse {
 }
 
 message ExecStreamResponse {
+  reserved "session_id";
+
   ExecStreamEventType event_type = 1;
   string exec_id = 2;
-  string session_id = 3;
+  string sandbox_id = 3;
   string run_id = 4;
   string chunk = 5;
   StdioStream stream = 6;
@@ -646,8 +665,10 @@ message ExecStreamResponse {
 }
 
 message ExecResult {
+  reserved "session_id";
+
   string exec_id = 1;
-  string session_id = 2;
+  string sandbox_id = 2;
   string run_id = 3;
   ExecCommand command = 4;
   string cwd = 5;
@@ -795,6 +816,9 @@ message RemoveCacheResponse {
 }
 
 message CacheItem {
+  reserved 10;
+  reserved "session_id";
+
   string cache_id = 1;
   CacheDomain domain = 2;
   string driver = 3;
@@ -804,7 +828,6 @@ message CacheItem {
   string image_id = 7;
   string image_ref = 8;
   string resolved_ref = 9;
-  string session_id = 10;
   string sandbox_id = 11;
   CacheStatus status = 12;
   bool removable = 13;

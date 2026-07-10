@@ -17,9 +17,9 @@ const (
 	LoaderTriggerKindTimeout  = "timeout"
 	LoaderTriggerKindCron     = "cron"
 
-	LoaderSessionPolicySticky = "sticky"
-	LoaderSessionPolicyNew    = "new"
-	LoaderSessionPolicyReuse  = "reuse"
+	LoaderSandboxPolicySticky = "sticky"
+	LoaderSandboxPolicyNew    = "new"
+	LoaderSandboxPolicyReuse  = "reuse"
 
 	LoaderConcurrencyPolicySkip     = "skip"
 	LoaderConcurrencyPolicyParallel = "parallel"
@@ -41,7 +41,7 @@ type LoaderSummary struct {
 	Driver             string    `json:"driver,omitempty"`
 	GuestImage         string    `json:"guest_image,omitempty"`
 	DefaultAgent       string    `json:"default_agent,omitempty"`
-	SessionPolicy      string    `json:"session_policy,omitempty"`
+	SandboxPolicy      string    `json:"sandbox_policy,omitempty"`
 	ConcurrencyPolicy  string    `json:"concurrency_policy,omitempty"`
 	CapsetIDs          []string  `json:"capset_ids,omitempty"`
 	ManagedProjectID   string    `json:"managed_project_id,omitempty"`
@@ -61,7 +61,7 @@ type Loader struct {
 	Summary  LoaderSummary     `json:"summary"`
 	Script   string            `json:"script"`
 	Triggers []LoaderTrigger   `json:"triggers,omitempty"`
-	EnvItems []SessionEnvVar   `json:"env_items,omitempty"`
+	EnvItems []SandboxEnvVar   `json:"env_items,omitempty"`
 	Volumes  []VolumeMountSpec `json:"volumes,omitempty"`
 }
 
@@ -96,29 +96,30 @@ type LoaderRunSummary struct {
 }
 
 type LoaderEvent struct {
-	ID                   string    `json:"id"`
-	LoaderID             string    `json:"loader_id"`
-	RunID                string    `json:"run_id,omitempty"`
-	TriggerID            string    `json:"trigger_id,omitempty"`
-	Type                 string    `json:"type"`
-	Level                string    `json:"level"`
-	Message              string    `json:"message"`
-	PayloadJSON          string    `json:"payload_json,omitempty"`
-	LinkedSessionID      string    `json:"linked_session_id,omitempty"`
-	LinkedCellID         string    `json:"linked_cell_id,omitempty"`
-	LinkedAgentSessionID string    `json:"linked_agent_session_id,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                  string    `json:"id"`
+	LoaderID            string    `json:"loader_id"`
+	RunID               string    `json:"run_id,omitempty"`
+	TriggerID           string    `json:"trigger_id,omitempty"`
+	Type                string    `json:"type"`
+	Level               string    `json:"level"`
+	Message             string    `json:"message"`
+	PayloadJSON         string    `json:"payload_json,omitempty"`
+	LinkedSandboxID     string    `json:"linked_sandbox_id,omitempty"`
+	LinkedCellID        string    `json:"linked_cell_id,omitempty"`
+	LinkedAgentThreadID string    `json:"linked_agent_thread_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type LoaderBinding struct {
 	LoaderID  string    `json:"loader_id"`
-	SessionID string    `json:"session_id"`
+	SandboxID string    `json:"sandbox_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type LoaderAgentRequest struct {
 	Agent          string            `json:"agent,omitempty"`
+	SandboxPolicy  string            `json:"sandboxPolicy,omitempty"`
 	SessionPolicy  string            `json:"sessionPolicy,omitempty"`
 	Timeout        time.Duration     `json:"timeout,omitempty"`
 	Title          string            `json:"title,omitempty"`
@@ -127,23 +128,24 @@ type LoaderAgentRequest struct {
 	PullPolicy     string            `json:"pullPolicy,omitempty"`
 	WorkspaceID    string            `json:"workspaceId,omitempty"`
 	JupyterEnabled bool              `json:"jupyter,omitempty"`
-	SessionEnv     []SessionEnvVar   `json:"sessionEnv,omitempty"`
+	SandboxEnv     []SandboxEnvVar   `json:"sandboxEnv,omitempty"`
+	SessionEnv     []SandboxEnvVar   `json:"sessionEnv,omitempty"`
 	Volumes        []VolumeMountSpec `json:"volumes,omitempty"`
 	OutputSchema   string            `json:"outputSchema,omitempty"`
 }
 
 type LoaderAgentResult struct {
-	Text           string `json:"text,omitempty"`
-	Output         string `json:"output,omitempty"`
-	FinalText      string `json:"finalText,omitempty"`
-	JSON           any    `json:"json"`
-	SessionID      string `json:"sessionId,omitempty"`
-	CellID         string `json:"cellId,omitempty"`
-	Agent          string `json:"agent,omitempty"`
-	AgentSessionID string `json:"agentSessionId,omitempty"`
-	StopReason     string `json:"stopReason,omitempty"`
-	Success        bool   `json:"success"`
-	ExitCode       int    `json:"exitCode"`
+	Text          string `json:"text,omitempty"`
+	Output        string `json:"output,omitempty"`
+	FinalText     string `json:"finalText,omitempty"`
+	JSON          any    `json:"json"`
+	SandboxID     string `json:"sandboxId,omitempty"`
+	CellID        string `json:"cellId,omitempty"`
+	Agent         string `json:"agent,omitempty"`
+	AgentThreadID string `json:"agentThreadId,omitempty"`
+	StopReason    string `json:"stopReason,omitempty"`
+	Success       bool   `json:"success"`
+	ExitCode      int    `json:"exitCode"`
 }
 
 type LoaderCommandRequest struct {
@@ -155,6 +157,7 @@ type LoaderCommandRequest struct {
 	Env            map[string]string `json:"env,omitempty"`
 	TimeoutMs      int64             `json:"timeoutMs,omitempty"`
 	MaxOutputBytes int64             `json:"maxOutputBytes,omitempty"`
+	SandboxPolicy  string            `json:"sandboxPolicy,omitempty"`
 	SessionPolicy  string            `json:"sessionPolicy,omitempty"`
 	Title          string            `json:"title,omitempty"`
 	Driver         string            `json:"driver,omitempty"`
@@ -162,7 +165,8 @@ type LoaderCommandRequest struct {
 	PullPolicy     string            `json:"pullPolicy,omitempty"`
 	WorkspaceID    string            `json:"workspaceId,omitempty"`
 	JupyterEnabled bool              `json:"jupyter,omitempty"`
-	SessionEnv     []SessionEnvVar   `json:"sessionEnv,omitempty"`
+	SandboxEnv     []SandboxEnvVar   `json:"sandboxEnv,omitempty"`
+	SessionEnv     []SandboxEnvVar   `json:"sessionEnv,omitempty"`
 	Volumes        []VolumeMountSpec `json:"volumes,omitempty"`
 }
 
@@ -175,7 +179,7 @@ type LoaderCommandResult struct {
 	StdoutTruncated bool              `json:"stdoutTruncated,omitempty"`
 	StderrTruncated bool              `json:"stderrTruncated,omitempty"`
 	OutputTruncated bool              `json:"outputTruncated,omitempty"`
-	SessionID       string            `json:"sessionId,omitempty"`
+	SandboxID       string            `json:"sandboxId,omitempty"`
 	CellID          string            `json:"cellId,omitempty"`
 	Artifacts       map[string]string `json:"artifacts,omitempty"`
 }
@@ -230,15 +234,46 @@ func NormalizeLoaderTriggerKind(kind string) (string, error) {
 	}
 }
 
-func NormalizeLoaderSessionPolicy(policy string) string {
+func NormalizeLoaderSandboxPolicy(policy string) string {
 	switch strings.ToLower(strings.TrimSpace(policy)) {
-	case "", LoaderSessionPolicySticky, LoaderSessionPolicyReuse:
-		return LoaderSessionPolicySticky
-	case LoaderSessionPolicyNew:
-		return LoaderSessionPolicyNew
+	case "", LoaderSandboxPolicySticky, LoaderSandboxPolicyReuse:
+		return LoaderSandboxPolicySticky
+	case LoaderSandboxPolicyNew:
+		return LoaderSandboxPolicyNew
 	default:
-		return LoaderSessionPolicySticky
+		return LoaderSandboxPolicySticky
 	}
+}
+
+func LoaderAgentSandboxPolicy(request LoaderAgentRequest) string {
+	return firstNonEmpty(request.SandboxPolicy, request.SessionPolicy)
+}
+
+func LoaderAgentSandboxEnv(request LoaderAgentRequest) []SandboxEnvVar {
+	if len(NormalizeEnvItems(request.SandboxEnv)) > 0 {
+		return request.SandboxEnv
+	}
+	return request.SessionEnv
+}
+
+func LoaderCommandSandboxPolicy(request LoaderCommandRequest) string {
+	return firstNonEmpty(request.SandboxPolicy, request.SessionPolicy)
+}
+
+func LoaderCommandSandboxEnv(request LoaderCommandRequest) []SandboxEnvVar {
+	if len(NormalizeEnvItems(request.SandboxEnv)) > 0 {
+		return request.SandboxEnv
+	}
+	return request.SessionEnv
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func NormalizeLoaderConcurrencyPolicy(policy string) string {

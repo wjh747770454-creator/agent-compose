@@ -73,19 +73,19 @@ func (s *eventStore) ensureEventSchema(ctx context.Context) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_event_delivery_run ON event_delivery(run_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_event_delivery_status ON event_delivery(status, updated_at);`,
-		`CREATE TABLE IF NOT EXISTS event_session_link (
+		`CREATE TABLE IF NOT EXISTS event_sandbox_link (
 			event_id TEXT NOT NULL,
-			session_id TEXT NOT NULL,
+			sandbox_id TEXT NOT NULL,
 			relation TEXT NOT NULL,
 			loader_id TEXT NOT NULL DEFAULT '',
 			run_id TEXT NOT NULL DEFAULT '',
 			trigger_id TEXT NOT NULL DEFAULT '',
 			loader_event_id TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL,
-			PRIMARY KEY(event_id, session_id, relation, run_id)
+			PRIMARY KEY(event_id, sandbox_id, relation, run_id)
 		);`,
-		`CREATE INDEX IF NOT EXISTS idx_event_session_link_session ON event_session_link(session_id, created_at);`,
-		`CREATE INDEX IF NOT EXISTS idx_event_session_link_run ON event_session_link(run_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_event_sandbox_link_sandbox ON event_sandbox_link(sandbox_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_event_sandbox_link_run ON event_sandbox_link(run_id);`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -480,24 +480,24 @@ func (s *eventStore) UpsertEventDelivery(ctx context.Context, delivery domain.Ev
 	return nil
 }
 
-func (s *eventStore) AddEventSessionLink(ctx context.Context, link domain.EventSessionLink) error {
+func (s *eventStore) AddEventSandboxLink(ctx context.Context, link domain.EventSandboxLink) error {
 	link.EventID = strings.TrimSpace(link.EventID)
-	link.SessionID = strings.TrimSpace(link.SessionID)
+	link.SandboxID = strings.TrimSpace(link.SandboxID)
 	link.Relation = strings.TrimSpace(link.Relation)
 	link.LoaderID = strings.TrimSpace(link.LoaderID)
 	link.RunID = strings.TrimSpace(link.RunID)
 	link.TriggerID = strings.TrimSpace(link.TriggerID)
 	link.LoaderEventID = strings.TrimSpace(link.LoaderEventID)
-	if link.EventID == "" || link.SessionID == "" || link.Relation == "" {
-		return fmt.Errorf("event session link requires event, session, and relation")
+	if link.EventID == "" || link.SandboxID == "" || link.Relation == "" {
+		return fmt.Errorf("event sandbox link requires event, sandbox, and relation")
 	}
 	if link.CreatedAt.IsZero() {
 		link.CreatedAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO event_session_link(event_id, session_id, relation, loader_id, run_id, trigger_id, loader_event_id, created_at)
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO event_sandbox_link(event_id, sandbox_id, relation, loader_id, run_id, trigger_id, loader_event_id, created_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
 		link.EventID,
-		link.SessionID,
+		link.SandboxID,
 		link.Relation,
 		link.LoaderID,
 		link.RunID,
@@ -506,7 +506,7 @@ func (s *eventStore) AddEventSessionLink(ctx context.Context, link domain.EventS
 		link.CreatedAt.UTC().UnixMilli(),
 	)
 	if err != nil {
-		return fmt.Errorf("insert event session link: %w", err)
+		return fmt.Errorf("insert event sandbox link: %w", err)
 	}
 	return nil
 }
@@ -558,7 +558,7 @@ func (s *eventStore) ListEventDeliveries(ctx context.Context, eventIDs []string)
 	return items, nil
 }
 
-func (s *eventStore) ListEventSessionLinks(ctx context.Context, eventIDs []string) ([]domain.EventSessionTraceItem, error) {
+func (s *eventStore) ListEventSandboxLinks(ctx context.Context, eventIDs []string) ([]domain.EventSandboxTraceItem, error) {
 	seen := map[string]struct{}{}
 	ids := make([]string, 0, len(eventIDs))
 	for _, id := range eventIDs {
@@ -581,24 +581,24 @@ func (s *eventStore) ListEventSessionLinks(ctx context.Context, eventIDs []strin
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT event_id, session_id, relation, loader_id, run_id, trigger_id, loader_event_id, created_at
-		FROM event_session_link WHERE event_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY created_at ASC, session_id ASC`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT event_id, sandbox_id, relation, loader_id, run_id, trigger_id, loader_event_id, created_at
+		FROM event_sandbox_link WHERE event_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY created_at ASC, sandbox_id ASC`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query event session links: %w", err)
+		return nil, fmt.Errorf("query event sandbox links: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	items := make([]domain.EventSessionTraceItem, 0)
+	items := make([]domain.EventSandboxTraceItem, 0)
 	for rows.Next() {
-		var item domain.EventSessionTraceItem
+		var item domain.EventSandboxTraceItem
 		var createdAtRaw int64
-		if err := rows.Scan(&item.EventID, &item.SessionID, &item.Relation, &item.LoaderID, &item.RunID, &item.TriggerID, &item.LoaderEventID, &createdAtRaw); err != nil {
-			return nil, fmt.Errorf("scan event session link: %w", err)
+		if err := rows.Scan(&item.EventID, &item.SandboxID, &item.Relation, &item.LoaderID, &item.RunID, &item.TriggerID, &item.LoaderEventID, &createdAtRaw); err != nil {
+			return nil, fmt.Errorf("scan event sandbox link: %w", err)
 		}
 		item.CreatedAt = storeutil.ParseStoredUnixTimeAuto(createdAtRaw)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate event session links: %w", err)
+		return nil, fmt.Errorf("iterate event sandbox links: %w", err)
 	}
 	return items, nil
 }

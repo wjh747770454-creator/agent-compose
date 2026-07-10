@@ -40,7 +40,7 @@ func NormalizeLoader(item domain.Loader, assignID bool) (domain.Loader, error) {
 	item.Summary.AgentID = strings.TrimSpace(item.Summary.AgentID)
 	item.Summary.Driver = strings.TrimSpace(item.Summary.Driver)
 	if item.Summary.Driver != "" {
-		driver, err := driverpkg.ResolveSessionRuntimeDriver(item.Summary.Driver, item.Summary.Driver)
+		driver, err := driverpkg.ResolveSandboxRuntimeDriver(item.Summary.Driver, item.Summary.Driver)
 		if err != nil {
 			return domain.Loader{}, err
 		}
@@ -51,7 +51,7 @@ func NormalizeLoader(item domain.Loader, assignID bool) (domain.Loader, error) {
 	if item.Summary.DefaultAgent == "" {
 		item.Summary.DefaultAgent = "codex"
 	}
-	item.Summary.SessionPolicy = domain.NormalizeLoaderSessionPolicy(item.Summary.SessionPolicy)
+	item.Summary.SandboxPolicy = domain.NormalizeLoaderSandboxPolicy(item.Summary.SandboxPolicy)
 	item.Summary.ConcurrencyPolicy = domain.NormalizeLoaderConcurrencyPolicy(item.Summary.ConcurrencyPolicy)
 	item.Summary.CapsetIDs = capabilities.NormalizeCapsetIDs(item.Summary.CapsetIDs)
 	item.Summary.ManagedProjectID = strings.TrimSpace(item.Summary.ManagedProjectID)
@@ -106,10 +106,10 @@ func DecodeVolumeMountSpecs(raw string) ([]domain.VolumeMountSpec, error) {
 	return domain.NormalizeVolumeMountSpecs(items)
 }
 
-func EncodeEnvItems(items []domain.SessionEnvVar) (string, error) {
+func EncodeEnvItems(items []domain.SandboxEnvVar) (string, error) {
 	normalized := domain.NormalizeEnvItems(items)
 	if normalized == nil {
-		normalized = []domain.SessionEnvVar{}
+		normalized = []domain.SandboxEnvVar{}
 	}
 	data, err := json.Marshal(normalized)
 	if err != nil {
@@ -118,12 +118,12 @@ func EncodeEnvItems(items []domain.SessionEnvVar) (string, error) {
 	return string(data), nil
 }
 
-func DecodeEnvItems(raw string) ([]domain.SessionEnvVar, error) {
+func DecodeEnvItems(raw string) ([]domain.SandboxEnvVar, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
 	}
-	var items []domain.SessionEnvVar
+	var items []domain.SandboxEnvVar
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
 		return nil, fmt.Errorf("decode loader env items: %w", err)
 	}

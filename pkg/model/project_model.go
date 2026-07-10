@@ -80,7 +80,6 @@ type ProjectRunRecord struct {
 	TriggerID       string    `json:"trigger_id,omitempty"`
 	Status          string    `json:"status"`
 	SandboxID       string    `json:"sandbox_id,omitempty"`
-	SessionID       string    `json:"-"`
 	ExitCode        int       `json:"exit_code,omitempty"`
 	Error           string    `json:"error,omitempty"`
 	Prompt          string    `json:"prompt,omitempty"`
@@ -110,7 +109,6 @@ type ProjectRunListOptions struct {
 	ProjectID   string
 	AgentName   string
 	SandboxID   string
-	SessionID   string
 	SchedulerID string
 	Status      string
 	Source      string
@@ -125,17 +123,16 @@ type ProjectListResult struct {
 	NextOffset int
 }
 
-type ProjectSessionRelationFilter struct {
+type ProjectSandboxRelationFilter struct {
 	ProjectID string
 	AgentName string
 	SandboxID string
-	SessionID string
 	Statuses  []string
 	Limit     int
 }
 
-type ProjectSessionStatus struct {
+type ProjectSandboxStatus struct {
 	Run            ProjectRunRecord `json:"run"`
-	Session        *Session         `json:"session,omitempty"`
-	SessionMissing bool             `json:"session_missing,omitempty"`
+	Sandbox        *Sandbox         `json:"sandbox,omitempty"`
+	SandboxMissing bool             `json:"sandbox_missing,omitempty"`
 }

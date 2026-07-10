@@ -17,10 +17,10 @@ type TopicEventListResponse struct {
 	NextAfterSequence int64            `json:"next_after_sequence"`
 }
 
-type EventSessionsResponse struct {
+type EventSandboxesResponse struct {
 	EventID       string             `json:"event_id"`
 	CorrelationID string             `json:"correlation_id"`
-	Sessions      []EventSessionJSON `json:"sessions"`
+	Sandboxes     []EventSandboxJSON `json:"sandboxes"`
 }
 
 type EventRunsResponse struct {
@@ -40,8 +40,8 @@ type EventRunJSON struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-type EventSessionJSON struct {
-	SessionID     string `json:"session_id"`
+type EventSandboxJSON struct {
+	SandboxID     string `json:"sandbox_id"`
 	Relation      string `json:"relation"`
 	LoaderID      string `json:"loader_id,omitempty"`
 	RunID         string `json:"run_id,omitempty"`

@@ -12,7 +12,7 @@ type Store interface {
 	GetWorkspaceConfig(ctx context.Context, id string) (domain.WorkspaceConfig, error)
 }
 
-func PrepareSessionWorkspace(ctx context.Context, config *appconfig.Config, configDB Store, session *domain.Session) error {
+func PrepareSessionWorkspace(ctx context.Context, config *appconfig.Config, configDB Store, session *domain.Sandbox) error {
 	workspaceID := strings.TrimSpace(session.WorkspaceID)
 	if session.Workspace != nil && strings.TrimSpace(session.Workspace.ID) != "" {
 		workspace := domain.WorkspaceConfig{
@@ -36,7 +36,7 @@ func PrepareSessionWorkspace(ctx context.Context, config *appconfig.Config, conf
 	return PrepareWorkspaceConfig(ctx, config, session, workspace)
 }
 
-func PrepareWorkspaceConfig(ctx context.Context, config *appconfig.Config, session *domain.Session, workspace domain.WorkspaceConfig) error {
+func PrepareWorkspaceConfig(ctx context.Context, config *appconfig.Config, session *domain.Sandbox, workspace domain.WorkspaceConfig) error {
 	impl, err := newWorkspace(config, workspace)
 	if err != nil {
 		return err

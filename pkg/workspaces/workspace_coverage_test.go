@@ -43,7 +43,7 @@ func testWorkspaceFileAndPathWorkflows(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(contentRoot, "docs", "guide.md"), []byte("guide\n"), 0o644); err != nil {
 		t.Fatalf("write guide.md: %v", err)
 	}
-	session := &domain.Session{Summary: domain.SessionSummary{ID: "session-1", WorkspacePath: t.TempDir()}}
+	session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-1", WorkspacePath: t.TempDir()}}
 	workspace := domain.WorkspaceConfig{
 		ID:         workspaceID,
 		Name:       "File Workspace",
@@ -59,10 +59,10 @@ func testWorkspaceFileAndPathWorkflows(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(contentRoot, "README.md"), []byte("updated\n"), 0o644); err != nil {
 		t.Fatalf("overwrite README.md: %v", err)
 	}
-	if err := PrepareSessionWorkspace(context.Background(), config, nil, &domain.Session{
-		Summary:     domain.SessionSummary{ID: "session-snapshot", WorkspacePath: session.Summary.WorkspacePath},
+	if err := PrepareSessionWorkspace(context.Background(), config, nil, &domain.Sandbox{
+		Summary:     domain.SandboxSummary{ID: "session-snapshot", WorkspacePath: session.Summary.WorkspacePath},
 		WorkspaceID: workspaceID,
-		Workspace: &domain.SessionWorkspace{
+		Workspace: &domain.SandboxWorkspace{
 			ID:         workspaceID,
 			Name:       "Snapshot File Workspace",
 			Type:       "file",
@@ -73,7 +73,7 @@ func testWorkspaceFileAndPathWorkflows(t *testing.T) {
 	}
 	assertFileContent(t, filepath.Join(session.Summary.WorkspacePath, "README.md"), "updated\n")
 
-	if err := PrepareFileWorkspace(config, &domain.Session{Summary: domain.SessionSummary{ID: "missing-workspace"}}, workspace); err == nil {
+	if err := PrepareFileWorkspace(config, &domain.Sandbox{Summary: domain.SandboxSummary{ID: "missing-workspace"}}, workspace); err == nil {
 		t.Fatalf("PrepareFileWorkspace missing workspace path returned nil error")
 	}
 	if _, err := FileWorkspaceContentRoot(config, domain.WorkspaceConfig{}); err == nil {
@@ -379,8 +379,8 @@ func testWorkspaceGitPrepareWorkflow(t *testing.T) {
 		Branch: "main",
 		Commit: sourceRepo.firstCommit,
 	})
-	if err := PrepareGitWorkspace(context.Background(), &domain.Session{
-		Summary: domain.SessionSummary{ID: "session-git-root", WorkspacePath: rootWorkspace},
+	if err := PrepareGitWorkspace(context.Background(), &domain.Sandbox{
+		Summary: domain.SandboxSummary{ID: "session-git-root", WorkspacePath: rootWorkspace},
 	}, domain.WorkspaceConfig{
 		ID:         "ws-git-root",
 		Name:       "Git Root Workspace",
@@ -397,8 +397,8 @@ func testWorkspaceGitPrepareWorkflow(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rootWorkspace, "LOCAL.txt"), []byte("keep\n"), 0o644); err != nil {
 		t.Fatalf("write local file: %v", err)
 	}
-	if err := PrepareGitWorkspace(context.Background(), &domain.Session{
-		Summary: domain.SessionSummary{ID: "session-git-root", WorkspacePath: rootWorkspace},
+	if err := PrepareGitWorkspace(context.Background(), &domain.Sandbox{
+		Summary: domain.SandboxSummary{ID: "session-git-root", WorkspacePath: rootWorkspace},
 	}, domain.WorkspaceConfig{
 		ID:         "ws-git-root",
 		Name:       "Git Root Workspace",
@@ -410,8 +410,8 @@ func testWorkspaceGitPrepareWorkflow(t *testing.T) {
 	assertFileContent(t, filepath.Join(rootWorkspace, "LOCAL.txt"), "keep\n")
 
 	nestedWorkspace := t.TempDir()
-	if err := PrepareGitWorkspace(context.Background(), &domain.Session{
-		Summary: domain.SessionSummary{ID: "session-git-nested", WorkspacePath: nestedWorkspace},
+	if err := PrepareGitWorkspace(context.Background(), &domain.Sandbox{
+		Summary: domain.SandboxSummary{ID: "session-git-nested", WorkspacePath: nestedWorkspace},
 	}, domain.WorkspaceConfig{
 		ID:   "ws-git-nested",
 		Name: "Git Nested Workspace",

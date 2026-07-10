@@ -67,7 +67,7 @@ func CloneLoader(item domain.Loader) domain.Loader {
 		cloned.Triggers = append([]domain.LoaderTrigger(nil), item.Triggers...)
 	}
 	if item.EnvItems != nil {
-		cloned.EnvItems = append([]domain.SessionEnvVar(nil), item.EnvItems...)
+		cloned.EnvItems = append([]domain.SandboxEnvVar(nil), item.EnvItems...)
 	}
 	return cloned
 }

@@ -33,11 +33,11 @@ type AgentDefinitionConfigStore interface {
 }
 
 type AgentDefinitionSessionStore interface {
-	ListSessions(context.Context, domain.SessionListOptions) (domain.SessionListResult, error)
+	ListSandboxes(context.Context, domain.SandboxListOptions) (domain.SandboxListResult, error)
 	GetVMState(string) (domain.VMState, error)
 	SaveVMState(string, domain.VMState) error
-	UpdateSession(context.Context, *domain.Session) error
-	AddEvent(context.Context, string, domain.SessionEvent) error
+	UpdateSandbox(context.Context, *domain.Sandbox) error
+	AddEvent(context.Context, string, domain.SandboxEvent) error
 }
 
 type AgentDefinitionHandler struct {
@@ -250,7 +250,7 @@ func (h *AgentDefinitionHandler) CreateAgentSession(ctx context.Context, req *co
 	}
 	driver := firstNonEmpty(strings.TrimSpace(req.Msg.GetDriver()), agent.Driver)
 	if strings.TrimSpace(driver) != "" {
-		if _, err := driverpkg.ResolveSessionRuntimeDriver(driver, h.runtimeDriver()); err != nil {
+		if _, err := driverpkg.ResolveSandboxRuntimeDriver(driver, h.runtimeDriver()); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -304,7 +304,7 @@ func (h *AgentDefinitionHandler) validateAgentDefinitionWithWorkspace(item domai
 		result.Errors = append(result.Errors, "runtime_image_id is not supported in this version")
 	}
 	if driver := strings.TrimSpace(item.Driver); driver != "" {
-		if _, driverErr := driverpkg.ResolveSessionRuntimeDriver(driver, h.runtimeDriver()); driverErr != nil {
+		if _, driverErr := driverpkg.ResolveSandboxRuntimeDriver(driver, h.runtimeDriver()); driverErr != nil {
 			result.Errors = append(result.Errors, driverErr.Error())
 		}
 	}
@@ -334,7 +334,7 @@ func (h *AgentDefinitionHandler) agentDefinitionToProto(ctx context.Context, ite
 	return h.agentDefinitionToProtoWith(ctx, item, sessions), nil
 }
 
-func (h *AgentDefinitionHandler) agentDefinitionToProtoWith(ctx context.Context, item domain.AgentDefinition, sessions []*domain.Session) *agentcomposev1.AgentDefinition {
+func (h *AgentDefinitionHandler) agentDefinitionToProtoWith(ctx context.Context, item domain.AgentDefinition, sessions []*domain.Sandbox) *agentcomposev1.AgentDefinition {
 	workspace, workspaceErr := h.agentWorkspace(ctx, item.WorkspaceID)
 	validation := h.validateAgentDefinitionWithWorkspace(item, "", workspace, workspaceErr)
 	current, latest := domain.AgentRunSummaries(item.ID, sessions)
@@ -361,12 +361,12 @@ func (h *AgentDefinitionHandler) agentWorkspace(ctx context.Context, workspaceID
 	return &workspace, nil
 }
 
-func (h *AgentDefinitionHandler) listAllSessions(ctx context.Context) ([]*domain.Session, error) {
-	result, err := h.store.ListSessions(ctx, domain.SessionListOptions{Limit: AgentSessionScanLimit})
+func (h *AgentDefinitionHandler) listAllSessions(ctx context.Context) ([]*domain.Sandbox, error) {
+	result, err := h.store.ListSandboxes(ctx, domain.SandboxListOptions{Limit: AgentSessionScanLimit})
 	if err != nil {
 		return nil, err
 	}
-	return result.Sessions, nil
+	return result.Sandboxes, nil
 }
 
 func (h *AgentDefinitionHandler) stopAgentSessions(ctx context.Context, agentID string) error {
@@ -375,7 +375,7 @@ func (h *AgentDefinitionHandler) stopAgentSessions(ctx context.Context, agentID 
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	for _, session := range sessions {
-		if !domain.SessionHasAgentTag(session, agentID) {
+		if !domain.SandboxHasAgentTag(session, agentID) {
 			continue
 		}
 		switch session.Summary.VMStatus {
@@ -384,7 +384,7 @@ func (h *AgentDefinitionHandler) stopAgentSessions(ctx context.Context, agentID 
 				return err
 			}
 		case domain.VMStatusPending:
-			if err := h.markAgentSessionStopped(ctx, session); err != nil {
+			if err := h.markAgentSandboxStopped(ctx, session); err != nil {
 				return connect.NewError(connect.CodeInternal, err)
 			}
 		}
@@ -392,7 +392,7 @@ func (h *AgentDefinitionHandler) stopAgentSessions(ctx context.Context, agentID 
 	return nil
 }
 
-func (h *AgentDefinitionHandler) markAgentSessionStopped(ctx context.Context, session *domain.Session) error {
+func (h *AgentDefinitionHandler) markAgentSandboxStopped(ctx context.Context, session *domain.Sandbox) error {
 	if session == nil {
 		return nil
 	}
@@ -407,15 +407,15 @@ func (h *AgentDefinitionHandler) markAgentSessionStopped(ctx context.Context, se
 		}
 	}
 	session.Summary.VMStatus = domain.VMStatusStopped
-	if err := h.store.UpdateSession(ctx, session); err != nil {
+	if err := h.store.UpdateSandbox(ctx, session); err != nil {
 		return err
 	}
 	if h.streams != nil {
-		h.streams.PublishSessionUpdated(&session.Summary)
+		h.streams.PublishSandboxUpdated(&session.Summary)
 	}
-	event := domain.SessionEvent{
+	event := domain.SandboxEvent{
 		ID:        uuid.NewString(),
-		Type:      "session.stopped",
+		Type:      "sandbox.stopped",
 		Level:     "info",
 		Message:   "session stopped because agent definition was deleted",
 		CreatedAt: now,

@@ -7,7 +7,6 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     environment:
-      DOCKER_HOST_SESSION_ROOT: ${DOCKER_HOST_SESSION_ROOT:-${PWD}/data/sessions}
       AGENT_COMPOSE_RUNTIME_BASE_URL: ${AGENT_COMPOSE_RUNTIME_BASE_URL:-http://agent-compose:7410}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

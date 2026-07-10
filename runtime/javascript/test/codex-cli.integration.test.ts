@@ -72,7 +72,7 @@ process.stdout.write(JSON.stringify({
       expect(stdio.stderr).toContain("done");
       expect(stdio.stderr).not.toContain("[tool:srv/lookup]");
       expect(stdio.stdout).toContain(`${RESULT_PREFIX}{`);
-      expect(stdio.stdout).toContain("\"sessionId\":\"codex-cli-thread\"");
+      expect(stdio.stdout).toContain("\"threadId\":\"codex-cli-thread\"");
       expect(stdio.stdout).toContain("\"finalText\":\"done\"");
     });
   });

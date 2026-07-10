@@ -28,7 +28,7 @@ type ExecuteAgentRequest struct {
 	Agent             string
 	AgentDefinitionID string
 	Model             string
-	ProviderEnvItems  []domain.SessionEnvVar
+	ProviderEnvItems  []domain.SandboxEnvVar
 	RunID             string
 	Message           string
 	Timeout           time.Duration

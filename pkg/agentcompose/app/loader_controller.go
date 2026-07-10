@@ -53,16 +53,16 @@ func NewLoaderController(di do.Injector) (*loaders.Controller, error) {
 			return loaders.NewRuntimeHost(loaders.RunHostDependencies{
 				Store:                   configDB,
 				Events:                  adapters.LoaderHostEvents{Controller: controller},
-				Sessions:                do.MustInvoke[*adapters.LoaderSessionRunner](di),
-				AgentDefinitions:        do.MustInvoke[*adapters.LoaderSessionRunner](di),
+				Sessions:                do.MustInvoke[*adapters.LoaderSandboxRunner](di),
+				AgentDefinitions:        do.MustInvoke[*adapters.LoaderSandboxRunner](di),
 				AgentExecutor:           adapters.LoaderHostAgentExecutor{Executor: do.MustInvoke[*adapters.AgentExecutor](di)},
 				CommandExecutor:         adapters.LoaderHostCommandExecutor{Executor: do.MustInvoke[*adapters.LoaderCommandExecutor](di)},
 				ProjectAgentRunner:      loaderProjectAgentRunner{controller: do.MustInvoke[*runs.Controller](di)},
 				LLM:                     adapters.LoaderHostLLMRunner{Client: do.MustInvoke[*adapters.LLMClient](di)},
-				SessionRPC:              do.MustInvoke[*adapters.SessionRPCBridge](di),
+				SessionRPC:              do.MustInvoke[*adapters.SandboxRPCBridge](di),
 				Publisher:               controller,
 				CommandRequiresCleanup:  loaders.CommandRequestRequiresCleanup,
-				LinkedSessionIDFromJSON: adapters.LoaderSessionRPCLinkedSessionID,
+				LinkedSandboxIDFromJSON: adapters.LoaderSandboxRPCLinkedSandboxID,
 			}, loader, run, triggerEvent)
 		},
 	})

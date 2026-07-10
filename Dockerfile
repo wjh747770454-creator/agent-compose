@@ -82,7 +82,6 @@ COPY --from=boxlite-build /out/runtime /app/boxlite/runtime
 COPY --from=microsandbox-fetch /out /app/microsandbox
 ENV RUNTIME_DRIVER=docker
 ENV DATA_ROOT=/data
-ENV SESSION_ROOT=/data/sessions
 ENV HTTP_LISTEN=0.0.0.0:7410
 ENV DEFAULT_IMAGE=debian:bookworm-slim
 ENV GUEST_WORKSPACE=/workspace

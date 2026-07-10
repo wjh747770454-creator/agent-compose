@@ -18,18 +18,19 @@ import (
 )
 
 const (
-	SessionTokenMetadata = "x-capability-session-token"
+	SandboxTokenMetadata           = "x-capability-sandbox-token"
+	deprecatedSessionTokenMetadata = "x-capability-session-token"
 )
 
-type SessionBinding struct {
-	SessionID string
-	// CapsetIDs is the set of capsets the session is allowed to use. The guest
+type SandboxBinding struct {
+	SandboxID string
+	// CapsetIDs is the set of capsets the sandbox is allowed to use. The guest
 	// picks one per call (x-octobus-capset); capproxy validates membership.
 	CapsetIDs []string
 }
 
-type SessionResolver interface {
-	ResolveCapabilitySession(ctx context.Context, token string) (SessionBinding, error)
+type SandboxResolver interface {
+	ResolveCapabilitySandbox(ctx context.Context, token string) (SandboxBinding, error)
 }
 
 // OctoBusResolver returns the current OctoBus dial target and token. ok is
@@ -40,7 +41,7 @@ type OctoBusResolver func(ctx context.Context) (addr string, token string, ok bo
 type Server struct {
 	listen     string
 	octobus    OctoBusResolver
-	sessions   SessionResolver
+	sandboxes  SandboxResolver
 	grpcServer *grpc.Server
 }
 
@@ -49,16 +50,16 @@ type Config struct {
 	OctoBus OctoBusResolver
 }
 
-func NewServer(config Config, sessions SessionResolver) *Server {
+func NewServer(config Config, sandboxes SandboxResolver) *Server {
 	return &Server{
-		listen:   strings.TrimSpace(config.Listen),
-		octobus:  config.OctoBus,
-		sessions: sessions,
+		listen:    strings.TrimSpace(config.Listen),
+		octobus:   config.OctoBus,
+		sandboxes: sandboxes,
 	}
 }
 
 func (s *Server) Configured() bool {
-	return s != nil && s.listen != "" && s.octobus != nil && s.sessions != nil
+	return s != nil && s.listen != "" && s.octobus != nil && s.sandboxes != nil
 }
 
 func (s *Server) Serve(ctx context.Context) error {
@@ -93,12 +94,12 @@ func (s *Server) handleUnknown(_ any, stream grpc.ServerStream) error {
 	if !ok {
 		return status.Error(codes.Internal, "missing gRPC method")
 	}
-	binding, err := s.resolveSession(stream.Context())
+	binding, err := s.resolveSandbox(stream.Context())
 	if err != nil {
 		return err
 	}
 	// The guest picks which capset this call targets (x-octobus-capset); capproxy
-	// validates it is one the session is allowed to use. Both the reflection and
+	// validates it is one the sandbox is allowed to use. Both the reflection and
 	// business paths require a resolved capset.
 	capset, err := resolveCallCapset(stream.Context(), binding.CapsetIDs)
 	if err != nil {
@@ -125,12 +126,12 @@ func resolveCallCapset(ctx context.Context, allowed []string) (string, error) {
 		if containsString(allowed, requested) {
 			return requested, nil
 		}
-		return "", status.Errorf(codes.PermissionDenied, "capset %q is not allowed for this session", requested)
+		return "", status.Errorf(codes.PermissionDenied, "capset %q is not allowed for this sandbox", requested)
 	}
 	if len(allowed) == 1 {
 		return allowed[0], nil
 	}
-	return "", status.Error(codes.FailedPrecondition, "x-octobus-capset is required: session allows multiple capsets")
+	return "", status.Error(codes.FailedPrecondition, "x-octobus-capset is required: sandbox allows multiple capsets")
 }
 
 func containsString(values []string, target string) bool {
@@ -143,34 +144,38 @@ func containsString(values []string, target string) bool {
 }
 
 // buildOutgoingMetadata forwards the guest's incoming metadata to OctoBus,
-// except agent-compose's own session credential and any authorization (OctoBus
+// except agent-compose's own sandbox credential and any authorization (OctoBus
 // auth is injected in proxyStream).
-// x-octobus-capset is forced to the resolved, session-allowed value so the guest
+// x-octobus-capset is forced to the resolved, sandbox-allowed value so the guest
 // cannot reach a capset outside its set.
 func buildOutgoingMetadata(ctx context.Context, capset string) metadata.MD {
 	incoming, _ := metadata.FromIncomingContext(ctx)
 	outgoing := incoming.Copy()
-	outgoing.Delete(SessionTokenMetadata)
+	outgoing.Delete(SandboxTokenMetadata)
+	outgoing.Delete(deprecatedSessionTokenMetadata)
 	outgoing.Delete("authorization")
 	outgoing.Set("x-octobus-capset", capset)
 	return outgoing
 }
 
-func (s *Server) resolveSession(ctx context.Context) (SessionBinding, error) {
+func (s *Server) resolveSandbox(ctx context.Context) (SandboxBinding, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
-	token := firstMetadata(md, SessionTokenMetadata)
+	token := firstMetadata(md, SandboxTokenMetadata)
+	if token == "" {
+		token = firstMetadata(md, deprecatedSessionTokenMetadata)
+	}
 	if token == "" {
 		token = bearerToken(firstMetadata(md, "authorization"))
 	}
 	if token == "" {
-		return SessionBinding{}, status.Error(codes.Unauthenticated, "missing capability session token")
+		return SandboxBinding{}, status.Error(codes.Unauthenticated, "missing capability sandbox token")
 	}
-	binding, err := s.sessions.ResolveCapabilitySession(ctx, token)
+	binding, err := s.sandboxes.ResolveCapabilitySandbox(ctx, token)
 	if err != nil {
-		return SessionBinding{}, status.Error(codes.Unauthenticated, err.Error())
+		return SandboxBinding{}, status.Error(codes.Unauthenticated, err.Error())
 	}
 	if len(binding.CapsetIDs) == 0 {
-		return SessionBinding{}, status.Error(codes.FailedPrecondition, "session has no capability capset")
+		return SandboxBinding{}, status.Error(codes.FailedPrecondition, "sandbox has no capability capset")
 	}
 	return binding, nil
 }

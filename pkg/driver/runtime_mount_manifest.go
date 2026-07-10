@@ -13,9 +13,9 @@ import (
 )
 
 const runtimeMountManifestVersion = 1
-const directoryOnlyGuestSessionPath = "/data"
+const directoryOnlyGuestSandboxPath = "/data"
 
-const DirectoryOnlyGuestSessionPath = directoryOnlyGuestSessionPath
+const DirectoryOnlyGuestSandboxPath = directoryOnlyGuestSandboxPath
 
 type RuntimeMountManifest struct {
 	Version int            `json:"version"`
@@ -46,26 +46,26 @@ const (
 )
 
 type logicalRuntimeMountEntry struct {
-	sessionPath           string
+	sandboxPath           string
 	guestPath             string
 	isFile                bool
 	directoryOnlyExposure directoryOnlyExposure
 }
 
-func runtimeMountManifestPath(session *Session) string {
-	return filepath.Join(hostSessionDir(session), "vm", "mount-manifest.json")
+func runtimeMountManifestPath(session *Sandbox) string {
+	return filepath.Join(hostSandboxDir(session), "vm", "mount-manifest.json")
 }
 
-func prepareRuntimeMountManifest(config *appconfig.Config, session *Session, driver string) (RuntimeMountManifest, error) {
+func prepareRuntimeMountManifest(config *appconfig.Config, session *Sandbox, driver string) (RuntimeMountManifest, error) {
 	appconfig.ApplyDefaultGuestPaths(config)
 	driver = resolveRuntimeDriver(driver)
 	if err := validateRuntimeDriver(driver); err != nil {
 		return RuntimeMountManifest{}, err
 	}
-	if err := initializeSessionHomeDefaults(session); err != nil {
+	if err := initializeSandboxHomeDefaults(session); err != nil {
 		return RuntimeMountManifest{}, err
 	}
-	if err := initializeSessionRuntimeMountDirs(config, session); err != nil {
+	if err := initializeSandboxRuntimeMountDirs(config, session); err != nil {
 		return RuntimeMountManifest{}, err
 	}
 	manifest, err := buildRuntimeMountManifest(config, session, driver)
@@ -87,11 +87,11 @@ func prepareRuntimeMountManifest(config *appconfig.Config, session *Session, dri
 	return manifest, nil
 }
 
-func PrepareRuntimeMountManifest(config *appconfig.Config, session *Session, driver string) (RuntimeMountManifest, error) {
+func PrepareRuntimeMountManifest(config *appconfig.Config, session *Sandbox, driver string) (RuntimeMountManifest, error) {
 	return prepareRuntimeMountManifest(config, session, driver)
 }
 
-func loadRuntimeMountManifest(session *Session, expectedDriver string) (RuntimeMountManifest, error) {
+func loadRuntimeMountManifest(session *Sandbox, expectedDriver string) (RuntimeMountManifest, error) {
 	path := runtimeMountManifestPath(session)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -131,11 +131,11 @@ func loadRuntimeMountManifest(session *Session, expectedDriver string) (RuntimeM
 	return manifest, nil
 }
 
-func LoadRuntimeMountManifest(session *Session, expectedDriver string) (RuntimeMountManifest, error) {
+func LoadRuntimeMountManifest(session *Sandbox, expectedDriver string) (RuntimeMountManifest, error) {
 	return loadRuntimeMountManifest(session, expectedDriver)
 }
 
-func loadDirectoryRuntimeMountManifest(session *Session, expectedDriver string) (RuntimeMountManifest, error) {
+func loadDirectoryRuntimeMountManifest(session *Sandbox, expectedDriver string) (RuntimeMountManifest, error) {
 	manifest, err := loadRuntimeMountManifest(session, expectedDriver)
 	if err != nil {
 		return RuntimeMountManifest{}, err
@@ -152,11 +152,11 @@ func loadDirectoryRuntimeMountManifest(session *Session, expectedDriver string) 
 	return manifest, nil
 }
 
-func LoadDirectoryRuntimeMountManifest(session *Session, expectedDriver string) (RuntimeMountManifest, error) {
+func LoadDirectoryRuntimeMountManifest(session *Sandbox, expectedDriver string) (RuntimeMountManifest, error) {
 	return loadDirectoryRuntimeMountManifest(session, expectedDriver)
 }
 
-func buildRuntimeMountManifest(config *appconfig.Config, session *Session, driver string) (RuntimeMountManifest, error) {
+func buildRuntimeMountManifest(config *appconfig.Config, session *Sandbox, driver string) (RuntimeMountManifest, error) {
 	appconfig.ApplyDefaultGuestPaths(config)
 	driver = resolveRuntimeDriver(driver)
 	if err := validateRuntimeDriver(driver); err != nil {
@@ -187,11 +187,11 @@ func buildRuntimeMountManifest(config *appconfig.Config, session *Session, drive
 	return RuntimeMountManifest{Version: runtimeMountManifestVersion, Driver: driver, Mounts: mounts}, nil
 }
 
-func BuildRuntimeMountManifest(config *appconfig.Config, session *Session, driver string) (RuntimeMountManifest, error) {
+func BuildRuntimeMountManifest(config *appconfig.Config, session *Sandbox, driver string) (RuntimeMountManifest, error) {
 	return buildRuntimeMountManifest(config, session, driver)
 }
 
-func runtimeMountSpecsForDriver(config *appconfig.Config, session *Session, driver string) []runtimeMountSpec {
+func runtimeMountSpecsForDriver(config *appconfig.Config, session *Sandbox, driver string) []runtimeMountSpec {
 	switch resolveRuntimeDriver(driver) {
 	case RuntimeDriverDocker:
 		return runtimeMountSpecsForDocker(config, session)
@@ -207,29 +207,29 @@ func runtimeMountSpecsForDriver(config *appconfig.Config, session *Session, driv
 func runtimeMountEntries(config *appconfig.Config) []logicalRuntimeMountEntry {
 	appconfig.ApplyDefaultGuestPaths(config)
 	return []logicalRuntimeMountEntry{
-		{sessionPath: "workspace", guestPath: config.GuestWorkspacePath, directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "state", guestPath: config.GuestStateRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
-		{sessionPath: "runtime", guestPath: config.GuestRuntimeRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
-		{sessionPath: "logs", guestPath: config.GuestLogRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
-		{sessionPath: "home/.codex", guestPath: filepath.Join(config.GuestHomePath, ".codex"), directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.claude", guestPath: filepath.Join(config.GuestHomePath, ".claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.opencode", guestPath: filepath.Join(config.GuestHomePath, ".opencode"), directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.claude.json", guestPath: filepath.Join(config.GuestHomePath, ".claude.json"), isFile: true, directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.gitconfig", guestPath: filepath.Join(config.GuestHomePath, ".gitconfig"), isFile: true, directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.gemini", guestPath: filepath.Join(config.GuestHomePath, ".gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.config/claude", guestPath: filepath.Join(config.GuestHomePath, ".config", "claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.config/Claude", guestPath: filepath.Join(config.GuestHomePath, ".config", "Claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.config/gemini", guestPath: filepath.Join(config.GuestHomePath, ".config", "gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.config/opencode", guestPath: filepath.Join(config.GuestHomePath, ".config", "opencode"), directoryOnlyExposure: directoryOnlyExposureSymlink},
-		{sessionPath: "home/.local/share/gemini", guestPath: filepath.Join(config.GuestHomePath, ".local", "share", "gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "workspace", guestPath: config.GuestWorkspacePath, directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "state", guestPath: config.GuestStateRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
+		{sandboxPath: "runtime", guestPath: config.GuestRuntimeRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
+		{sandboxPath: "logs", guestPath: config.GuestLogRoot, directoryOnlyExposure: directoryOnlyExposureAlreadyInData},
+		{sandboxPath: "home/.codex", guestPath: filepath.Join(config.GuestHomePath, ".codex"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.claude", guestPath: filepath.Join(config.GuestHomePath, ".claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.opencode", guestPath: filepath.Join(config.GuestHomePath, ".opencode"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.claude.json", guestPath: filepath.Join(config.GuestHomePath, ".claude.json"), isFile: true, directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.gitconfig", guestPath: filepath.Join(config.GuestHomePath, ".gitconfig"), isFile: true, directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.gemini", guestPath: filepath.Join(config.GuestHomePath, ".gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.config/claude", guestPath: filepath.Join(config.GuestHomePath, ".config", "claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.config/Claude", guestPath: filepath.Join(config.GuestHomePath, ".config", "Claude"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.config/gemini", guestPath: filepath.Join(config.GuestHomePath, ".config", "gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.config/opencode", guestPath: filepath.Join(config.GuestHomePath, ".config", "opencode"), directoryOnlyExposure: directoryOnlyExposureSymlink},
+		{sandboxPath: "home/.local/share/gemini", guestPath: filepath.Join(config.GuestHomePath, ".local", "share", "gemini"), directoryOnlyExposure: directoryOnlyExposureSymlink},
 	}
 }
 
-func logicalRuntimeMountHostPath(session *Session, entry logicalRuntimeMountEntry) string {
-	return filepath.Join(hostSessionDir(session), filepath.FromSlash(entry.sessionPath))
+func logicalRuntimeMountHostPath(session *Sandbox, entry logicalRuntimeMountEntry) string {
+	return filepath.Join(hostSandboxDir(session), filepath.FromSlash(entry.sandboxPath))
 }
 
-func runtimeMountSpecsForDocker(config *appconfig.Config, session *Session) []runtimeMountSpec {
+func runtimeMountSpecsForDocker(config *appconfig.Config, session *Sandbox) []runtimeMountSpec {
 	entries := runtimeMountEntries(config)
 	specs := make([]runtimeMountSpec, 0, len(entries))
 	for _, entry := range entries {
@@ -239,24 +239,24 @@ func runtimeMountSpecsForDocker(config *appconfig.Config, session *Session) []ru
 			isFile:    entry.isFile,
 		})
 	}
-	return append(specs, sessionVolumeMountSpecs(session)...)
+	return append(specs, sandboxVolumeMountSpecs(session)...)
 }
 
-func runtimeMountSpecsForBoxlite(config *appconfig.Config, session *Session) []runtimeMountSpec {
+func runtimeMountSpecsForBoxlite(config *appconfig.Config, session *Sandbox) []runtimeMountSpec {
 	if len(runtimeMountEntries(config)) == 0 {
 		return nil
 	}
 	return []runtimeMountSpec{
-		{hostPath: hostSessionDir(session), guestPath: directoryOnlyGuestSessionPath},
+		{hostPath: hostSandboxDir(session), guestPath: directoryOnlyGuestSandboxPath},
 	}
 }
 
-func runtimeMountSpecsForMicrosandbox(config *appconfig.Config, session *Session) []runtimeMountSpec {
+func runtimeMountSpecsForMicrosandbox(config *appconfig.Config, session *Sandbox) []runtimeMountSpec {
 	specs := runtimeMountSpecsForBoxlite(config, session)
-	return append(specs, sessionVolumeMountSpecs(session)...)
+	return append(specs, sandboxVolumeMountSpecs(session)...)
 }
 
-func sessionVolumeMountSpecs(session *Session) []runtimeMountSpec {
+func sandboxVolumeMountSpecs(session *Sandbox) []runtimeMountSpec {
 	if session == nil || len(session.VolumeMounts) == 0 {
 		return nil
 	}
@@ -303,10 +303,10 @@ func ensureRuntimeMountSource(spec runtimeMountSpec) error {
 	return nil
 }
 
-func initializeSessionHomeDefaults(session *Session) error {
-	home := hostSessionHome(session)
+func initializeSandboxHomeDefaults(session *Sandbox) error {
+	home := hostSandboxHome(session)
 	if err := os.MkdirAll(home, 0o755); err != nil {
-		return fmt.Errorf("create session home: %w", err)
+		return fmt.Errorf("create sandbox home: %w", err)
 	}
 	for _, item := range []string{".codex", ".claude", ".claude.json", ".gitconfig"} {
 		target := filepath.Join(home, item)
@@ -322,14 +322,14 @@ func initializeSessionHomeDefaults(session *Session) error {
 	return nil
 }
 
-func initializeSessionRuntimeMountDirs(config *appconfig.Config, session *Session) error {
+func initializeSandboxRuntimeMountDirs(config *appconfig.Config, session *Sandbox) error {
 	for _, entry := range runtimeMountEntries(config) {
 		if entry.isFile {
 			continue
 		}
 		dir := logicalRuntimeMountHostPath(session, entry)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create session runtime mount dir %s: %w", dir, err)
+			return fmt.Errorf("create sandbox runtime mount dir %s: %w", dir, err)
 		}
 	}
 	return nil

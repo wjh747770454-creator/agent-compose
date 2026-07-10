@@ -42,7 +42,7 @@ describe("runtime shape integration workflows", () => {
       expect(codex.threadOptions()).not.toHaveProperty("config");
 
       const claude = new ClaudeRunner(runnerOptions(root, "mpi context", "claude"));
-      expect(claude.queryOptions({ provider: "claude", sessionId: "s1" })).toMatchObject({
+      expect(claude.queryOptions({ provider: "claude", threadId: "s1" })).toMatchObject({
         cwd: path.join(root, "workspace"),
         resume: "s1",
         systemPrompt: {
@@ -60,7 +60,7 @@ describe("runtime shape integration workflows", () => {
       await fs.writeFile(messageFile, "hello", "utf8");
       const runPrompt = vi.fn().mockResolvedValue({
           provider: "gemini",
-          sessionId: "shape-session",
+          threadId: "shape-session",
           stopReason: "completed",
           finalText: "done",
           transcript: "done",
@@ -93,7 +93,7 @@ describe("runtime shape integration workflows", () => {
           workspace: path.join(root, "workspace"),
           home: path.join(root, "home"),
         });
-        expect(result.sessionId).toBe("shape-session");
+        expect(result.threadId).toBe("shape-session");
       } finally {
         stdio.restore();
         geminiSpy.mockRestore();

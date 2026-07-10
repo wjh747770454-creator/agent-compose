@@ -86,7 +86,7 @@ func testLoaderScheduleModelWorkflows(t *testing.T) {
 		t.Fatalf("unexpected topic match")
 	}
 
-	if domain.NormalizeLoaderSessionPolicy("new") != domain.LoaderSessionPolicyNew || domain.NormalizeLoaderSessionPolicy("bad") != domain.LoaderSessionPolicySticky {
+	if domain.NormalizeLoaderSandboxPolicy("new") != domain.LoaderSandboxPolicyNew || domain.NormalizeLoaderSandboxPolicy("bad") != domain.LoaderSandboxPolicySticky {
 		t.Fatalf("session policy normalization failed")
 	}
 	if domain.NormalizeLoaderConcurrencyPolicy("allow") != domain.LoaderConcurrencyPolicyParallel || domain.NormalizeLoaderConcurrencyPolicy("bad") != domain.LoaderConcurrencyPolicySkip {

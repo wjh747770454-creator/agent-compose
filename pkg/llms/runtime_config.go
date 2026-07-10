@@ -12,7 +12,7 @@ import (
 	domain "agent-compose/pkg/model"
 )
 
-func WriteCodexRuntimeConfig(session *domain.Session, model, baseURL, wireAPI string) error {
+func WriteCodexRuntimeConfig(session *domain.Sandbox, model, baseURL, wireAPI string) error {
 	if session == nil {
 		return nil
 	}
@@ -21,7 +21,7 @@ func WriteCodexRuntimeConfig(session *domain.Session, model, baseURL, wireAPI st
 	if model == "" || baseURL == "" {
 		return nil
 	}
-	path := filepath.Join(execution.HostSessionHome(session), ".codex", "config.toml")
+	path := filepath.Join(execution.HostSandboxHome(session), ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create codex config dir: %w", err)
 	}
@@ -31,7 +31,7 @@ model = %q
 [model_providers.agent_compose]
 name = "agent-compose"
 base_url = %q
-env_key = "AGENT_COMPOSE_SESSION_TOKEN"
+env_key = "AGENT_COMPOSE_SANDBOX_TOKEN"
 wire_api = %q
 request_max_retries = 30
 stream_max_retries = 50
@@ -55,7 +55,7 @@ persistence = "save-all"
 	return nil
 }
 
-func WriteOpenCodeRuntimeConfig(session *domain.Session, providerID, model, baseURL string) error {
+func WriteOpenCodeRuntimeConfig(session *domain.Sandbox, providerID, model, baseURL string) error {
 	if session == nil {
 		return nil
 	}
@@ -69,7 +69,7 @@ func WriteOpenCodeRuntimeConfig(session *domain.Session, providerID, model, base
 	if providerID == "openai" {
 		providerPackage = "@ai-sdk/openai"
 	}
-	path := filepath.Join(execution.HostSessionHome(session), ".config", "opencode", "opencode.json")
+	path := filepath.Join(execution.HostSandboxHome(session), ".config", "opencode", "opencode.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create opencode config dir: %w", err)
 	}
@@ -81,7 +81,7 @@ func WriteOpenCodeRuntimeConfig(session *domain.Session, providerID, model, base
 				"name": "agent-compose " + providerID,
 				"options": map[string]any{
 					"baseURL": baseURL,
-					"apiKey":  "{env:AGENT_COMPOSE_SESSION_TOKEN}",
+					"apiKey":  "{env:AGENT_COMPOSE_SANDBOX_TOKEN}",
 				},
 				"models": map[string]any{
 					model: map[string]any{"name": model},
@@ -99,7 +99,7 @@ func WriteOpenCodeRuntimeConfig(session *domain.Session, providerID, model, base
 	return nil
 }
 
-func WriteOpenCodeAnthropicRuntimeConfig(session *domain.Session, model, baseURL string) error {
+func WriteOpenCodeAnthropicRuntimeConfig(session *domain.Sandbox, model, baseURL string) error {
 	if session == nil {
 		return nil
 	}
@@ -108,7 +108,7 @@ func WriteOpenCodeAnthropicRuntimeConfig(session *domain.Session, model, baseURL
 	if model == "" || baseURL == "" {
 		return nil
 	}
-	path := filepath.Join(execution.HostSessionHome(session), ".config", "opencode", "opencode.json")
+	path := filepath.Join(execution.HostSandboxHome(session), ".config", "opencode", "opencode.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create opencode config dir: %w", err)
 	}
@@ -120,7 +120,7 @@ func WriteOpenCodeAnthropicRuntimeConfig(session *domain.Session, model, baseURL
 				"name": "agent-compose anthropic",
 				"options": map[string]any{
 					"baseURL": baseURL,
-					"apiKey":  "{env:AGENT_COMPOSE_SESSION_TOKEN}",
+					"apiKey":  "{env:AGENT_COMPOSE_SANDBOX_TOKEN}",
 				},
 				"models": map[string]any{
 					model: map[string]any{"name": model},
@@ -144,7 +144,7 @@ func GuestOpenCodeConfigPath(config *appconfig.Config) string {
 	return filepath.Join(config.GuestHomePath, ".config", "opencode", "opencode.json")
 }
 
-func GuestRuntimeBaseURL(config *appconfig.Config, session *domain.Session) string {
+func GuestRuntimeBaseURL(config *appconfig.Config, session *domain.Sandbox) string {
 	if config == nil {
 		return ""
 	}
@@ -172,11 +172,11 @@ func GuestRuntimeBaseURL(config *appconfig.Config, session *domain.Session) stri
 	return "http://" + host + ":" + port
 }
 
-func LookupRuntimeBaseURLEnv(session *domain.Session) string {
+func LookupRuntimeBaseURLEnv(session *domain.Sandbox) string {
 	if session == nil {
 		return ""
 	}
-	for _, items := range [][]domain.SessionEnvVar{session.ProviderEnvItems, session.RuntimeEnvItems, session.EnvItems} {
+	for _, items := range [][]domain.SandboxEnvVar{session.ProviderEnvItems, session.RuntimeEnvItems, session.EnvItems} {
 		if value := EnvItemValue(items, RuntimeBaseURLEnvName); strings.TrimSpace(value) != "" {
 			return value
 		}

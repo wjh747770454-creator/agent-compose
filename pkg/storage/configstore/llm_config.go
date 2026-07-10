@@ -53,7 +53,7 @@ func (s *llmStore) ensureLLMSchema(ctx context.Context) error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS llm_facade_token (
 			token_hash TEXT PRIMARY KEY,
-			session_id TEXT NOT NULL,
+			sandbox_id TEXT NOT NULL,
 			token_fingerprint TEXT NOT NULL,
 			model TEXT NOT NULL DEFAULT '',
 			provider_id TEXT NOT NULL DEFAULT '',
@@ -64,7 +64,7 @@ func (s *llmStore) ensureLLMSchema(ctx context.Context) error {
 			expires_at INTEGER NOT NULL,
 			revoked_at INTEGER NOT NULL DEFAULT 0
 		);`,
-		`CREATE INDEX IF NOT EXISTS idx_llm_facade_token_session ON llm_facade_token(session_id, revoked_at, expires_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_llm_facade_token_sandbox ON llm_facade_token(sandbox_id, revoked_at, expires_at);`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -177,8 +177,8 @@ func (s *llmStore) LLMProviderModelWireAPI(ctx context.Context, providerID, mode
 }
 
 func (s *llmStore) SaveLLMFacadeToken(ctx context.Context, token llms.FacadeToken) error {
-	if strings.TrimSpace(token.TokenHash) == "" || strings.TrimSpace(token.SessionID) == "" {
-		return fmt.Errorf("llm facade token hash and session id are required")
+	if strings.TrimSpace(token.TokenHash) == "" || strings.TrimSpace(token.SandboxID) == "" {
+		return fmt.Errorf("llm facade token hash and sandbox id are required")
 	}
 	if token.IssuedAt.IsZero() {
 		token.IssuedAt = time.Now().UTC()
@@ -191,10 +191,10 @@ func (s *llmStore) SaveLLMFacadeToken(ctx context.Context, token llms.FacadeToke
 	if !token.ExpiresAt.IsZero() {
 		expiresAt = token.ExpiresAt.Unix()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO llm_facade_token(token_hash, session_id, token_fingerprint, model, provider_id, wire_api, source, run_id, issued_at, expires_at, revoked_at)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO llm_facade_token(token_hash, sandbox_id, token_fingerprint, model, provider_id, wire_api, source, run_id, issued_at, expires_at, revoked_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(token_hash) DO UPDATE SET session_id = excluded.session_id, token_fingerprint = excluded.token_fingerprint, model = excluded.model, provider_id = excluded.provider_id, wire_api = excluded.wire_api, source = excluded.source, run_id = excluded.run_id, issued_at = excluded.issued_at, expires_at = excluded.expires_at, revoked_at = excluded.revoked_at`,
-		token.TokenHash, token.SessionID, token.TokenFingerprint, token.Model, token.ProviderID, token.WireAPI, token.Source, token.RunID, token.IssuedAt.Unix(), expiresAt, revokedAt)
+		ON CONFLICT(token_hash) DO UPDATE SET sandbox_id = excluded.sandbox_id, token_fingerprint = excluded.token_fingerprint, model = excluded.model, provider_id = excluded.provider_id, wire_api = excluded.wire_api, source = excluded.source, run_id = excluded.run_id, issued_at = excluded.issued_at, expires_at = excluded.expires_at, revoked_at = excluded.revoked_at`,
+		token.TokenHash, token.SandboxID, token.TokenFingerprint, token.Model, token.ProviderID, token.WireAPI, token.Source, token.RunID, token.IssuedAt.Unix(), expiresAt, revokedAt)
 	if err != nil {
 		return fmt.Errorf("save llm facade token: %w", err)
 	}
@@ -217,7 +217,7 @@ func (s *llmStore) DeleteLLMFacadeToken(ctx context.Context, rawToken string) er
 
 func (s *llmStore) GetLLMFacadeToken(ctx context.Context, rawToken string) (llms.FacadeToken, error) {
 	hash, fingerprint := llms.HashFacadeToken(rawToken)
-	row := s.db.QueryRowContext(ctx, `SELECT session_id, token_hash, token_fingerprint, model, provider_id, wire_api, source, run_id, issued_at, expires_at, revoked_at FROM llm_facade_token WHERE token_hash = ?`, hash)
+	row := s.db.QueryRowContext(ctx, `SELECT sandbox_id, token_hash, token_fingerprint, model, provider_id, wire_api, source, run_id, issued_at, expires_at, revoked_at FROM llm_facade_token WHERE token_hash = ?`, hash)
 	token, err := llms.ScanFacadeToken(row.Scan)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -235,10 +235,10 @@ const llmFacadeTokenRetention = time.Hour
 
 const LLMFacadeTokenRetention = llmFacadeTokenRetention
 
-func (s *llmStore) RevokeLLMFacadeTokensForSession(ctx context.Context, sessionID string) error {
+func (s *llmStore) RevokeLLMFacadeTokensForSandbox(ctx context.Context, sandboxID string) error {
 	now := time.Now().UTC()
-	if _, err := s.db.ExecContext(ctx, `UPDATE llm_facade_token SET revoked_at = ? WHERE session_id = ? AND revoked_at = 0`, now.Unix(), strings.TrimSpace(sessionID)); err != nil {
-		return fmt.Errorf("revoke llm facade tokens for session: %w", err)
+	if _, err := s.db.ExecContext(ctx, `UPDATE llm_facade_token SET revoked_at = ? WHERE sandbox_id = ? AND revoked_at = 0`, now.Unix(), strings.TrimSpace(sandboxID)); err != nil {
+		return fmt.Errorf("revoke llm facade tokens for sandbox: %w", err)
 	}
 	// Opportunistically prune long-dead rows (revoked beyond the retention grace,
 	// or expired) so the table stays bounded across sessions. Both states already

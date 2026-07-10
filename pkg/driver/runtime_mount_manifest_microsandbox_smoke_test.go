@@ -16,22 +16,22 @@ func TestSmokeMicrosandboxRuntimeMountManifestDirectoryOnlyStarts(t *testing.T) 
 	defer cancel()
 
 	config := newRuntimeSmokeConfig(t, RuntimeDriverMicrosandbox)
-	session, vmState, proxyState := newRuntimeSmokeSession(t, ctx, config, RuntimeDriverMicrosandbox)
+	session, vmState, proxyState := newRuntimeSmokeSandbox(t, ctx, config, RuntimeDriverMicrosandbox)
 	assertDirectoryOnlyRuntimeSmokeManifest(t, session, RuntimeDriverMicrosandbox)
 
 	runtime := &microsandboxRuntime{config: config, lifecycleHandles: map[string]*microsandbox.Sandbox{}}
-	info, err := runtime.EnsureSession(ctx, session, vmState, proxyState)
+	info, err := runtime.EnsureSandbox(ctx, session, vmState, proxyState)
 	if err != nil {
-		t.Fatalf("EnsureSession returned error: %v", err)
+		t.Fatalf("EnsureSandbox returned error: %v", err)
 	}
 	vmState.BoxID = info.BoxID
 	t.Cleanup(func() {
 		if t.Failed() && runtimeSmokeKeepTmp() {
 			return
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), config.SessionStopTimeout)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), config.SandboxStopTimeout)
 		defer stopCancel()
-		_, _ = runtime.StopSession(stopCtx, session, vmState)
+		_, _ = runtime.StopSandbox(stopCtx, session, vmState)
 	})
 	assertMicrosandboxRuntimeSmokeGuestPaths(t, ctx, runtime, session, vmState)
 	assertRuntimeSmokeHomeFiles(t, ctx, runtime, session, vmState)
@@ -44,28 +44,28 @@ func TestSmokeMicrosandboxUsesGoContainerRegistryOCIImage(t *testing.T) {
 
 	config := newRuntimeSmokeConfig(t, RuntimeDriverMicrosandbox)
 	config.MicrosandboxDefaultImage = prepareRuntimeSmokeGoContainerRegistryOCIImage(t, ctx, config)
-	session, vmState, proxyState := newRuntimeSmokeSession(t, ctx, config, RuntimeDriverMicrosandbox)
+	session, vmState, proxyState := newRuntimeSmokeSandbox(t, ctx, config, RuntimeDriverMicrosandbox)
 	assertDirectoryOnlyRuntimeSmokeManifest(t, session, RuntimeDriverMicrosandbox)
 
 	runtime := &microsandboxRuntime{config: config, lifecycleHandles: map[string]*microsandbox.Sandbox{}}
-	info, err := runtime.EnsureSession(ctx, session, vmState, proxyState)
+	info, err := runtime.EnsureSandbox(ctx, session, vmState, proxyState)
 	if err != nil {
-		t.Fatalf("EnsureSession returned error: %v", err)
+		t.Fatalf("EnsureSandbox returned error: %v", err)
 	}
 	vmState.BoxID = info.BoxID
 	t.Cleanup(func() {
 		if t.Failed() && runtimeSmokeKeepTmp() {
 			return
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), config.SessionStopTimeout)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), config.SandboxStopTimeout)
 		defer stopCancel()
-		_, _ = runtime.StopSession(stopCtx, session, vmState)
+		_, _ = runtime.StopSandbox(stopCtx, session, vmState)
 	})
 	assertMicrosandboxRuntimeSmokeGuestPaths(t, ctx, runtime, session, vmState)
 	assertRuntimeSmokeHomeFiles(t, ctx, runtime, session, vmState)
 }
 
-func assertMicrosandboxRuntimeSmokeGuestPaths(t *testing.T, ctx context.Context, runtime *microsandboxRuntime, session *Session, vmState VMState) {
+func assertMicrosandboxRuntimeSmokeGuestPaths(t *testing.T, ctx context.Context, runtime *microsandboxRuntime, session *Sandbox, vmState VMState) {
 	t.Helper()
 	result, err := runtime.Exec(ctx, session, vmState, ExecSpec{Command: "sh", Args: []string{"-lc", runtimeSmokeGuestPathAssertionScript()}, Cwd: "/"})
 	if err != nil {

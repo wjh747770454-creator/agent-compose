@@ -42,42 +42,42 @@ func testCapabilityGatewayCoverage(t *testing.T) {
 		t.Fatalf("DecodeCapsetIDs accepted invalid or null input")
 	}
 
-	env, tags := BuildGatewaySessionVars(" 127.0.0.1:9000 ", []string{"dev", "", "ops", "dev"})
-	if len(env) != 2 || env[0].Name != ProxyTargetEnvName || env[0].Value != "127.0.0.1:9000" || env[1].Name != SessionTokenEnvName || !env[1].Secret {
+	env, tags := BuildGatewaySandboxVars(" 127.0.0.1:9000 ", []string{"dev", "", "ops", "dev"})
+	if len(env) != 2 || env[0].Name != ProxyTargetEnvName || env[0].Value != "127.0.0.1:9000" || env[1].Name != SandboxTokenEnvName || !env[1].Secret {
 		t.Fatalf("gateway env = %#v", env)
 	}
 	if len(tags) != 2 || tags[0].Value != "dev" || tags[1].Value != "ops" {
 		t.Fatalf("gateway tags = %#v", tags)
 	}
-	if emptyEnv, emptyTags := BuildGatewaySessionVars("", []string{"dev"}); emptyEnv != nil || emptyTags != nil {
-		t.Fatalf("BuildGatewaySessionVars without target = %#v/%#v", emptyEnv, emptyTags)
+	if emptyEnv, emptyTags := BuildGatewaySandboxVars("", []string{"dev"}); emptyEnv != nil || emptyTags != nil {
+		t.Fatalf("BuildGatewaySandboxVars without target = %#v/%#v", emptyEnv, emptyTags)
 	}
-	if GuidePreamble("") != "" || !strings.Contains(GuidePreamble("127.0.0.1:9000"), capproxy.SessionTokenMetadata) {
+	if GuidePreamble("") != "" || !strings.Contains(GuidePreamble("127.0.0.1:9000"), capproxy.SandboxTokenMetadata) {
 		t.Fatalf("GuidePreamble did not include expected metadata")
 	}
 
-	session := &domain.Session{
-		Summary: domain.SessionSummary{
-			ID:            "session-1",
+	sandbox := &domain.Sandbox{
+		Summary: domain.SandboxSummary{
+			ID:            "sandbox-1",
 			WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
-			Tags:          append(tags, domain.SessionTag{Name: CapsetTagName, Value: " dev "}),
+			Tags:          append(tags, domain.SandboxTag{Name: CapsetTagName, Value: " dev "}),
 		},
 		EnvItems: env,
 	}
-	if runtimeDir := SessionRuntimeDir(session); runtimeDir != filepath.Join(filepath.Dir(session.Summary.WorkspacePath), "runtime") {
-		t.Fatalf("SessionRuntimeDir = %q", runtimeDir)
+	if runtimeDir := SandboxRuntimeDir(sandbox); runtimeDir != filepath.Join(filepath.Dir(sandbox.Summary.WorkspacePath), "runtime") {
+		t.Fatalf("SandboxRuntimeDir = %q", runtimeDir)
 	}
-	if guidePath := SessionGuidePath(session); !strings.HasSuffix(guidePath, filepath.Join("runtime", "mpi", "catalog.md")) {
-		t.Fatalf("SessionGuidePath = %q", guidePath)
+	if guidePath := SandboxGuidePath(sandbox); !strings.HasSuffix(guidePath, filepath.Join("runtime", "mpi", "catalog.md")) {
+		t.Fatalf("SandboxGuidePath = %q", guidePath)
 	}
-	if SessionToken(session) == "" || SessionToken(nil) != "" {
-		t.Fatalf("SessionToken returned unexpected values")
+	if SandboxToken(sandbox) == "" || SandboxToken(nil) != "" {
+		t.Fatalf("SandboxToken returned unexpected values")
 	}
-	if capsets := SessionCapsets(session); strings.Join(capsets, ",") != "dev,ops" {
-		t.Fatalf("SessionCapsets = %#v", capsets)
+	if capsets := SandboxCapsets(sandbox); strings.Join(capsets, ",") != "dev,ops" {
+		t.Fatalf("SandboxCapsets = %#v", capsets)
 	}
-	if SessionRuntimeDir(nil) != "" || SessionGuidePath(&domain.Session{}) != "" {
-		t.Fatalf("empty session paths returned non-empty values")
+	if SandboxRuntimeDir(nil) != "" || SandboxGuidePath(&domain.Sandbox{}) != "" {
+		t.Fatalf("empty sandbox paths returned non-empty values")
 	}
 }
 

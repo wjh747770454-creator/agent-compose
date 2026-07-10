@@ -93,7 +93,6 @@ func ScanProjectRun(scan func(dest ...any) error) (domain.ProjectRunRecord, erro
 	); err != nil {
 		return domain.ProjectRunRecord{}, fmt.Errorf("scan project run: %w", err)
 	}
-	item.SessionID = item.SandboxID
 	item.StartedAt = parseStoredUnixTimeAuto(AsInt64Time(startedAtRaw))
 	item.CompletedAt = parseStoredUnixTimeAuto(AsInt64Time(completedAtRaw))
 	item.CreatedAt = parseStoredTime(createdAtRaw)

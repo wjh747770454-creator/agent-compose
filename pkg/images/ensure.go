@@ -21,11 +21,11 @@ func EnsureProjectAgentImages(ctx context.Context, config *appconfig.Config, bac
 		return fmt.Errorf("image ensure config is required")
 	}
 	for _, agent := range agents {
-		driver, err := driverpkg.ResolveSessionRuntimeDriver(agent.Driver, config.RuntimeDriver)
+		driver, err := driverpkg.ResolveSandboxRuntimeDriver(agent.Driver, config.RuntimeDriver)
 		if err != nil {
 			return fmt.Errorf("ensure image for project %s agent %s: %w", projectName, agent.AgentName, err)
 		}
-		imageRef := driverpkg.ResolveSessionGuestImage(agent.Image, driverpkg.DefaultGuestImageForDriver(config, driver))
+		imageRef := driverpkg.ResolveSandboxGuestImage(agent.Image, driverpkg.DefaultGuestImageForDriver(config, driver))
 		if err := EnsureDriverImage(ctx, config, backend, EnsureRequest{
 			Driver:      driver,
 			ImageRef:    imageRef,

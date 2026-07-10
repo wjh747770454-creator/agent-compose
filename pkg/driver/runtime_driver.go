@@ -44,7 +44,7 @@ func ValidateRuntimeDriver(value string) error {
 	return validateRuntimeDriver(value)
 }
 
-func resolveSessionRuntimeDriver(value, fallback string) (string, error) {
+func resolveSandboxRuntimeDriver(value, fallback string) (string, error) {
 	input := value
 	if strings.TrimSpace(input) == "" {
 		input = fallback
@@ -56,8 +56,8 @@ func resolveSessionRuntimeDriver(value, fallback string) (string, error) {
 	return driver, nil
 }
 
-func ResolveSessionRuntimeDriver(value, fallback string) (string, error) {
-	return resolveSessionRuntimeDriver(value, fallback)
+func ResolveSandboxRuntimeDriver(value, fallback string) (string, error) {
+	return resolveSandboxRuntimeDriver(value, fallback)
 }
 
 func defaultGuestImageForDriver(config *appconfig.Config, driver string) string {

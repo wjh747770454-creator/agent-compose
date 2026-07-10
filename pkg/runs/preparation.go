@@ -20,24 +20,24 @@ type PreparationStore interface {
 	GetProject(ctx context.Context, projectID string) (domain.ProjectRecord, error)
 	GetProjectRevision(ctx context.Context, projectID string, revision int64) (domain.ProjectRevisionRecord, error)
 	GetAgentDefinition(ctx context.Context, id string) (domain.AgentDefinition, error)
-	ListGlobalEnv(ctx context.Context) ([]domain.SessionEnvVar, error)
+	ListGlobalEnv(ctx context.Context) ([]domain.SandboxEnvVar, error)
 	ListProjectVolumes(ctx context.Context, projectID string) (map[string]domain.VolumeRecord, error)
 }
 
 type WorkspaceResolver interface {
-	ResolveProjectRunWorkspace(ctx context.Context, run domain.ProjectRunRecord, project domain.ProjectRecord, agentWorkspace *compose.WorkspaceSpec) (*domain.WorkspaceConfig, *domain.SessionWorkspace, error)
+	ResolveProjectRunWorkspace(ctx context.Context, run domain.ProjectRunRecord, project domain.ProjectRecord, projectWorkspace, agentWorkspace *compose.WorkspaceSpec) (*domain.WorkspaceConfig, *domain.SandboxWorkspace, error)
 }
 
 type Preparation struct {
-	EnvItems         []domain.SessionEnvVar
-	ProviderEnvItems []domain.SessionEnvVar
+	EnvItems         []domain.SandboxEnvVar
+	ProviderEnvItems []domain.SandboxEnvVar
 	CapsetIDs        []string
 	WorkspaceConfig  *domain.WorkspaceConfig
-	Workspace        *domain.SessionWorkspace
+	Workspace        *domain.SandboxWorkspace
 	Volumes          []domain.VolumeMountSpec
 	ProjectRoot      string
 	ProjectVolumes   map[string]domain.VolumeRecord
-	Jupyter          sessionstore.CreateSessionOptions
+	Jupyter          sessionstore.CreateSandboxOptions
 }
 
 func PrepareProjectRun(ctx context.Context, store PreparationStore, resolver WorkspaceResolver, run domain.ProjectRunRecord, requestEnv []*agentcomposev2.EnvVarSpec) (Preparation, error) {
@@ -92,7 +92,11 @@ func PrepareProjectRun(ctx context.Context, store PreparationStore, resolver Wor
 	if resolver == nil {
 		return prepared, nil
 	}
-	workspaceConfig, workspaceSnapshot, err := resolver.ResolveProjectRunWorkspace(ctx, run, project, ComposeWorkspaceSpecFromV2(agentSpec.GetWorkspace()))
+	projectWorkspace, agentWorkspace, err := ProjectRunWorkspaceSpecsFromV2(spec.GetWorkspaces(), agentSpec.GetWorkspace())
+	if err != nil {
+		return Preparation{}, err
+	}
+	workspaceConfig, workspaceSnapshot, err := resolver.ResolveProjectRunWorkspace(ctx, run, project, projectWorkspace, agentWorkspace)
 	if err != nil {
 		return Preparation{}, err
 	}
@@ -115,12 +119,12 @@ func ProjectRoot(project domain.ProjectRecord) string {
 	return filepath.Dir(sourcePath)
 }
 
-func jupyterOptionsFromAgentSpec(agent *agentcomposev2.AgentSpec) sessionstore.CreateSessionOptions {
+func jupyterOptionsFromAgentSpec(agent *agentcomposev2.AgentSpec) sessionstore.CreateSandboxOptions {
 	if agent == nil || agent.GetJupyter() == nil {
-		return sessionstore.CreateSessionOptions{}
+		return sessionstore.CreateSandboxOptions{}
 	}
 	jupyter := agent.GetJupyter()
-	return sessionstore.CreateSessionOptions{
+	return sessionstore.CreateSandboxOptions{
 		JupyterEnabled:   jupyter.GetEnabled(),
 		JupyterGuestPort: int(jupyter.GetGuestPort()),
 	}
@@ -147,13 +151,13 @@ func AgentSpecByName(spec *agentcomposev2.ProjectSpec, name string) (*agentcompo
 	return nil, false
 }
 
-func EnvItemsFromV2(items []*agentcomposev2.EnvVarSpec) []domain.SessionEnvVar {
-	env := make([]domain.SessionEnvVar, 0, len(items))
+func EnvItemsFromV2(items []*agentcomposev2.EnvVarSpec) []domain.SandboxEnvVar {
+	env := make([]domain.SandboxEnvVar, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue
 		}
-		env = append(env, domain.SessionEnvVar{
+		env = append(env, domain.SandboxEnvVar{
 			Name:   item.GetName(),
 			Value:  item.GetValue(),
 			Secret: item.GetSecret(),
@@ -175,8 +179,53 @@ func ComposeWorkspaceSpecFromV2(workspace *agentcomposev2.WorkspaceSpec) *compos
 	}
 }
 
-func MergeEnvItems(groups ...[]domain.SessionEnvVar) []domain.SessionEnvVar {
-	var merged []domain.SessionEnvVar
+func ProjectRunWorkspaceSpecsFromV2(projectWorkspaces []*agentcomposev2.NamedWorkspaceSpec, agentWorkspace *agentcomposev2.WorkspaceSpec) (*compose.WorkspaceSpec, *compose.WorkspaceSpec, error) {
+	globals := make(map[string]compose.WorkspaceSpec, len(projectWorkspaces))
+	keys := make([]string, 0, len(projectWorkspaces))
+	for i, item := range projectWorkspaces {
+		name := strings.TrimSpace(item.GetName())
+		if name == "" {
+			return nil, nil, fmt.Errorf("project workspace %d name is required", i)
+		}
+		if _, exists := globals[name]; exists {
+			return nil, nil, fmt.Errorf("duplicate project workspace %q", name)
+		}
+		workspace := ComposeWorkspaceSpecFromV2(item.GetWorkspace())
+		if workspace == nil {
+			return nil, nil, fmt.Errorf("project workspace %q spec is required", name)
+		}
+		workspace.Name = ""
+		globals[name] = *workspace
+		keys = append(keys, name)
+	}
+
+	agent := ComposeWorkspaceSpecFromV2(agentWorkspace)
+	if agent != nil {
+		hasName := strings.TrimSpace(agent.Name) != ""
+		hasInline := strings.TrimSpace(agent.Provider) != "" || strings.TrimSpace(agent.URL) != "" || strings.TrimSpace(agent.Branch) != "" || strings.TrimSpace(agent.Path) != ""
+		switch {
+		case hasName && hasInline:
+			return nil, nil, fmt.Errorf("agent workspace reference cannot set name together with provider, url, branch, or path")
+		case hasName:
+			workspace, ok := globals[strings.TrimSpace(agent.Name)]
+			if !ok {
+				return nil, nil, fmt.Errorf("agent workspace %q is not defined", agent.Name)
+			}
+			return nil, &workspace, nil
+		case hasInline:
+			return nil, agent, nil
+		}
+	}
+
+	if len(globals) == 1 {
+		workspace := globals[keys[0]]
+		return &workspace, nil, nil
+	}
+	return nil, nil, nil
+}
+
+func MergeEnvItems(groups ...[]domain.SandboxEnvVar) []domain.SandboxEnvVar {
+	var merged []domain.SandboxEnvVar
 	for _, group := range groups {
 		merged = domain.MergeEnvItems(merged, group)
 	}

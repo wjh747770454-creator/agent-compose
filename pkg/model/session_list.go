@@ -5,12 +5,12 @@ import (
 	"time"
 )
 
-const DefaultSessionListLimit = 50
+const DefaultSandboxListLimit = 50
 
-func NormalizeSessionTriggerSource(value string, tags []SessionTag) string {
+func NormalizeSandboxTriggerSource(value string, tags []SandboxTag) string {
 	value = strings.TrimSpace(value)
 	if value != "" {
-		if value == SessionTypeManual || strings.HasPrefix(value, SessionTypeScript+":") {
+		if value == SandboxTypeManual || strings.HasPrefix(value, SandboxTypeScript+":") {
 			return value
 		}
 	}
@@ -27,30 +27,30 @@ func NormalizeSessionTriggerSource(value string, tags []SessionTag) string {
 		}
 	}
 	if hasLoaderOrigin && loaderID != "" {
-		return SessionTypeScript + ":" + loaderID
+		return SandboxTypeScript + ":" + loaderID
 	}
-	return SessionTypeManual
+	return SandboxTypeManual
 }
 
-func SessionTypeFromTriggerSource(value string) string {
-	value = NormalizeSessionTriggerSource(value, nil)
-	if strings.HasPrefix(value, SessionTypeScript+":") {
-		return SessionTypeScript
+func SandboxTypeFromTriggerSource(value string) string {
+	value = NormalizeSandboxTriggerSource(value, nil)
+	if strings.HasPrefix(value, SandboxTypeScript+":") {
+		return SandboxTypeScript
 	}
-	return SessionTypeManual
+	return SandboxTypeManual
 }
 
-func NormalizeSessionListBounds(offset, limit int) (int, int) {
+func NormalizeSandboxListBounds(offset, limit int) (int, int) {
 	if offset < 0 {
 		offset = 0
 	}
 	if limit <= 0 {
-		limit = DefaultSessionListLimit
+		limit = DefaultSandboxListLimit
 	}
 	return offset, limit
 }
 
-func PaginateSessions(items []*Session, offset, limit int) []*Session {
+func PaginateSandboxes(items []*Sandbox, offset, limit int) []*Sandbox {
 	if offset >= len(items) {
 		return nil
 	}
@@ -61,13 +61,13 @@ func PaginateSessions(items []*Session, offset, limit int) []*Session {
 	return items[offset:end]
 }
 
-func SessionMatchesListOptions(session *Session, options SessionListOptions) bool {
+func SandboxMatchesListOptions(session *Sandbox, options SandboxListOptions) bool {
 	if session == nil {
 		return false
 	}
 	summary := session.Summary
-	if value := strings.ToLower(strings.TrimSpace(options.SessionType)); value != "" {
-		if SessionTypeFromTriggerSource(summary.TriggerSource) != value {
+	if value := strings.ToLower(strings.TrimSpace(options.SandboxType)); value != "" {
+		if SandboxTypeFromTriggerSource(summary.TriggerSource) != value {
 			return false
 		}
 	}

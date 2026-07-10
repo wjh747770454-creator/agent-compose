@@ -275,7 +275,7 @@ Rules:
 - `sandbox prune` only considers sandboxes that belong to the current compose project.
 - `sandbox prune` never removes `running` or `pending` sandboxes and never sends `force=true` to `RemoveSandbox`.
 - Time values that cannot be parsed are skipped and reported as warnings.
-- `sandbox prune` removes sandbox/session records through `SandboxService.RemoveSandbox`; it does not clean runtime cache files. Use `cache prune` or `cache rm` for daemon runtime cache inventory.
+- `sandbox prune` removes sandbox records through `SandboxService.RemoveSandbox`; it does not clean runtime cache files. Use `cache prune` or `cache rm` for daemon runtime cache inventory.
 - If a forced prune fails to remove one matched sandbox, it continues with later matches, writes the skipped item, and exits non-zero.
 
 ## `stats`: Show Sandbox Resource Stats

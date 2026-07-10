@@ -8,6 +8,9 @@ import (
 
 func TestIsRuntimeLLMFacadeRequestMatchesOnlyRegisteredPOSTRoutes(t *testing.T) {
 	valid := []string{
+		"/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses",
+		"/api/runtime/sandboxes/sandbox-1/llm/openai/v1/chat/completions",
+		"/api/runtime/sandboxes/sandbox-1/llm/anthropic/v1/messages",
 		"/api/runtime/sessions/session-1/llm/openai/v1/responses",
 		"/api/runtime/sessions/session-1/llm/openai/v1/chat/completions",
 		"/api/runtime/sessions/session-1/llm/anthropic/v1/messages",
@@ -23,12 +26,12 @@ func TestIsRuntimeLLMFacadeRequestMatchesOnlyRegisteredPOSTRoutes(t *testing.T) 
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/api/runtime/sessions/session-1/llm/openai/v1/responses"},
-		{http.MethodPost, "/api/runtime/sessions/session-1/llm/openai/v1/responses/extra"},
-		{http.MethodPost, "/api/runtime/sessions/session-1/not-llm/openai/v1/responses"},
-		{http.MethodPost, "/api/runtime/sessions/session-1/llm/openai/v1/unknown"},
-		{http.MethodPost, "/api/runtime/sessions/session-1/llm/anthropic/v1/messages/extra"},
-		{http.MethodPost, "/api/other/session-1/llm/openai/v1/responses"},
+		{http.MethodGet, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses"},
+		{http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/responses/extra"},
+		{http.MethodPost, "/api/runtime/sandboxes/sandbox-1/not-llm/openai/v1/responses"},
+		{http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/openai/v1/unknown"},
+		{http.MethodPost, "/api/runtime/sandboxes/sandbox-1/llm/anthropic/v1/messages/extra"},
+		{http.MethodPost, "/api/other/sandbox-1/llm/openai/v1/responses"},
 	}
 	for _, tc := range invalid {
 		req := httptest.NewRequest(tc.method, tc.path, nil)

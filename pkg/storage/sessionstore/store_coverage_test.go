@@ -45,7 +45,7 @@ func TestE2EStorePersistenceErrorAndUpdateBranches(t *testing.T) {
 func TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)
-	session, err := store.CreateSession(ctx, "Prefixed Proxy", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "Prefixed Proxy", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
@@ -58,15 +58,37 @@ func TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t *testing.T) {
 	if session.Summary.RuntimeRef != "agent-compose-"+session.Summary.ShortID {
 		t.Fatalf("runtime ref = %q, want short-id ref", session.Summary.RuntimeRef)
 	}
-	sessionDir := store.SessionDir(session.Summary.ID)
-	if strings.ContainsAny(filepath.Base(sessionDir), ",:;") {
-		t.Fatalf("session dir basename = %q, want no runtime-forbidden characters", filepath.Base(sessionDir))
+	sandboxDir := store.SandboxDir(session.Summary.ID)
+	if strings.ContainsAny(filepath.Base(sandboxDir), ",:;") {
+		t.Fatalf("sandbox dir basename = %q, want no runtime-forbidden characters", filepath.Base(sandboxDir))
 	}
-	if filepath.Base(sessionDir) != strings.TrimPrefix(session.Summary.ID, identity.Prefix) {
-		t.Fatalf("session dir = %q, want hash identity path", sessionDir)
+	if filepath.Base(sandboxDir) != strings.TrimPrefix(session.Summary.ID, identity.Prefix) {
+		t.Fatalf("sandbox dir = %q, want hash identity path", sandboxDir)
 	}
-	if session.Summary.WorkspacePath != filepath.Join(sessionDir, "workspace") {
-		t.Fatalf("workspace path = %q, want under session dir %q", session.Summary.WorkspacePath, sessionDir)
+	if session.Summary.WorkspacePath != filepath.Join(sandboxDir, "workspace") {
+		t.Fatalf("workspace path = %q, want under sandbox dir %q", session.Summary.WorkspacePath, sandboxDir)
+	}
+	if gotRoot := filepath.Dir(sandboxDir); filepath.Base(gotRoot) != "sandboxes" {
+		t.Fatalf("sandbox dir root = %q, want sandboxes", gotRoot)
+	}
+	for _, rel := range []string{
+		"metadata.json",
+		"workspace",
+		"context",
+		"home",
+		"runtime",
+		"state",
+		"logs",
+		"vm",
+		"proxy",
+		filepath.Join("state", "cells.json"),
+		filepath.Join("state", "events.jsonl"),
+		filepath.Join("vm", "runtime.json"),
+		filepath.Join("proxy", "jupyter.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(sandboxDir, rel)); err != nil {
+			t.Fatalf("sandbox layout missing %s: %v", rel, err)
+		}
 	}
 	wantProxyPath := "/agent-compose/session/" + session.Summary.ID + "/lab"
 	if session.Summary.ProxyPath != wantProxyPath {
@@ -86,18 +108,18 @@ func TestStoreCreateSessionUsesConfiguredJupyterProxyBase(t *testing.T) {
 
 func TestSessionLockKeyUsesSessionDirName(t *testing.T) {
 	id := identity.NewID(identity.ResourceSandbox, "lock-key")
-	if got, want := sessionLockKey(id), sessionDirName(id); got != want {
-		t.Fatalf("sessionLockKey(%q) = %q, want %q", id, got, want)
+	if got, want := sandboxLockKey(id), sandboxDirName(id); got != want {
+		t.Fatalf("sandboxLockKey(%q) = %q, want %q", id, got, want)
 	}
-	if sessionLockKey(id) != sessionLockKey(strings.TrimPrefix(id, identity.Prefix)) {
+	if sandboxLockKey(id) != sandboxLockKey(strings.TrimPrefix(id, identity.Prefix)) {
 		t.Fatalf("session lock key should match canonical and directory-form ids")
 	}
 }
 
 func TestSessionDirNameFallbackPreservesInvalidInput(t *testing.T) {
 	for _, id := range []string{" . ", " .. ", "   "} {
-		if got := sessionDirName(id); got != id {
-			t.Fatalf("sessionDirName(%q) = %q, want unchanged fallback", id, got)
+		if got := sandboxDirName(id); got != id {
+			t.Fatalf("sandboxDirName(%q) = %q, want unchanged fallback", id, got)
 		}
 	}
 }
@@ -105,13 +127,13 @@ func TestSessionDirNameFallbackPreservesInvalidInput(t *testing.T) {
 func TestStoreCreateSessionWithJupyterOptions(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)
-	session, err := store.CreateSessionWithOptions(ctx, "Jupyter", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil, CreateSessionOptions{
+	session, err := store.CreateSandboxWithOptions(ctx, "Jupyter", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil, CreateSandboxOptions{
 		JupyterEnabled:   true,
 		JupyterGuestPort: 9999,
 		JupyterExpose:    true,
 	})
 	if err != nil {
-		t.Fatalf("CreateSessionWithOptions returned error: %v", err)
+		t.Fatalf("CreateSandboxWithOptions returned error: %v", err)
 	}
 	proxyState, err := store.GetProxyState(session.Summary.ID)
 	if err != nil {
@@ -125,7 +147,7 @@ func TestStoreCreateSessionWithJupyterOptions(t *testing.T) {
 func TestStoreCreateSessionInitializesJSONLEvents(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)
-	session, err := store.CreateSession(ctx, "JSONL Events", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "JSONL Events", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
@@ -140,7 +162,7 @@ func TestStoreCreateSessionInitializesJSONLEvents(t *testing.T) {
 func TestStoreEventJSONLLegacyCompatibility(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)
-	session, err := store.CreateSession(ctx, "Legacy JSON Events", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "Legacy JSON Events", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
@@ -148,7 +170,7 @@ func TestStoreEventJSONLLegacyCompatibility(t *testing.T) {
 	if err := os.Remove(store.eventsJSONLPath(session.Summary.ID)); err != nil {
 		t.Fatalf("remove initial events.jsonl: %v", err)
 	}
-	legacyEvents := []SessionEvent{{ID: "legacy-1", Type: "session.legacy", Level: "info", Message: "legacy", CreatedAt: baseTime}}
+	legacyEvents := []SandboxEvent{{ID: "legacy-1", Type: "session.legacy", Level: "info", Message: "legacy", CreatedAt: baseTime}}
 	legacyData, err := json.Marshal(legacyEvents)
 	if err != nil {
 		t.Fatalf("Marshal legacy events returned error: %v", err)
@@ -165,7 +187,7 @@ func TestStoreEventJSONLLegacyCompatibility(t *testing.T) {
 		t.Fatalf("legacy events = %#v", events)
 	}
 
-	if err := store.AddEvent(ctx, session.Summary.ID, SessionEvent{ID: "jsonl-1", Type: "session.jsonl", Level: "info", Message: "jsonl", CreatedAt: baseTime.Add(time.Second)}); err != nil {
+	if err := store.AddEvent(ctx, session.Summary.ID, SandboxEvent{ID: "jsonl-1", Type: "session.jsonl", Level: "info", Message: "jsonl", CreatedAt: baseTime.Add(time.Second)}); err != nil {
 		t.Fatalf("AddEvent returned error: %v", err)
 	}
 	events, err = store.ListEvents(ctx, session.Summary.ID)
@@ -175,7 +197,7 @@ func TestStoreEventJSONLLegacyCompatibility(t *testing.T) {
 	if len(events) != 2 || events[0].ID != "legacy-1" || events[1].ID != "jsonl-1" {
 		t.Fatalf("mixed events = %#v", events)
 	}
-	loaded, err := store.GetSession(ctx, session.Summary.ID)
+	loaded, err := store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		t.Fatalf("GetSession returned error: %v", err)
 	}
@@ -187,14 +209,14 @@ func TestStoreEventJSONLLegacyCompatibility(t *testing.T) {
 func TestStoreSaveEventsReplacesWithJSONLAndRemovesLegacy(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)
-	session, err := store.CreateSession(ctx, "Replace Events", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "Replace Events", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 	if err := os.WriteFile(store.eventsJSONPath(session.Summary.ID), []byte(`[{"id":"legacy"}]`), 0o644); err != nil {
 		t.Fatalf("write legacy events returned error: %v", err)
 	}
-	events := []SessionEvent{
+	events := []SandboxEvent{
 		{ID: "replacement-1", Type: "session.replaced", Level: "info", Message: "one", CreatedAt: time.Now().UTC().Round(0)},
 		{ID: "replacement-2", Type: "session.replaced", Level: "info", Message: "two", CreatedAt: time.Now().UTC().Round(0)},
 	}
@@ -211,7 +233,7 @@ func TestStoreSaveEventsReplacesWithJSONLAndRemovesLegacy(t *testing.T) {
 	if len(loaded) != 2 || loaded[0].ID != "replacement-1" || loaded[1].ID != "replacement-2" {
 		t.Fatalf("loaded replacement events = %#v", loaded)
 	}
-	metadata, err := store.GetSession(ctx, session.Summary.ID)
+	metadata, err := store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		t.Fatalf("GetSession after SaveEvents returned error: %v", err)
 	}
@@ -226,11 +248,11 @@ func TestStoreSaveEventsReplacesWithJSONLAndRemovesLegacy(t *testing.T) {
 		t.Fatalf("events.jsonl data = %q, want two JSONL records", string(data))
 	}
 
-	replacement := []SessionEvent{{ID: "replacement-final", Type: "session.replaced", Level: "info", Message: "final", CreatedAt: time.Now().UTC().Round(0)}}
+	replacement := []SandboxEvent{{ID: "replacement-final", Type: "session.replaced", Level: "info", Message: "final", CreatedAt: time.Now().UTC().Round(0)}}
 	if err := store.SaveEvents(session.Summary.ID, replacement); err != nil {
 		t.Fatalf("SaveEvents final replacement returned error: %v", err)
 	}
-	metadata, err = store.GetSession(ctx, session.Summary.ID)
+	metadata, err = store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		t.Fatalf("GetSession after final SaveEvents returned error: %v", err)
 	}
@@ -242,7 +264,7 @@ func TestStoreSaveEventsReplacesWithJSONLAndRemovesLegacy(t *testing.T) {
 func TestStoreListEventsCorruptJSONLIncludesLineNumber(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)
-	session, err := store.CreateSession(ctx, "Corrupt JSONL", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "Corrupt JSONL", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
@@ -262,7 +284,7 @@ func TestStoreListEventsCorruptJSONLIncludesLineNumber(t *testing.T) {
 func TestStoreConcurrentAddEventJSONL(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)
-	session, err := store.CreateSession(ctx, "Concurrent Events", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "Concurrent Events", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
@@ -275,7 +297,7 @@ func TestStoreConcurrentAddEventJSONL(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errCh <- store.AddEvent(ctx, session.Summary.ID, SessionEvent{
+			errCh <- store.AddEvent(ctx, session.Summary.ID, SandboxEvent{
 				ID:        fmt.Sprintf("event-%03d", index),
 				Type:      "session.concurrent",
 				Level:     "info",
@@ -299,7 +321,7 @@ func TestStoreConcurrentAddEventJSONL(t *testing.T) {
 	if len(events) != eventCount {
 		t.Fatalf("len(events) = %d, want %d", len(events), eventCount)
 	}
-	loaded, err := store.GetSession(ctx, session.Summary.ID)
+	loaded, err := store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		t.Fatalf("GetSession returned error: %v", err)
 	}
@@ -339,62 +361,173 @@ func TestE2EStoreCreateAndRemoveWorkflows(t *testing.T) {
 	TestIntegrationStoreCreateAndRemoveWorkflows(t)
 }
 
+func TestNewWithConfigAllowsNonEmptyLegacySessionsRoot(t *testing.T) {
+	dataRoot := t.TempDir()
+	legacyRoot := filepath.Join(dataRoot, "sessions")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatalf("create legacy root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, "metadata.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write legacy fixture: %v", err)
+	}
+	sandboxRoot := filepath.Join(dataRoot, "sandboxes")
+
+	_, err := NewWithConfig(&appconfig.Config{
+		DataRoot:    dataRoot,
+		SandboxRoot: sandboxRoot,
+	})
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	if info, statErr := os.Stat(sandboxRoot); statErr != nil || !info.IsDir() {
+		t.Fatalf("sandbox root stat = %v/%v, want directory", info, statErr)
+	}
+}
+
+func TestNewWithConfigAllowsEmptyLegacySessionsRoot(t *testing.T) {
+	dataRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dataRoot, "sessions"), 0o755); err != nil {
+		t.Fatalf("create empty legacy root: %v", err)
+	}
+	sandboxRoot := filepath.Join(dataRoot, "sandboxes")
+
+	if _, err := NewWithConfig(&appconfig.Config{
+		DataRoot:    dataRoot,
+		SandboxRoot: sandboxRoot,
+	}); err != nil {
+		t.Fatalf("NewWithConfig returned error for empty legacy root: %v", err)
+	}
+	if info, err := os.Stat(sandboxRoot); err != nil || !info.IsDir() {
+		t.Fatalf("sandbox root stat = %v/%v, want directory", info, err)
+	}
+}
+
+func TestNewWithConfigAllowsExplicitSandboxRootBesideLegacySessionsRoot(t *testing.T) {
+	dataRoot := t.TempDir()
+	legacyRoot := filepath.Join(dataRoot, "sessions")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatalf("create legacy root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, "metadata.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write legacy fixture: %v", err)
+	}
+	sandboxRoot := filepath.Join(t.TempDir(), "fresh-sandboxes")
+
+	if _, err := NewWithConfig(&appconfig.Config{
+		DataRoot:            dataRoot,
+		SandboxRoot:         sandboxRoot,
+		SandboxRootExplicit: true,
+	}); err != nil {
+		t.Fatalf("NewWithConfig returned error for explicit sandbox root: %v", err)
+	}
+	if info, err := os.Stat(sandboxRoot); err != nil || !info.IsDir() {
+		t.Fatalf("sandbox root stat = %v/%v, want directory", info, err)
+	}
+}
+
+func TestStoreReadsAndRemovesSandboxFromLegacySessionsRoot(t *testing.T) {
+	ctx := context.Background()
+	legacyRoot := filepath.Join(t.TempDir(), "sessions")
+	store, err := NewWithConfig(&appconfig.Config{
+		SandboxRoot:   legacyRoot,
+		RuntimeDriver: driverpkg.RuntimeDriverDocker,
+		DefaultImage:  "debian:bookworm-slim",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyID := "legacy-session"
+	legacyDir := store.SandboxDir(legacyID)
+	if err := os.MkdirAll(filepath.Join(legacyDir, "state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := json.Marshal(Sandbox{Summary: SandboxSummary{
+		ID: legacyID, Title: "Legacy sandbox", Driver: driverpkg.RuntimeDriverDocker,
+		VMStatus: VMStatusStopped, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "metadata.json"), metadata, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacyCells := []byte(`[{"id":"cell-1","source":"hello","agent_session_id":"thread-1","agent_resume":{"session_id":"thread-1","session_state_path":"/state.json"}}]`)
+	if err := os.WriteFile(filepath.Join(legacyDir, "state", "cells.json"), legacyCells, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if sandbox, err := store.GetSandbox(ctx, legacyID); err != nil || sandbox.Summary.ID != legacyID {
+		t.Fatalf("GetSandbox sandbox=%#v err=%v", sandbox, err)
+	}
+	if result, err := store.ListSandboxes(ctx, SandboxListOptions{}); err != nil || len(result.Sandboxes) != 1 || result.Sandboxes[0].Summary.ID != legacyID {
+		t.Fatalf("ListSandboxes result=%#v err=%v", result, err)
+	}
+	if cells, err := store.ListCells(ctx, legacyID); err != nil || len(cells) != 1 || cells[0].AgentThreadID != "thread-1" || cells[0].AgentResume == nil || cells[0].AgentResume.ThreadID != "thread-1" {
+		t.Fatalf("ListCells cells=%#v err=%v", cells, err)
+	}
+	if err := store.RemoveSandbox(ctx, legacyID); err != nil {
+		t.Fatalf("RemoveSandbox returned error: %v", err)
+	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("legacy sandbox dir stat error = %v, want not exist", err)
+	}
+}
+
 func testStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	store := newCoverageStore(t)
 	sessionID := "legacy-session"
-	sessionDir := store.SessionDir(sessionID)
+	sandboxDir := store.SandboxDir(sessionID)
 	for _, dir := range []string{
-		filepath.Join(sessionDir, "state"),
-		filepath.Join(sessionDir, "vm"),
-		filepath.Join(sessionDir, "proxy"),
+		filepath.Join(sandboxDir, "state"),
+		filepath.Join(sandboxDir, "vm"),
+		filepath.Join(sandboxDir, "proxy"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("MkdirAll %s returned error: %v", dir, err)
 		}
 	}
-	if got, want := store.VMStatePath(sessionID), filepath.Join(sessionDir, "vm", "runtime.json"); got != want {
+	if got, want := store.VMStatePath(sessionID), filepath.Join(sandboxDir, "vm", "runtime.json"); got != want {
 		t.Fatalf("VMStatePath = %q, want %q", got, want)
 	}
-	if got, want := store.LegacyVMStatePath(sessionID), filepath.Join(sessionDir, "vm", "boxlite.json"); got != want {
+	if got, want := store.LegacyVMStatePath(sessionID), filepath.Join(sandboxDir, "vm", "boxlite.json"); got != want {
 		t.Fatalf("LegacyVMStatePath = %q, want %q", got, want)
 	}
-	if got, want := store.ProxyStatePath(sessionID), filepath.Join(sessionDir, "proxy", "jupyter.json"); got != want {
+	if got, want := store.ProxyStatePath(sessionID), filepath.Join(sandboxDir, "proxy", "jupyter.json"); got != want {
 		t.Fatalf("ProxyStatePath = %q, want %q", got, want)
 	}
 	if port, err := store.AllocateHostPortForJupyter(); err != nil || port == 0 {
 		t.Fatalf("AllocateHostPortForJupyter port=%d err=%v", port, err)
 	}
 
-	fileRoot := filepath.Join(t.TempDir(), "session-root-file")
+	fileRoot := filepath.Join(t.TempDir(), "sandbox-root-file")
 	if err := os.WriteFile(fileRoot, []byte("not a dir"), 0o644); err != nil {
-		t.Fatalf("write file session root: %v", err)
+		t.Fatalf("write file sandbox root: %v", err)
 	}
-	if _, err := NewWithConfig(&appconfig.Config{SessionRoot: fileRoot}); err == nil {
-		t.Fatalf("NewWithConfig file session root returned nil error")
+	if _, err := NewWithConfig(&appconfig.Config{SandboxRoot: fileRoot}); err == nil {
+		t.Fatalf("NewWithConfig file sandbox root returned nil error")
 	}
 
 	fromConfigStore := FromConfig(store.config)
 	baseTime := time.Now().UTC().Add(-time.Hour).Round(0)
-	session := &Session{Summary: SessionSummary{
+	session := &Sandbox{Summary: SandboxSummary{
 		ID:        sessionID,
 		Title:     "Legacy",
 		Driver:    driverpkg.RuntimeDriverBoxlite,
 		CreatedAt: baseTime,
 		UpdatedAt: baseTime,
 	}}
-	if err := fromConfigStore.SaveSession(session); err != nil {
+	if err := fromConfigStore.SaveSandbox(session); err != nil {
 		t.Fatalf("SaveSession returned error: %v", err)
 	}
-	loaded, err := fromConfigStore.LoadSession(sessionID)
+	loaded, err := fromConfigStore.LoadSandbox(sessionID)
 	if err != nil {
 		t.Fatalf("LoadSession returned error: %v", err)
 	}
 	if loaded.Summary.ID != sessionID || loaded.Summary.Driver != driverpkg.RuntimeDriverBoxlite {
 		t.Fatalf("LoadSession loaded %#v", loaded.Summary)
 	}
-	if err := fromConfigStore.SaveSession(&Session{Summary: SessionSummary{ID: "missing-dir"}}); err == nil {
+	if err := fromConfigStore.SaveSandbox(&Sandbox{Summary: SandboxSummary{ID: "missing-dir"}}); err == nil {
 		t.Fatalf("SaveSession missing dir returned nil error")
 	}
 	if err := fromConfigStore.SaveCells("missing-dir", nil); err == nil {
@@ -413,15 +546,15 @@ func testStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
 	}
 	legacyRuns := []AgentRun{
 		{
-			ID:             "run-new",
-			Agent:          "codex",
-			Message:        "legacy prompt",
-			Output:         "legacy output",
-			ExitCode:       7,
-			Success:        false,
-			CreatedAt:      baseTime.Add(time.Minute),
-			AgentSessionID: "legacy-agent-session",
-			StopReason:     "stopped",
+			ID:            "run-new",
+			Agent:         "codex",
+			Message:       "legacy prompt",
+			Output:        "legacy output",
+			ExitCode:      7,
+			Success:       false,
+			CreatedAt:     baseTime.Add(time.Minute),
+			AgentThreadID: "legacy-agent-session",
+			StopReason:    "stopped",
 		},
 		{ID: "run-existing", Agent: "codex", Message: "duplicate", CreatedAt: baseTime.Add(4 * time.Minute)},
 	}
@@ -429,7 +562,7 @@ func testStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal legacy runs returned error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(sessionDir, "state", "agent_runs.json"), legacyData, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sandboxDir, "state", "agent_runs.json"), legacyData, 0o644); err != nil {
 		t.Fatalf("write legacy agent runs returned error: %v", err)
 	}
 	cells, err := fromConfigStore.ListCells(ctx, sessionID)
@@ -439,11 +572,11 @@ func testStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
 	if len(cells) != 3 || cells[0].ID != "run-new" || cells[1].ID != "run-existing" || cells[2].ID != "shell-later" {
 		t.Fatalf("legacy merged cells = %#v", cells)
 	}
-	if cells[0].Type != CellTypeAgent || cells[0].Source != "legacy prompt" || cells[0].Output != "legacy output" || cells[0].ExitCode != 7 || cells[0].AgentSessionID != "legacy-agent-session" || cells[0].StopReason != "stopped" {
+	if cells[0].Type != CellTypeAgent || cells[0].Source != "legacy prompt" || cells[0].Output != "legacy output" || cells[0].ExitCode != 7 || cells[0].AgentThreadID != "legacy-agent-session" || cells[0].StopReason != "stopped" {
 		t.Fatalf("legacy run cell = %#v", cells[0])
 	}
 
-	events := []SessionEvent{{ID: "event-wrapper", Type: "session.wrapper", Level: "info", Message: "wrapper", CreatedAt: baseTime}}
+	events := []SandboxEvent{{ID: "event-wrapper", Type: "session.wrapper", Level: "info", Message: "wrapper", CreatedAt: baseTime}}
 	if err := fromConfigStore.SaveEvents(sessionID, events); err != nil {
 		t.Fatalf("SaveEvents returned error: %v", err)
 	}
@@ -456,7 +589,7 @@ func testStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
 	}
 
 	missingStateID := "missing-state"
-	if err := os.MkdirAll(filepath.Join(store.SessionDir(missingStateID), "state"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(store.SandboxDir(missingStateID), "state"), 0o755); err != nil {
 		t.Fatalf("MkdirAll missing state returned error: %v", err)
 	}
 	if cells, err := fromConfigStore.ListCells(ctx, missingStateID); err != nil || len(cells) != 0 {
@@ -465,7 +598,7 @@ func testStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
 	if events, err := fromConfigStore.ListEvents(ctx, missingStateID); err != nil || len(events) != 0 {
 		t.Fatalf("ListEvents missing file events=%#v err=%v", events, err)
 	}
-	if err := os.WriteFile(filepath.Join(store.SessionDir(missingStateID), "state", "agent_runs.json"), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store.SandboxDir(missingStateID), "state", "agent_runs.json"), nil, 0o644); err != nil {
 		t.Fatalf("write empty agent runs returned error: %v", err)
 	}
 	if runs, err := fromConfigStore.loadAgentRuns(missingStateID); err != nil || len(runs) != 0 {
@@ -474,7 +607,7 @@ func testStoreLegacyWrappersAndMissingStateWorkflows(t *testing.T) {
 	if err := fromConfigStore.SaveCells(missingStateID, nil); err != nil {
 		t.Fatalf("SaveCells missingState reset returned error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(store.SessionDir(missingStateID), "state", "agent_runs.json"), []byte(`{bad json`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store.SandboxDir(missingStateID), "state", "agent_runs.json"), []byte(`{bad json`), 0o644); err != nil {
 		t.Fatalf("write corrupt agent runs returned error: %v", err)
 	}
 	if _, err := fromConfigStore.ListCells(ctx, missingStateID); err == nil {
@@ -486,7 +619,7 @@ func testStorePersistenceErrorAndUpdateBranches(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	store := newCoverageStore(t)
-	session, err := store.CreateSession(ctx, "Persistence Branches", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
+	session, err := store.CreateSandbox(ctx, "Persistence Branches", "", driverpkg.RuntimeDriverBoxlite, "", "", "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
@@ -512,7 +645,7 @@ func testStorePersistenceErrorAndUpdateBranches(t *testing.T) {
 	if err := store.AddCell(ctx, session, runningCell); err != nil {
 		t.Fatalf("AddCell running returned error: %v", err)
 	}
-	cellDir := filepath.Join(store.sessionDir(session.Summary.ID), "state", "cells", runningCell.ID)
+	cellDir := filepath.Join(store.sandboxDir(session.Summary.ID), "state", "cells", runningCell.ID)
 	if err := os.MkdirAll(cellDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll running cell dir returned error: %v", err)
 	}
@@ -533,10 +666,10 @@ func testStorePersistenceErrorAndUpdateBranches(t *testing.T) {
 		t.Fatalf("running cells = %#v", cells)
 	}
 
-	if err := store.AddEvent(ctx, session.Summary.ID, SessionEvent{ID: "event-1", Type: "session.tested", Level: "info", Message: "tested", CreatedAt: time.Now().UTC()}); err != nil {
+	if err := store.AddEvent(ctx, session.Summary.ID, SandboxEvent{ID: "event-1", Type: "session.tested", Level: "info", Message: "tested", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("AddEvent returned error: %v", err)
 	}
-	loaded, err := store.GetSession(ctx, session.Summary.ID)
+	loaded, err := store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		t.Fatalf("GetSession returned error: %v", err)
 	}
@@ -544,7 +677,7 @@ func testStorePersistenceErrorAndUpdateBranches(t *testing.T) {
 		t.Fatalf("loaded counts = cells %d events %d", loaded.Summary.CellCount, loaded.Summary.EventCount)
 	}
 
-	if err := os.WriteFile(filepath.Join(store.sessionDir(session.Summary.ID), "state", "cells.json"), []byte(`{bad json`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store.sandboxDir(session.Summary.ID), "state", "cells.json"), []byte(`{bad json`), 0o644); err != nil {
 		t.Fatalf("write corrupt cells: %v", err)
 	}
 	if _, err := store.ListCells(ctx, session.Summary.ID); err == nil {
@@ -553,7 +686,7 @@ func testStorePersistenceErrorAndUpdateBranches(t *testing.T) {
 	if err := store.saveCells(session.Summary.ID, nil); err != nil {
 		t.Fatalf("saveCells reset returned error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(store.sessionDir(session.Summary.ID), "state", "events.json"), []byte(`{bad json`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store.sandboxDir(session.Summary.ID), "state", "events.json"), []byte(`{bad json`), 0o644); err != nil {
 		t.Fatalf("write corrupt events: %v", err)
 	}
 	if _, err := store.ListEvents(ctx, session.Summary.ID); err == nil {
@@ -574,10 +707,10 @@ func testStorePersistenceErrorAndUpdateBranches(t *testing.T) {
 	if _, err := store.GetVMState(session.Summary.ID); err == nil {
 		t.Fatalf("GetVMState corrupt returned nil error")
 	}
-	if err := os.WriteFile(filepath.Join(store.sessionDir(session.Summary.ID), "metadata.json"), []byte(`{"summary":{"driver":"bad"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store.sandboxDir(session.Summary.ID), "metadata.json"), []byte(`{"summary":{"driver":"bad"}}`), 0o644); err != nil {
 		t.Fatalf("write invalid metadata: %v", err)
 	}
-	if _, err := store.GetSession(ctx, session.Summary.ID); err == nil {
+	if _, err := store.GetSandbox(ctx, session.Summary.ID); err == nil {
 		t.Fatalf("GetSession invalid metadata returned nil error")
 	}
 }
@@ -587,12 +720,12 @@ func testStoreAgentRunLegacyVMAndListWorkflows(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)
 
-	session, err := store.CreateSession(ctx, "", "", driverpkg.RuntimeDriverBoxlite, "", "ws-1", "script:timer", &SessionWorkspace{
+	session, err := store.CreateSandbox(ctx, "", "", driverpkg.RuntimeDriverBoxlite, "", "ws-1", "script:timer", &SandboxWorkspace{
 		ID:         "ws-1",
 		Name:       "Workspace",
 		Type:       "file",
 		ConfigJSON: "{}",
-	}, []SessionEnvVar{{Name: "PLAIN", Value: "value"}}, []SessionTag{{Name: "kind", Value: "loader"}})
+	}, []SandboxEnvVar{{Name: "PLAIN", Value: "value"}}, []SandboxTag{{Name: "kind", Value: "loader"}})
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
@@ -605,16 +738,16 @@ func testStoreAgentRunLegacyVMAndListWorkflows(t *testing.T) {
 
 	createdAt := time.Now().UTC().Add(-time.Minute)
 	if err := store.AddAgentRun(ctx, session.Summary.ID, AgentRun{
-		ID:             "run-1",
-		Agent:          "codex",
-		Message:        "hello",
-		Output:         "world",
-		ExitCode:       0,
-		Success:        true,
-		Running:        true,
-		CreatedAt:      createdAt,
-		AgentSessionID: "agent-session-1",
-		StopReason:     "completed",
+		ID:            "run-1",
+		Agent:         "codex",
+		Message:       "hello",
+		Output:        "world",
+		ExitCode:      0,
+		Success:       true,
+		Running:       true,
+		CreatedAt:     createdAt,
+		AgentThreadID: "agent-session-1",
+		StopReason:    "completed",
 	}); err != nil {
 		t.Fatalf("AddAgentRun returned error: %v", err)
 	}
@@ -622,7 +755,7 @@ func testStoreAgentRunLegacyVMAndListWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCells returned error: %v", err)
 	}
-	if len(cells) != 1 || cells[0].Type != execution.CellTypeAgent || cells[0].AgentSessionID != "agent-session-1" || !cells[0].Running {
+	if len(cells) != 1 || cells[0].Type != execution.CellTypeAgent || cells[0].AgentThreadID != "agent-session-1" || !cells[0].Running {
 		t.Fatalf("agent run cells = %#v", cells)
 	}
 
@@ -655,7 +788,7 @@ func testStoreAgentRunLegacyVMAndListWorkflows(t *testing.T) {
 		t.Fatalf("legacy vm state = %#v", vmState)
 	}
 
-	if err := store.AddEvent(ctx, session.Summary.ID, SessionEvent{ID: "evt-1", Type: "session.started", Level: "info", Message: "started", CreatedAt: createdAt}); err != nil {
+	if err := store.AddEvent(ctx, session.Summary.ID, SandboxEvent{ID: "evt-1", Type: "session.started", Level: "info", Message: "started", CreatedAt: createdAt}); err != nil {
 		t.Fatalf("AddEvent returned error: %v", err)
 	}
 	events, err := store.ListEvents(ctx, session.Summary.ID)
@@ -666,22 +799,22 @@ func testStoreAgentRunLegacyVMAndListWorkflows(t *testing.T) {
 		t.Fatalf("events = %#v", events)
 	}
 
-	listed, err := store.ListSessions(ctx, SessionListOptions{TitleQuery: "agent-compose", Driver: driverpkg.RuntimeDriverBoxlite, VMStatus: domain.VMStatusPending, Limit: 1})
+	listed, err := store.ListSandboxes(ctx, SandboxListOptions{TitleQuery: "agent-compose", Driver: driverpkg.RuntimeDriverBoxlite, VMStatus: domain.VMStatusPending, Limit: 1})
 	if err != nil {
 		t.Fatalf("ListSessions returned error: %v", err)
 	}
-	if listed.TotalCount != 1 || len(listed.Sessions) != 1 || listed.HasMore {
+	if listed.TotalCount != 1 || len(listed.Sandboxes) != 1 || listed.HasMore {
 		t.Fatalf("listed sessions = %#v", listed)
 	}
-	stored, err := store.loadSession(session.Summary.ID)
+	stored, err := store.loadSandbox(session.Summary.ID)
 	if err != nil {
-		t.Fatalf("loadSession returned error: %v", err)
+		t.Fatalf("loadSandbox returned error: %v", err)
 	}
 	stored.Summary.GuestImage = ""
-	if err := store.saveSession(stored); err != nil {
-		t.Fatalf("saveSession returned error: %v", err)
+	if err := store.saveSandbox(stored); err != nil {
+		t.Fatalf("saveSandbox returned error: %v", err)
 	}
-	loaded, err := store.GetSession(ctx, session.Summary.ID)
+	loaded, err := store.GetSandbox(ctx, session.Summary.ID)
 	if err != nil {
 		t.Fatalf("GetSession returned error: %v", err)
 	}
@@ -693,7 +826,7 @@ func testStoreAgentRunLegacyVMAndListWorkflows(t *testing.T) {
 func newCoverageStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := NewWithConfig(&appconfig.Config{
-		SessionRoot:          filepath.Join(t.TempDir(), "sessions"),
+		SandboxRoot:          filepath.Join(t.TempDir(), "sandboxes"),
 		RuntimeDriver:        driverpkg.RuntimeDriverBoxlite,
 		DefaultImage:         "default-box:latest",
 		ImageRegistry:        "registry.test",

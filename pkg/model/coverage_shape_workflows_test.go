@@ -30,10 +30,10 @@ func TestE2EModelBranchCoverageWorkflows(t *testing.T) {
 func testModelBranchCoverageWorkflows(t *testing.T) {
 	t.Helper()
 	now := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
-	session := &domain.Session{
-		Summary: domain.SessionSummary{
+	session := &domain.Sandbox{
+		Summary: domain.SandboxSummary{
 			ID:            "session-branch",
-			Title:         "Branch Session",
+			Title:         "Branch Sandbox",
 			TriggerSource: "script:loader-1",
 			Driver:        driverpkg.RuntimeDriverDocker,
 			VMStatus:      domain.VMStatusRunning,
@@ -42,10 +42,10 @@ func testModelBranchCoverageWorkflows(t *testing.T) {
 			UpdatedAt:     now.Add(time.Minute),
 		},
 		WorkspaceID: "workspace-1",
-		Workspace:   &domain.SessionWorkspace{ID: "workspace-1", Name: "Workspace One", Type: "file"},
+		Workspace:   &domain.SandboxWorkspace{ID: "workspace-1", Name: "Workspace One", Type: "file"},
 	}
-	if !domain.SessionMatchesListOptions(session, domain.SessionListOptions{
-		SessionType:        domain.SessionTypeScript,
+	if !domain.SandboxMatchesListOptions(session, domain.SandboxListOptions{
+		SandboxType:        domain.SandboxTypeScript,
 		TriggerSourceQuery: "loader",
 		TitleQuery:         "branch",
 		WorkspaceQuery:     "workspace one",
@@ -58,8 +58,8 @@ func testModelBranchCoverageWorkflows(t *testing.T) {
 	}) {
 		t.Fatalf("session should match full list options")
 	}
-	for _, options := range []domain.SessionListOptions{
-		{SessionType: domain.SessionTypeManual},
+	for _, options := range []domain.SandboxListOptions{
+		{SandboxType: domain.SandboxTypeManual},
 		{TriggerSourceQuery: "missing"},
 		{TitleQuery: "missing"},
 		{WorkspaceQuery: "missing"},
@@ -70,22 +70,22 @@ func testModelBranchCoverageWorkflows(t *testing.T) {
 		{UpdatedFrom: now.Add(2 * time.Minute)},
 		{UpdatedTo: now.Add(-time.Second)},
 	} {
-		if domain.SessionMatchesListOptions(session, options) {
+		if domain.SandboxMatchesListOptions(session, options) {
 			t.Fatalf("session unexpectedly matched options %#v", options)
 		}
 	}
-	if domain.SessionMatchesListOptions(nil, domain.SessionListOptions{}) {
+	if domain.SandboxMatchesListOptions(nil, domain.SandboxListOptions{}) {
 		t.Fatalf("nil session matched list options")
 	}
-	if got := domain.NormalizeSessionTriggerSource("", []domain.SessionTag{{Name: "origin", Value: "loader"}, {Name: "loader_id", Value: "loader-9"}}); got != "script:loader-9" {
-		t.Fatalf("NormalizeSessionTriggerSource tags = %q", got)
+	if got := domain.NormalizeSandboxTriggerSource("", []domain.SandboxTag{{Name: "origin", Value: "loader"}, {Name: "loader_id", Value: "loader-9"}}); got != "script:loader-9" {
+		t.Fatalf("NormalizeSandboxTriggerSource tags = %q", got)
 	}
-	if got := domain.PaginateSessions([]*domain.Session{session}, 5, 10); got != nil {
-		t.Fatalf("PaginateSessions beyond end = %#v", got)
+	if got := domain.PaginateSandboxes([]*domain.Sandbox{session}, 5, 10); got != nil {
+		t.Fatalf("PaginateSandboxes beyond end = %#v", got)
 	}
-	offset, limit := domain.NormalizeSessionListBounds(-1, 0)
-	if offset != 0 || limit != domain.DefaultSessionListLimit {
-		t.Fatalf("NormalizeSessionListBounds = %d/%d", offset, limit)
+	offset, limit := domain.NormalizeSandboxListBounds(-1, 0)
+	if offset != 0 || limit != domain.DefaultSandboxListLimit {
+		t.Fatalf("NormalizeSandboxListBounds = %d/%d", offset, limit)
 	}
 
 	for _, runtime := range []string{"", domain.LoaderRuntimeScheduler} {
@@ -106,8 +106,8 @@ func testModelBranchCoverageWorkflows(t *testing.T) {
 	if _, err := domain.NormalizeLoaderTriggerKind("bad"); err == nil {
 		t.Fatalf("NormalizeLoaderTriggerKind bad returned nil error")
 	}
-	if domain.NormalizeLoaderSessionPolicy("new") != domain.LoaderSessionPolicyNew || domain.NormalizeLoaderSessionPolicy("bad") != domain.LoaderSessionPolicySticky {
-		t.Fatalf("NormalizeLoaderSessionPolicy returned unexpected values")
+	if domain.NormalizeLoaderSandboxPolicy("new") != domain.LoaderSandboxPolicyNew || domain.NormalizeLoaderSandboxPolicy("bad") != domain.LoaderSandboxPolicySticky {
+		t.Fatalf("NormalizeLoaderSandboxPolicy returned unexpected values")
 	}
 	if domain.NormalizeLoaderConcurrencyPolicy("allow") != domain.LoaderConcurrencyPolicyParallel || domain.NormalizeLoaderConcurrencyPolicy("bad") != domain.LoaderConcurrencyPolicySkip {
 		t.Fatalf("NormalizeLoaderConcurrencyPolicy returned unexpected values")
@@ -171,20 +171,20 @@ func testModelBranchCoverageWorkflows(t *testing.T) {
 		t.Fatalf("topic event status/hash helpers returned unexpected values")
 	}
 
-	normalizedEnv := domain.NormalizeEnvItems([]domain.SessionEnvVar{{Name: " B ", Value: "2"}, {Name: "A", Value: "1"}, {Name: "B", Value: "3"}, {Name: " ", Value: "skip"}})
+	normalizedEnv := domain.NormalizeEnvItems([]domain.SandboxEnvVar{{Name: " B ", Value: "2"}, {Name: "A", Value: "1"}, {Name: "B", Value: "3"}, {Name: " ", Value: "skip"}})
 	if len(normalizedEnv) != 2 || normalizedEnv[0].Name != "A" || normalizedEnv[1].Value != "3" {
 		t.Fatalf("NormalizeEnvItems = %#v", normalizedEnv)
 	}
-	mergedEnv := domain.MergeEnvItems([]domain.SessionEnvVar{{Name: "A", Value: "global"}}, []domain.SessionEnvVar{{Name: "A", Value: "session"}, {Name: "B", Value: "session"}})
+	mergedEnv := domain.MergeEnvItems([]domain.SandboxEnvVar{{Name: "A", Value: "global"}}, []domain.SandboxEnvVar{{Name: "A", Value: "session"}, {Name: "B", Value: "session"}})
 	if len(mergedEnv) != 2 || mergedEnv[0].Value != "session" || mergedEnv[1].Name != "B" {
 		t.Fatalf("MergeEnvItems = %#v", mergedEnv)
 	}
 	if domain.MergeEnvItems(nil, nil) != nil {
 		t.Fatalf("MergeEnvItems nil did not return nil")
 	}
-	envMap := domain.SessionEnvMap([]domain.SessionEnvVar{{Name: " A ", Value: "1"}, {Name: " ", Value: "skip"}}, []domain.SessionEnvVar{{Name: "B", Value: "2"}})
-	if envMap["A"] != "1" || envMap["B"] != "2" || domain.SessionEnvMap([]domain.SessionEnvVar{{Name: " "}}) != nil {
-		t.Fatalf("SessionEnvMap = %#v", envMap)
+	envMap := domain.SandboxEnvMap([]domain.SandboxEnvVar{{Name: " A ", Value: "1"}, {Name: " ", Value: "skip"}}, []domain.SandboxEnvVar{{Name: "B", Value: "2"}})
+	if envMap["A"] != "1" || envMap["B"] != "2" || domain.SandboxEnvMap([]domain.SandboxEnvVar{{Name: " "}}) != nil {
+		t.Fatalf("SandboxEnvMap = %#v", envMap)
 	}
 	classified := domain.ResourceError(domain.ErrNotFound, "session", "session-1", "", errors.New("missing"))
 	if !errors.Is(classified, domain.ErrNotFound) || !strings.Contains(classified.Error(), "missing") {

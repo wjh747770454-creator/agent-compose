@@ -342,55 +342,55 @@ func (RunAgentStreamEventType) EnumDescriptor() ([]byte, []int) {
 	return file_agentcompose_v2_agentcompose_proto_rawDescGZIP(), []int{5}
 }
 
-type RunSessionCleanupPolicy int32
+type RunSandboxCleanupPolicy int32
 
 const (
-	RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_UNSPECIFIED          RunSessionCleanupPolicy = 0
-	RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION   RunSessionCleanupPolicy = 1
-	RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING         RunSessionCleanupPolicy = 2
-	RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION RunSessionCleanupPolicy = 3
+	RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_UNSPECIFIED          RunSandboxCleanupPolicy = 0
+	RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_STOP_ON_COMPLETION   RunSandboxCleanupPolicy = 1
+	RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING         RunSandboxCleanupPolicy = 2
+	RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION RunSandboxCleanupPolicy = 3
 )
 
-// Enum value maps for RunSessionCleanupPolicy.
+// Enum value maps for RunSandboxCleanupPolicy.
 var (
-	RunSessionCleanupPolicy_name = map[int32]string{
-		0: "RUN_SESSION_CLEANUP_POLICY_UNSPECIFIED",
-		1: "RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION",
-		2: "RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING",
-		3: "RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION",
+	RunSandboxCleanupPolicy_name = map[int32]string{
+		0: "RUN_SANDBOX_CLEANUP_POLICY_UNSPECIFIED",
+		1: "RUN_SANDBOX_CLEANUP_POLICY_STOP_ON_COMPLETION",
+		2: "RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING",
+		3: "RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION",
 	}
-	RunSessionCleanupPolicy_value = map[string]int32{
-		"RUN_SESSION_CLEANUP_POLICY_UNSPECIFIED":          0,
-		"RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION":   1,
-		"RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING":         2,
-		"RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION": 3,
+	RunSandboxCleanupPolicy_value = map[string]int32{
+		"RUN_SANDBOX_CLEANUP_POLICY_UNSPECIFIED":          0,
+		"RUN_SANDBOX_CLEANUP_POLICY_STOP_ON_COMPLETION":   1,
+		"RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING":         2,
+		"RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION": 3,
 	}
 )
 
-func (x RunSessionCleanupPolicy) Enum() *RunSessionCleanupPolicy {
-	p := new(RunSessionCleanupPolicy)
+func (x RunSandboxCleanupPolicy) Enum() *RunSandboxCleanupPolicy {
+	p := new(RunSandboxCleanupPolicy)
 	*p = x
 	return p
 }
 
-func (x RunSessionCleanupPolicy) String() string {
+func (x RunSandboxCleanupPolicy) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (RunSessionCleanupPolicy) Descriptor() protoreflect.EnumDescriptor {
+func (RunSandboxCleanupPolicy) Descriptor() protoreflect.EnumDescriptor {
 	return file_agentcompose_v2_agentcompose_proto_enumTypes[6].Descriptor()
 }
 
-func (RunSessionCleanupPolicy) Type() protoreflect.EnumType {
+func (RunSandboxCleanupPolicy) Type() protoreflect.EnumType {
 	return &file_agentcompose_v2_agentcompose_proto_enumTypes[6]
 }
 
-func (x RunSessionCleanupPolicy) Number() protoreflect.EnumNumber {
+func (x RunSandboxCleanupPolicy) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use RunSessionCleanupPolicy.Descriptor instead.
-func (RunSessionCleanupPolicy) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use RunSandboxCleanupPolicy.Descriptor instead.
+func (RunSandboxCleanupPolicy) EnumDescriptor() ([]byte, []int) {
 	return file_agentcompose_v2_agentcompose_proto_rawDescGZIP(), []int{6}
 }
 
@@ -707,7 +707,7 @@ const (
 	CacheDomain_CACHE_DOMAIN_OCI_IMAGE_STORE          CacheDomain = 1
 	CacheDomain_CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE CacheDomain = 2
 	CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE    CacheDomain = 3
-	CacheDomain_CACHE_DOMAIN_SESSION_EPHEMERAL_STATE  CacheDomain = 4
+	CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE  CacheDomain = 4
 )
 
 // Enum value maps for CacheDomain.
@@ -717,14 +717,14 @@ var (
 		1: "CACHE_DOMAIN_OCI_IMAGE_STORE",
 		2: "CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE",
 		3: "CACHE_DOMAIN_RUNTIME_DERIVED_CACHE",
-		4: "CACHE_DOMAIN_SESSION_EPHEMERAL_STATE",
+		4: "CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE",
 	}
 	CacheDomain_value = map[string]int32{
 		"CACHE_DOMAIN_UNSPECIFIED":              0,
 		"CACHE_DOMAIN_OCI_IMAGE_STORE":          1,
 		"CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE": 2,
 		"CACHE_DOMAIN_RUNTIME_DERIVED_CACHE":    3,
-		"CACHE_DOMAIN_SESSION_EPHEMERAL_STATE":  4,
+		"CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE":  4,
 	}
 )
 
@@ -1321,12 +1321,12 @@ func (x *ListProjectsResponse) GetNextOffset() uint32 {
 }
 
 type RemoveProjectRequest struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	Project             *ProjectRef            `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
-	RemoveHistory       bool                   `protobuf:"varint,2,opt,name=remove_history,json=removeHistory,proto3" json:"remove_history,omitempty"`
-	StopRunningSessions bool                   `protobuf:"varint,3,opt,name=stop_running_sessions,json=stopRunningSessions,proto3" json:"stop_running_sessions,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Project              *ProjectRef            `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	RemoveHistory        bool                   `protobuf:"varint,2,opt,name=remove_history,json=removeHistory,proto3" json:"remove_history,omitempty"`
+	StopRunningSandboxes bool                   `protobuf:"varint,3,opt,name=stop_running_sandboxes,json=stopRunningSandboxes,proto3" json:"stop_running_sandboxes,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *RemoveProjectRequest) Reset() {
@@ -1373,9 +1373,9 @@ func (x *RemoveProjectRequest) GetRemoveHistory() bool {
 	return false
 }
 
-func (x *RemoveProjectRequest) GetStopRunningSessions() bool {
+func (x *RemoveProjectRequest) GetStopRunningSandboxes() bool {
 	if x != nil {
-		return x.StopRunningSessions
+		return x.StopRunningSandboxes
 	}
 	return false
 }
@@ -3370,9 +3370,8 @@ type RunAgentRequest struct {
 	AgentName        string                  `protobuf:"bytes,2,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
 	Prompt           string                  `protobuf:"bytes,3,opt,name=prompt,proto3" json:"prompt,omitempty"`
 	Source           RunSource               `protobuf:"varint,4,opt,name=source,proto3,enum=agentcompose.v2.RunSource" json:"source,omitempty"`
-	SessionId        string                  `protobuf:"bytes,5,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Env              []*EnvVarSpec           `protobuf:"bytes,6,rep,name=env,proto3" json:"env,omitempty"`
-	CleanupPolicy    RunSessionCleanupPolicy `protobuf:"varint,7,opt,name=cleanup_policy,json=cleanupPolicy,proto3,enum=agentcompose.v2.RunSessionCleanupPolicy" json:"cleanup_policy,omitempty"`
+	CleanupPolicy    RunSandboxCleanupPolicy `protobuf:"varint,7,opt,name=cleanup_policy,json=cleanupPolicy,proto3,enum=agentcompose.v2.RunSandboxCleanupPolicy" json:"cleanup_policy,omitempty"`
 	SchedulerId      string                  `protobuf:"bytes,8,opt,name=scheduler_id,json=schedulerId,proto3" json:"scheduler_id,omitempty"`
 	TriggerId        string                  `protobuf:"bytes,9,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
 	OutputSchemaJson string                  `protobuf:"bytes,10,opt,name=output_schema_json,json=outputSchemaJson,proto3" json:"output_schema_json,omitempty"`
@@ -3444,13 +3443,6 @@ func (x *RunAgentRequest) GetSource() RunSource {
 	return RunSource_RUN_SOURCE_UNSPECIFIED
 }
 
-func (x *RunAgentRequest) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
 func (x *RunAgentRequest) GetEnv() []*EnvVarSpec {
 	if x != nil {
 		return x.Env
@@ -3458,11 +3450,11 @@ func (x *RunAgentRequest) GetEnv() []*EnvVarSpec {
 	return nil
 }
 
-func (x *RunAgentRequest) GetCleanupPolicy() RunSessionCleanupPolicy {
+func (x *RunAgentRequest) GetCleanupPolicy() RunSandboxCleanupPolicy {
 	if x != nil {
 		return x.CleanupPolicy
 	}
-	return RunSessionCleanupPolicy_RUN_SESSION_CLEANUP_POLICY_UNSPECIFIED
+	return RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_UNSPECIFIED
 }
 
 func (x *RunAgentRequest) GetSchedulerId() string {
@@ -3856,7 +3848,6 @@ type ListRunsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	AgentName     string                 `protobuf:"bytes,2,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
-	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	SchedulerId   string                 `protobuf:"bytes,4,opt,name=scheduler_id,json=schedulerId,proto3" json:"scheduler_id,omitempty"`
 	Status        RunStatus              `protobuf:"varint,5,opt,name=status,proto3,enum=agentcompose.v2.RunStatus" json:"status,omitempty"`
 	Source        RunSource              `protobuf:"varint,6,opt,name=source,proto3,enum=agentcompose.v2.RunSource" json:"source,omitempty"`
@@ -3909,13 +3900,6 @@ func (x *ListRunsRequest) GetProjectId() string {
 func (x *ListRunsRequest) GetAgentName() string {
 	if x != nil {
 		return x.AgentName
-	}
-	return ""
-}
-
-func (x *ListRunsRequest) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
 	}
 	return ""
 }
@@ -4688,7 +4672,6 @@ type RunSummary struct {
 	SchedulerId     string                 `protobuf:"bytes,8,opt,name=scheduler_id,json=schedulerId,proto3" json:"scheduler_id,omitempty"`
 	TriggerId       string                 `protobuf:"bytes,9,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
 	Status          RunStatus              `protobuf:"varint,10,opt,name=status,proto3,enum=agentcompose.v2.RunStatus" json:"status,omitempty"`
-	SessionId       string                 `protobuf:"bytes,11,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	ExitCode        int32                  `protobuf:"varint,12,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	Error           string                 `protobuf:"bytes,13,opt,name=error,proto3" json:"error,omitempty"`
 	StartedAt       string                 `protobuf:"bytes,14,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
@@ -4802,13 +4785,6 @@ func (x *RunSummary) GetStatus() RunStatus {
 		return x.Status
 	}
 	return RunStatus_RUN_STATUS_UNSPECIFIED
-}
-
-func (x *RunSummary) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
 }
 
 func (x *RunSummary) GetExitCode() int32 {
@@ -5008,7 +4984,7 @@ type ExecRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Target:
 	//
-	//	*ExecRequest_SessionId
+	//	*ExecRequest_SandboxId
 	//	*ExecRequest_RunId
 	//	*ExecRequest_Selector
 	Target         isExecRequest_Target `protobuf_oneof:"target"`
@@ -5058,10 +5034,10 @@ func (x *ExecRequest) GetTarget() isExecRequest_Target {
 	return nil
 }
 
-func (x *ExecRequest) GetSessionId() string {
+func (x *ExecRequest) GetSandboxId() string {
 	if x != nil {
-		if x, ok := x.Target.(*ExecRequest_SessionId); ok {
-			return x.SessionId
+		if x, ok := x.Target.(*ExecRequest_SandboxId); ok {
+			return x.SandboxId
 		}
 	}
 	return ""
@@ -5076,7 +5052,7 @@ func (x *ExecRequest) GetRunId() string {
 	return ""
 }
 
-func (x *ExecRequest) GetSelector() *ExecSessionSelector {
+func (x *ExecRequest) GetSelector() *ExecSandboxSelector {
 	if x != nil {
 		if x, ok := x.Target.(*ExecRequest_Selector); ok {
 			return x.Selector
@@ -5124,8 +5100,8 @@ type isExecRequest_Target interface {
 	isExecRequest_Target()
 }
 
-type ExecRequest_SessionId struct {
-	SessionId string `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3,oneof"`
+type ExecRequest_SandboxId struct {
+	SandboxId string `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3,oneof"`
 }
 
 type ExecRequest_RunId struct {
@@ -5133,16 +5109,16 @@ type ExecRequest_RunId struct {
 }
 
 type ExecRequest_Selector struct {
-	Selector *ExecSessionSelector `protobuf:"bytes,3,opt,name=selector,proto3,oneof"`
+	Selector *ExecSandboxSelector `protobuf:"bytes,3,opt,name=selector,proto3,oneof"`
 }
 
-func (*ExecRequest_SessionId) isExecRequest_Target() {}
+func (*ExecRequest_SandboxId) isExecRequest_Target() {}
 
 func (*ExecRequest_RunId) isExecRequest_Target() {}
 
 func (*ExecRequest_Selector) isExecRequest_Target() {}
 
-type ExecSessionSelector struct {
+type ExecSandboxSelector struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	ProjectName   string                 `protobuf:"bytes,2,opt,name=project_name,json=projectName,proto3" json:"project_name,omitempty"`
@@ -5151,20 +5127,20 @@ type ExecSessionSelector struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ExecSessionSelector) Reset() {
-	*x = ExecSessionSelector{}
+func (x *ExecSandboxSelector) Reset() {
+	*x = ExecSandboxSelector{}
 	mi := &file_agentcompose_v2_agentcompose_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ExecSessionSelector) String() string {
+func (x *ExecSandboxSelector) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ExecSessionSelector) ProtoMessage() {}
+func (*ExecSandboxSelector) ProtoMessage() {}
 
-func (x *ExecSessionSelector) ProtoReflect() protoreflect.Message {
+func (x *ExecSandboxSelector) ProtoReflect() protoreflect.Message {
 	mi := &file_agentcompose_v2_agentcompose_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5176,26 +5152,26 @@ func (x *ExecSessionSelector) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ExecSessionSelector.ProtoReflect.Descriptor instead.
-func (*ExecSessionSelector) Descriptor() ([]byte, []int) {
+// Deprecated: Use ExecSandboxSelector.ProtoReflect.Descriptor instead.
+func (*ExecSandboxSelector) Descriptor() ([]byte, []int) {
 	return file_agentcompose_v2_agentcompose_proto_rawDescGZIP(), []int{58}
 }
 
-func (x *ExecSessionSelector) GetProjectId() string {
+func (x *ExecSandboxSelector) GetProjectId() string {
 	if x != nil {
 		return x.ProjectId
 	}
 	return ""
 }
 
-func (x *ExecSessionSelector) GetProjectName() string {
+func (x *ExecSandboxSelector) GetProjectName() string {
 	if x != nil {
 		return x.ProjectName
 	}
 	return ""
 }
 
-func (x *ExecSessionSelector) GetAgentName() string {
+func (x *ExecSandboxSelector) GetAgentName() string {
 	if x != nil {
 		return x.AgentName
 	}
@@ -5302,7 +5278,7 @@ type ExecStreamResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	EventType     ExecStreamEventType    `protobuf:"varint,1,opt,name=event_type,json=eventType,proto3,enum=agentcompose.v2.ExecStreamEventType" json:"event_type,omitempty"`
 	ExecId        string                 `protobuf:"bytes,2,opt,name=exec_id,json=execId,proto3" json:"exec_id,omitempty"`
-	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	SandboxId     string                 `protobuf:"bytes,3,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
 	RunId         string                 `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	Chunk         string                 `protobuf:"bytes,5,opt,name=chunk,proto3" json:"chunk,omitempty"`
 	Stream        StdioStream            `protobuf:"varint,6,opt,name=stream,proto3,enum=agentcompose.v2.StdioStream" json:"stream,omitempty"`
@@ -5356,9 +5332,9 @@ func (x *ExecStreamResponse) GetExecId() string {
 	return ""
 }
 
-func (x *ExecStreamResponse) GetSessionId() string {
+func (x *ExecStreamResponse) GetSandboxId() string {
 	if x != nil {
-		return x.SessionId
+		return x.SandboxId
 	}
 	return ""
 }
@@ -5401,7 +5377,7 @@ func (x *ExecStreamResponse) GetTranscript() *TranscriptEvent {
 type ExecResult struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	ExecId          string                 `protobuf:"bytes,1,opt,name=exec_id,json=execId,proto3" json:"exec_id,omitempty"`
-	SessionId       string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	SandboxId       string                 `protobuf:"bytes,2,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
 	RunId           string                 `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	Command         *ExecCommand           `protobuf:"bytes,4,opt,name=command,proto3" json:"command,omitempty"`
 	Cwd             string                 `protobuf:"bytes,5,opt,name=cwd,proto3" json:"cwd,omitempty"`
@@ -5455,9 +5431,9 @@ func (x *ExecResult) GetExecId() string {
 	return ""
 }
 
-func (x *ExecResult) GetSessionId() string {
+func (x *ExecResult) GetSandboxId() string {
 	if x != nil {
-		return x.SessionId
+		return x.SandboxId
 	}
 	return ""
 }
@@ -6841,7 +6817,6 @@ type CacheItem struct {
 	ImageId        string                 `protobuf:"bytes,7,opt,name=image_id,json=imageId,proto3" json:"image_id,omitempty"`
 	ImageRef       string                 `protobuf:"bytes,8,opt,name=image_ref,json=imageRef,proto3" json:"image_ref,omitempty"`
 	ResolvedRef    string                 `protobuf:"bytes,9,opt,name=resolved_ref,json=resolvedRef,proto3" json:"resolved_ref,omitempty"`
-	SessionId      string                 `protobuf:"bytes,10,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	SandboxId      string                 `protobuf:"bytes,11,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
 	Status         CacheStatus            `protobuf:"varint,12,opt,name=status,proto3,enum=agentcompose.v2.CacheStatus" json:"status,omitempty"`
 	Removable      bool                   `protobuf:"varint,13,opt,name=removable,proto3" json:"removable,omitempty"`
@@ -6943,13 +6918,6 @@ func (x *CacheItem) GetImageRef() string {
 func (x *CacheItem) GetResolvedRef() string {
 	if x != nil {
 		return x.ResolvedRef
-	}
-	return ""
-}
-
-func (x *CacheItem) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
 	}
 	return ""
 }
@@ -8531,11 +8499,11 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"totalCount\x12\x19\n" +
 	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12\x1f\n" +
 	"\vnext_offset\x18\x04 \x01(\rR\n" +
-	"nextOffset\"\xa8\x01\n" +
+	"nextOffset\"\xc1\x01\n" +
 	"\x14RemoveProjectRequest\x125\n" +
 	"\aproject\x18\x01 \x01(\v2\x1b.agentcompose.v2.ProjectRefR\aproject\x12%\n" +
-	"\x0eremove_history\x18\x02 \x01(\bR\rremoveHistory\x122\n" +
-	"\x15stop_running_sessions\x18\x03 \x01(\bR\x13stopRunningSessions\"\x85\x01\n" +
+	"\x0eremove_history\x18\x02 \x01(\bR\rremoveHistory\x124\n" +
+	"\x16stop_running_sandboxes\x18\x03 \x01(\bR\x14stopRunningSandboxesR\x15stop_running_sessions\"\x85\x01\n" +
 	"\x15RemoveProjectResponse\x122\n" +
 	"\aproject\x18\x01 \x01(\v2\x18.agentcompose.v2.ProjectR\aproject\x128\n" +
 	"\achanges\x18\x02 \x03(\v2\x1e.agentcompose.v2.ProjectChangeR\achanges\"L\n" +
@@ -8722,18 +8690,16 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x10DockerDriverSpec\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\"2\n" +
 	"\x16MicrosandboxDriverSpec\x12\x18\n" +
-	"\aprofile\x18\x01 \x01(\tR\aprofile\"\x9e\x05\n" +
+	"\aprofile\x18\x01 \x01(\tR\aprofile\"\x91\x05\n" +
 	"\x0fRunAgentRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x02 \x01(\tR\tagentName\x12\x16\n" +
 	"\x06prompt\x18\x03 \x01(\tR\x06prompt\x122\n" +
-	"\x06source\x18\x04 \x01(\x0e2\x1a.agentcompose.v2.RunSourceR\x06source\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x05 \x01(\tR\tsessionId\x12-\n" +
+	"\x06source\x18\x04 \x01(\x0e2\x1a.agentcompose.v2.RunSourceR\x06source\x12-\n" +
 	"\x03env\x18\x06 \x03(\v2\x1b.agentcompose.v2.EnvVarSpecR\x03env\x12O\n" +
-	"\x0ecleanup_policy\x18\a \x01(\x0e2(.agentcompose.v2.RunSessionCleanupPolicyR\rcleanupPolicy\x12!\n" +
+	"\x0ecleanup_policy\x18\a \x01(\x0e2(.agentcompose.v2.RunSandboxCleanupPolicyR\rcleanupPolicy\x12!\n" +
 	"\fscheduler_id\x18\b \x01(\tR\vschedulerId\x12\x1d\n" +
 	"\n" +
 	"trigger_id\x18\t \x01(\tR\ttriggerId\x12,\n" +
@@ -8745,7 +8711,8 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x06driver\x18\x0e \x01(\tR\x06driver\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x0f \x01(\tR\tsandboxId\x12:\n" +
-	"\avolumes\x18\x10 \x03(\v2 .agentcompose.v2.VolumeMountSpecR\avolumes\"\\\n" +
+	"\avolumes\x18\x10 \x03(\v2 .agentcompose.v2.VolumeMountSpecR\avolumesJ\x04\b\x05\x10\x06R\n" +
+	"session_id\"\\\n" +
 	"\x10RunAgentResponse\x12,\n" +
 	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\x12\x1a\n" +
 	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"\xf0\x02\n" +
@@ -8774,14 +8741,12 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\n" +
 	"project_id\x18\x02 \x01(\tR\tprojectId\">\n" +
 	"\x0eGetRunResponse\x12,\n" +
-	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\"\x88\x03\n" +
+	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\"\xfb\x02\n" +
 	"\x0fListRunsRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
 	"\n" +
-	"agent_name\x18\x02 \x01(\tR\tagentName\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\x12!\n" +
+	"agent_name\x18\x02 \x01(\tR\tagentName\x12!\n" +
 	"\fscheduler_id\x18\x04 \x01(\tR\vschedulerId\x122\n" +
 	"\x06status\x18\x05 \x01(\x0e2\x1a.agentcompose.v2.RunStatusR\x06status\x122\n" +
 	"\x06source\x18\x06 \x01(\x0e2\x1a.agentcompose.v2.RunSourceR\x06source\x12!\n" +
@@ -8792,7 +8757,8 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x05limit\x18\n" +
 	" \x01(\rR\x05limit\x12\x1d\n" +
 	"\n" +
-	"sandbox_id\x18\v \x01(\tR\tsandboxId\"C\n" +
+	"sandbox_id\x18\v \x01(\tR\tsandboxIdJ\x04\b\x03\x10\x04R\n" +
+	"session_id\"C\n" +
 	"\x10ListRunsResponse\x12/\n" +
 	"\x04runs\x18\x01 \x03(\v2\x1b.agentcompose.v2.RunSummaryR\x04runs\"\xa6\x01\n" +
 	"\x14FollowRunLogsRequest\x12\x1d\n" +
@@ -8853,7 +8819,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x10block_read_bytes\x18\n" +
 	" \x01(\v2\x1c.agentcompose.v2.MetricValueR\x0eblockReadBytes\x12H\n" +
 	"\x11block_write_bytes\x18\v \x01(\v2\x1c.agentcompose.v2.MetricValueR\x0fblockWriteBytes\x12C\n" +
-	"\x0euptime_seconds\x18\f \x01(\v2\x1c.agentcompose.v2.MetricValueR\ruptimeSeconds\"\xee\x05\n" +
+	"\x0euptime_seconds\x18\f \x01(\v2\x1c.agentcompose.v2.MetricValueR\ruptimeSeconds\"\xe1\x05\n" +
 	"\n" +
 	"RunSummary\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1d\n" +
@@ -8869,9 +8835,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\n" +
 	"trigger_id\x18\t \x01(\tR\ttriggerId\x122\n" +
 	"\x06status\x18\n" +
-	" \x01(\x0e2\x1a.agentcompose.v2.RunStatusR\x06status\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\v \x01(\tR\tsessionId\x12\x1b\n" +
+	" \x01(\x0e2\x1a.agentcompose.v2.RunStatusR\x06status\x12\x1b\n" +
 	"\texit_code\x18\f \x01(\x05R\bexitCode\x12\x14\n" +
 	"\x05error\x18\r \x01(\tR\x05error\x12\x1d\n" +
 	"\n" +
@@ -8888,7 +8852,8 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"sandbox_id\x18\x14 \x01(\tR\tsandboxId\x12 \n" +
 	"\frun_short_id\x18\x15 \x01(\tR\n" +
 	"runShortId\x12(\n" +
-	"\x10sandbox_short_id\x18\x16 \x01(\tR\x0esandboxShortId\"\xcb\x02\n" +
+	"\x10sandbox_short_id\x18\x16 \x01(\tR\x0esandboxShortIdJ\x04\b\v\x10\fR\n" +
+	"session_id\"\xcb\x02\n" +
 	"\tRunDetail\x125\n" +
 	"\asummary\x18\x01 \x01(\v2\x1b.agentcompose.v2.RunSummaryR\asummary\x12\x16\n" +
 	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x16\n" +
@@ -8901,20 +8866,21 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x06driver\x18\b \x01(\tR\x06driver\x12\x1b\n" +
 	"\timage_ref\x18\t \x01(\tR\bimageRef\x12\x1a\n" +
 	"\bwarnings\x18\n" +
-	" \x03(\tR\bwarnings\"\xd7\x02\n" +
+	" \x03(\tR\bwarnings\"\xe3\x02\n" +
 	"\vExecRequest\x12\x1f\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tH\x00R\tsessionId\x12\x17\n" +
+	"sandbox_id\x18\x01 \x01(\tH\x00R\tsandboxId\x12\x17\n" +
 	"\x06run_id\x18\x02 \x01(\tH\x00R\x05runId\x12B\n" +
-	"\bselector\x18\x03 \x01(\v2$.agentcompose.v2.ExecSessionSelectorH\x00R\bselector\x126\n" +
+	"\bselector\x18\x03 \x01(\v2$.agentcompose.v2.ExecSandboxSelectorH\x00R\bselector\x126\n" +
 	"\acommand\x18\x04 \x01(\v2\x1c.agentcompose.v2.ExecCommandR\acommand\x12\x10\n" +
 	"\x03cwd\x18\x05 \x01(\tR\x03cwd\x12-\n" +
 	"\x03env\x18\x06 \x03(\v2\x1b.agentcompose.v2.EnvVarSpecR\x03env\x12\x1d\n" +
 	"\n" +
 	"timeout_ms\x18\a \x01(\rR\ttimeoutMs\x12(\n" +
 	"\x10max_output_bytes\x18\b \x01(\rR\x0emaxOutputBytesB\b\n" +
-	"\x06target\"v\n" +
-	"\x13ExecSessionSelector\x12\x1d\n" +
+	"\x06targetR\n" +
+	"session_id\"v\n" +
+	"\x13ExecSandboxSelector\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12!\n" +
 	"\fproject_name\x18\x02 \x01(\tR\vprojectName\x12\x1d\n" +
@@ -8924,25 +8890,26 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x12\n" +
 	"\x04args\x18\x02 \x03(\tR\x04args\"C\n" +
 	"\fExecResponse\x123\n" +
-	"\x06result\x18\x01 \x01(\v2\x1b.agentcompose.v2.ExecResultR\x06result\"\xeb\x02\n" +
+	"\x06result\x18\x01 \x01(\v2\x1b.agentcompose.v2.ExecResultR\x06result\"\xf7\x02\n" +
 	"\x12ExecStreamResponse\x12C\n" +
 	"\n" +
 	"event_type\x18\x01 \x01(\x0e2$.agentcompose.v2.ExecStreamEventTypeR\teventType\x12\x17\n" +
 	"\aexec_id\x18\x02 \x01(\tR\x06execId\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x15\n" +
+	"sandbox_id\x18\x03 \x01(\tR\tsandboxId\x12\x15\n" +
 	"\x06run_id\x18\x04 \x01(\tR\x05runId\x12\x14\n" +
 	"\x05chunk\x18\x05 \x01(\tR\x05chunk\x124\n" +
 	"\x06stream\x18\x06 \x01(\x0e2\x1c.agentcompose.v2.StdioStreamR\x06stream\x123\n" +
 	"\x06result\x18\a \x01(\v2\x1b.agentcompose.v2.ExecResultR\x06result\x12@\n" +
 	"\n" +
 	"transcript\x18\b \x01(\v2 .agentcompose.v2.TranscriptEventR\n" +
-	"transcript\"\xbb\x03\n" +
+	"transcriptR\n" +
+	"session_id\"\xc7\x03\n" +
 	"\n" +
 	"ExecResult\x12\x17\n" +
 	"\aexec_id\x18\x01 \x01(\tR\x06execId\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x15\n" +
+	"sandbox_id\x18\x02 \x01(\tR\tsandboxId\x12\x15\n" +
 	"\x06run_id\x18\x03 \x01(\tR\x05runId\x126\n" +
 	"\acommand\x18\x04 \x01(\v2\x1c.agentcompose.v2.ExecCommandR\acommand\x12\x10\n" +
 	"\x03cwd\x18\x05 \x01(\tR\x03cwd\x12\x1b\n" +
@@ -8955,7 +8922,8 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x10stdout_truncated\x18\v \x01(\bR\x0fstdoutTruncated\x12)\n" +
 	"\x10stderr_truncated\x18\f \x01(\bR\x0fstderrTruncated\x12)\n" +
 	"\x10output_truncated\x18\r \x01(\bR\x0foutputTruncated\x12\x14\n" +
-	"\x05error\x18\x0e \x01(\tR\x05error\"\xd2\x01\n" +
+	"\x05error\x18\x0e \x01(\tR\x05errorR\n" +
+	"session_id\"\xd2\x01\n" +
 	"\x11ListImagesRequest\x125\n" +
 	"\x05store\x18\x01 \x01(\x0e2\x1f.agentcompose.v2.ImageStoreKindR\x05store\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12\x10\n" +
@@ -9059,7 +9027,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\amatched\x18\x02 \x03(\v2\x1a.agentcompose.v2.CacheItemR\amatched\x12\x18\n" +
 	"\aremoved\x18\x03 \x03(\tR\aremoved\x124\n" +
 	"\askipped\x18\x04 \x03(\v2\x1a.agentcompose.v2.CacheItemR\askipped\x12\x1a\n" +
-	"\bwarnings\x18\x05 \x03(\tR\bwarnings\"\xfa\x04\n" +
+	"\bwarnings\x18\x05 \x03(\tR\bwarnings\"\xed\x04\n" +
 	"\tCacheItem\x12\x19\n" +
 	"\bcache_id\x18\x01 \x01(\tR\acacheId\x124\n" +
 	"\x06domain\x18\x02 \x01(\x0e2\x1c.agentcompose.v2.CacheDomainR\x06domain\x12\x16\n" +
@@ -9072,9 +9040,6 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\timage_ref\x18\b \x01(\tR\bimageRef\x12!\n" +
 	"\fresolved_ref\x18\t \x01(\tR\vresolvedRef\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\n" +
-	" \x01(\tR\tsessionId\x12\x1d\n" +
-	"\n" +
 	"sandbox_id\x18\v \x01(\tR\tsandboxId\x124\n" +
 	"\x06status\x18\f \x01(\x0e2\x1c.agentcompose.v2.CacheStatusR\x06status\x12\x1c\n" +
 	"\tremovable\x18\r \x01(\bR\tremovable\x12'\n" +
@@ -9085,7 +9050,9 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\n" +
 	"references\x18\x11 \x03(\v2\x1f.agentcompose.v2.CacheReferenceR\n" +
 	"references\x12\x1a\n" +
-	"\bwarnings\x18\x12 \x03(\tR\bwarnings\"\x96\x01\n" +
+	"\bwarnings\x18\x12 \x03(\tR\bwarningsJ\x04\b\n" +
+	"\x10\vR\n" +
+	"session_id\"\x96\x01\n" +
 	"\x0eCacheReference\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x12\n" +
@@ -9254,12 +9221,12 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"#RUN_AGENT_STREAM_EVENT_TYPE_STARTED\x10\x01\x12&\n" +
 	"\"RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT\x10\x02\x12&\n" +
 	"\"RUN_AGENT_STREAM_EVENT_TYPE_STATUS\x10\x03\x12)\n" +
-	"%RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED\x10\x04*\xda\x01\n" +
-	"\x17RunSessionCleanupPolicy\x12*\n" +
-	"&RUN_SESSION_CLEANUP_POLICY_UNSPECIFIED\x10\x00\x121\n" +
-	"-RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION\x10\x01\x12+\n" +
-	"'RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING\x10\x02\x123\n" +
-	"/RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION\x10\x03*\xaa\x01\n" +
+	"%RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED\x10\x04*\x8b\x03\n" +
+	"\x17RunSandboxCleanupPolicy\x12*\n" +
+	"&RUN_SANDBOX_CLEANUP_POLICY_UNSPECIFIED\x10\x00\x121\n" +
+	"-RUN_SANDBOX_CLEANUP_POLICY_STOP_ON_COMPLETION\x10\x01\x12+\n" +
+	"'RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING\x10\x02\x123\n" +
+	"/RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION\x10\x03*&RUN_SESSION_CLEANUP_POLICY_UNSPECIFIED*-RUN_SESSION_CLEANUP_POLICY_STOP_ON_COMPLETION*'RUN_SESSION_CLEANUP_POLICY_KEEP_RUNNING*/RUN_SESSION_CLEANUP_POLICY_REMOVE_ON_COMPLETION*\xaa\x01\n" +
 	"\x13ExecStreamEventType\x12&\n" +
 	"\"EXEC_STREAM_EVENT_TYPE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eEXEC_STREAM_EVENT_TYPE_STARTED\x10\x01\x12!\n" +
@@ -9287,13 +9254,13 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x19METRIC_STATUS_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10METRIC_STATUS_OK\x10\x01\x12\x19\n" +
 	"\x15METRIC_STATUS_UNKNOWN\x10\x02\x12\x1d\n" +
-	"\x19METRIC_STATUS_UNAVAILABLE\x10\x03*\xca\x01\n" +
+	"\x19METRIC_STATUS_UNAVAILABLE\x10\x03*\xf0\x01\n" +
 	"\vCacheDomain\x12\x1c\n" +
 	"\x18CACHE_DOMAIN_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cCACHE_DOMAIN_OCI_IMAGE_STORE\x10\x01\x12)\n" +
 	"%CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE\x10\x02\x12&\n" +
 	"\"CACHE_DOMAIN_RUNTIME_DERIVED_CACHE\x10\x03\x12(\n" +
-	"$CACHE_DOMAIN_SESSION_EPHEMERAL_STATE\x10\x04*\xc9\x01\n" +
+	"$CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE\x10\x04*$CACHE_DOMAIN_SESSION_EPHEMERAL_STATE*\xc9\x01\n" +
 	"\vCacheStatus\x12\x1c\n" +
 	"\x18CACHE_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CACHE_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
@@ -9368,7 +9335,7 @@ var file_agentcompose_v2_agentcompose_proto_goTypes = []any{
 	(RunStatus)(0),                  // 3: agentcompose.v2.RunStatus
 	(RunSource)(0),                  // 4: agentcompose.v2.RunSource
 	(RunAgentStreamEventType)(0),    // 5: agentcompose.v2.RunAgentStreamEventType
-	(RunSessionCleanupPolicy)(0),    // 6: agentcompose.v2.RunSessionCleanupPolicy
+	(RunSandboxCleanupPolicy)(0),    // 6: agentcompose.v2.RunSandboxCleanupPolicy
 	(ExecStreamEventType)(0),        // 7: agentcompose.v2.ExecStreamEventType
 	(StdioStream)(0),                // 8: agentcompose.v2.StdioStream
 	(ImageStoreKind)(0),             // 9: agentcompose.v2.ImageStoreKind
@@ -9435,7 +9402,7 @@ var file_agentcompose_v2_agentcompose_proto_goTypes = []any{
 	(*RunSummary)(nil),              // 70: agentcompose.v2.RunSummary
 	(*RunDetail)(nil),               // 71: agentcompose.v2.RunDetail
 	(*ExecRequest)(nil),             // 72: agentcompose.v2.ExecRequest
-	(*ExecSessionSelector)(nil),     // 73: agentcompose.v2.ExecSessionSelector
+	(*ExecSandboxSelector)(nil),     // 73: agentcompose.v2.ExecSandboxSelector
 	(*ExecCommand)(nil),             // 74: agentcompose.v2.ExecCommand
 	(*ExecResponse)(nil),            // 75: agentcompose.v2.ExecResponse
 	(*ExecStreamResponse)(nil),      // 76: agentcompose.v2.ExecStreamResponse
@@ -9543,7 +9510,7 @@ var file_agentcompose_v2_agentcompose_proto_depIdxs = []int32{
 	51,  // 47: agentcompose.v2.DriverSpec.microsandbox:type_name -> agentcompose.v2.MicrosandboxDriverSpec
 	4,   // 48: agentcompose.v2.RunAgentRequest.source:type_name -> agentcompose.v2.RunSource
 	42,  // 49: agentcompose.v2.RunAgentRequest.env:type_name -> agentcompose.v2.EnvVarSpec
-	6,   // 50: agentcompose.v2.RunAgentRequest.cleanup_policy:type_name -> agentcompose.v2.RunSessionCleanupPolicy
+	6,   // 50: agentcompose.v2.RunAgentRequest.cleanup_policy:type_name -> agentcompose.v2.RunSandboxCleanupPolicy
 	117, // 51: agentcompose.v2.RunAgentRequest.jupyter:type_name -> agentcompose.v2.RunJupyterSpec
 	40,  // 52: agentcompose.v2.RunAgentRequest.volumes:type_name -> agentcompose.v2.VolumeMountSpec
 	71,  // 53: agentcompose.v2.RunAgentResponse.run:type_name -> agentcompose.v2.RunDetail
@@ -9572,7 +9539,7 @@ var file_agentcompose_v2_agentcompose_proto_depIdxs = []int32{
 	4,   // 76: agentcompose.v2.RunSummary.source:type_name -> agentcompose.v2.RunSource
 	3,   // 77: agentcompose.v2.RunSummary.status:type_name -> agentcompose.v2.RunStatus
 	70,  // 78: agentcompose.v2.RunDetail.summary:type_name -> agentcompose.v2.RunSummary
-	73,  // 79: agentcompose.v2.ExecRequest.selector:type_name -> agentcompose.v2.ExecSessionSelector
+	73,  // 79: agentcompose.v2.ExecRequest.selector:type_name -> agentcompose.v2.ExecSandboxSelector
 	74,  // 80: agentcompose.v2.ExecRequest.command:type_name -> agentcompose.v2.ExecCommand
 	42,  // 81: agentcompose.v2.ExecRequest.env:type_name -> agentcompose.v2.EnvVarSpec
 	77,  // 82: agentcompose.v2.ExecResponse.result:type_name -> agentcompose.v2.ExecResult
@@ -9706,7 +9673,7 @@ func file_agentcompose_v2_agentcompose_proto_init() {
 	}
 	file_agentcompose_v2_agentcompose_proto_msgTypes[53].OneofWrappers = []any{}
 	file_agentcompose_v2_agentcompose_proto_msgTypes[57].OneofWrappers = []any{
-		(*ExecRequest_SessionId)(nil),
+		(*ExecRequest_SandboxId)(nil),
 		(*ExecRequest_RunId)(nil),
 		(*ExecRequest_Selector)(nil),
 	}

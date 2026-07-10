@@ -10,7 +10,7 @@ import (
 )
 
 type workspace interface {
-	Prepare(context.Context, *domain.Session) error
+	Prepare(context.Context, *domain.Sandbox) error
 }
 
 func newWorkspace(config *appconfig.Config, workspace domain.WorkspaceConfig) (workspace, error) {

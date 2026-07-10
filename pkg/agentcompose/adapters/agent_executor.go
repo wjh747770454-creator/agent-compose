@@ -29,7 +29,7 @@ func NewAgentExecutor(config *appconfig.Config, store *sessionstore.Store, strea
 	return &AgentExecutor{config: config, store: store, streams: streams, runner: runner}
 }
 
-func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain.Session, request execution.ExecuteAgentRequest) (domain.NotebookCell, domain.SessionEvent, domain.SessionEvent, error) {
+func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain.Sandbox, request execution.ExecuteAgentRequest) (domain.NotebookCell, domain.SandboxEvent, domain.SandboxEvent, error) {
 	agent := domain.NormalizeAgentKind(request.Agent)
 	if agent == "" {
 		agent = "codex"
@@ -38,7 +38,7 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 	message := strings.TrimSpace(request.Message)
 	stream := request.Stream
 	if message == "" {
-		return domain.NotebookCell{}, domain.SessionEvent{}, domain.SessionEvent{}, fmt.Errorf("message is required")
+		return domain.NotebookCell{}, domain.SandboxEvent{}, domain.SandboxEvent{}, fmt.Errorf("message is required")
 	}
 
 	agentTimeout := e.config.AgentTimeout
@@ -54,14 +54,14 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 	defer execCancel()
 
 	cellID := uuid.NewString()
-	hostCellDir := filepath.Join(execution.HostSessionDir(session), "state", "cells", cellID)
+	hostCellDir := filepath.Join(execution.HostSandboxDir(session), "state", "cells", cellID)
 	if err := os.MkdirAll(hostCellDir, 0o755); err != nil {
-		return domain.NotebookCell{}, domain.SessionEvent{}, domain.SessionEvent{}, fmt.Errorf("create agent cell state dir: %w", err)
+		return domain.NotebookCell{}, domain.SandboxEvent{}, domain.SandboxEvent{}, fmt.Errorf("create agent cell state dir: %w", err)
 	}
 	startedAt := time.Now().UTC()
-	userEvent := domain.SessionEvent{ID: uuid.NewString(), Type: "agent.user", Level: "info", Message: message, CreatedAt: startedAt}
+	userEvent := domain.SandboxEvent{ID: uuid.NewString(), Type: "agent.user", Level: "info", Message: message, CreatedAt: startedAt}
 	if err := e.store.AddEvent(ctx, session.Summary.ID, userEvent); err != nil {
-		return domain.NotebookCell{}, domain.SessionEvent{}, domain.SessionEvent{}, err
+		return domain.NotebookCell{}, domain.SandboxEvent{}, domain.SandboxEvent{}, err
 	}
 	if e.streams != nil {
 		e.streams.PublishEventAdded(session.Summary.ID, userEvent)
@@ -76,7 +76,7 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 		Running:   true,
 	}
 	if err := e.store.AddCell(ctx, session, cell); err != nil {
-		return domain.NotebookCell{}, domain.SessionEvent{}, domain.SessionEvent{}, err
+		return domain.NotebookCell{}, domain.SandboxEvent{}, domain.SandboxEvent{}, err
 	}
 	if e.streams != nil {
 		e.streams.PublishCellStarted(session.Summary.ID, cell)
@@ -97,8 +97,8 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 		}
 		streamErrMu.Unlock()
 	}
-	persistFailedCell := func(finalErr error, execResult domain.ExecResult, result domain.AgentRunResult) (domain.NotebookCell, domain.SessionEvent, domain.SessionEvent, error) {
-		assistantEvent := domain.SessionEvent{
+	persistFailedCell := func(finalErr error, execResult domain.ExecResult, result domain.AgentRunResult) (domain.NotebookCell, domain.SandboxEvent, domain.SandboxEvent, error) {
+		assistantEvent := domain.SandboxEvent{
 			ID:        uuid.NewString(),
 			Type:      "agent.assistant.failed",
 			Level:     "error",
@@ -112,15 +112,16 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 			execResult.Output = assistantEvent.Message
 		}
 		if err := execution.WriteCellArtifacts(hostCellDir, message, execResult); err != nil {
-			return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, err
+			return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 		}
-		resumeInfo := execution.CollectAgentResumeInfo(session, firstNonEmpty(result.Agent, cell.Agent, agent), result.SessionID, filepath.Join(hostCellDir, "agent-session.json"))
-		if err := execution.WriteAgentSessionArtifact(filepath.Join(hostCellDir, "agent-session.json"), resumeInfo); err != nil {
-			return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, err
+		threadArtifactPath := filepath.Join(hostCellDir, "agent-thread.json")
+		resumeInfo := execution.CollectAgentResumeInfo(session, firstNonEmpty(result.Agent, cell.Agent, agent), result.ThreadID, threadArtifactPath)
+		if err := execution.WriteAgentThreadArtifact(threadArtifactPath, resumeInfo); err != nil {
+			return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 		}
-		agentSessionID := strings.TrimSpace(result.SessionID)
-		if resumeInfo != nil && agentSessionID == "" {
-			agentSessionID = resumeInfo.SessionID
+		agentThreadID := strings.TrimSpace(result.ThreadID)
+		if resumeInfo != nil && agentThreadID == "" {
+			agentThreadID = resumeInfo.ThreadID
 		}
 		cellMu.Lock()
 		cell.Stdout = execResult.Stdout
@@ -130,19 +131,19 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 		cell.Success = false
 		cell.Running = false
 		cell.Agent = firstNonEmpty(result.Agent, cell.Agent, agent)
-		cell.AgentSessionID = agentSessionID
+		cell.AgentThreadID = agentThreadID
 		cell.StopReason = result.StopReason
 		cell.AgentResume = resumeInfo
 		failedCell := cell
 		cellMu.Unlock()
 		if addErr := e.store.AddCell(ctx, session, failedCell); addErr != nil {
-			return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, addErr
+			return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, addErr
 		}
 		if e.streams != nil {
 			e.streams.PublishCellCompleted(session.Summary.ID, failedCell)
 		}
 		if addErr := e.store.AddEvent(ctx, session.Summary.ID, assistantEvent); addErr != nil {
-			return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, addErr
+			return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, addErr
 		}
 		if e.streams != nil {
 			e.streams.PublishEventAdded(session.Summary.ID, assistantEvent)
@@ -204,15 +205,16 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 		execResult.Output = firstNonEmpty(result.DisplayOutput, result.Transcript, result.FinalText)
 	}
 	if err := execution.WriteCellArtifacts(hostCellDir, message, execResult); err != nil {
-		return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, err
+		return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 	}
-	resumeInfo := execution.CollectAgentResumeInfo(session, firstNonEmpty(result.Agent, cell.Agent), result.SessionID, filepath.Join(hostCellDir, "agent-session.json"))
-	if err := execution.WriteAgentSessionArtifact(filepath.Join(hostCellDir, "agent-session.json"), resumeInfo); err != nil {
-		return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, err
+	threadArtifactPath := filepath.Join(hostCellDir, "agent-thread.json")
+	resumeInfo := execution.CollectAgentResumeInfo(session, firstNonEmpty(result.Agent, cell.Agent), result.ThreadID, threadArtifactPath)
+	if err := execution.WriteAgentThreadArtifact(threadArtifactPath, resumeInfo); err != nil {
+		return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 	}
-	agentSessionID := strings.TrimSpace(result.SessionID)
-	if resumeInfo != nil && agentSessionID == "" {
-		agentSessionID = resumeInfo.SessionID
+	agentThreadID := strings.TrimSpace(result.ThreadID)
+	if resumeInfo != nil && agentThreadID == "" {
+		agentThreadID = resumeInfo.ThreadID
 	}
 	cellMu.Lock()
 	cell.Stdout = execResult.Stdout
@@ -222,33 +224,33 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 	cell.Success = result.Success
 	cell.Running = false
 	cell.Agent = firstNonEmpty(result.Agent, cell.Agent)
-	cell.AgentSessionID = agentSessionID
+	cell.AgentThreadID = agentThreadID
 	cell.StopReason = result.StopReason
 	cell.AgentResume = resumeInfo
 	cellSnapshot := cell
 	cellMu.Unlock()
 	if err := e.store.AddCell(ctx, session, cellSnapshot); err != nil {
-		return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, err
+		return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 	}
 	if e.streams != nil {
 		e.streams.PublishCellCompleted(session.Summary.ID, cellSnapshot)
 	}
 
-	assistantEvent := domain.SessionEvent{ID: uuid.NewString(), Type: "agent.assistant", Level: "info", CreatedAt: time.Now().UTC(), Message: summarizeAgentResult(result)}
+	assistantEvent := domain.SandboxEvent{ID: uuid.NewString(), Type: "agent.assistant", Level: "info", CreatedAt: time.Now().UTC(), Message: summarizeAgentResult(result)}
 	if !cellSnapshot.Success {
 		assistantEvent.Type = "agent.assistant.failed"
 		assistantEvent.Level = "error"
 	}
 	for _, event := range execution.AgentTraceEvents(result.Transcript, assistantEvent.CreatedAt) {
 		if err := e.store.AddEvent(ctx, session.Summary.ID, event); err != nil {
-			return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, err
+			return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 		}
 		if e.streams != nil {
 			e.streams.PublishEventAdded(session.Summary.ID, event)
 		}
 	}
 	if err := e.store.AddEvent(ctx, session.Summary.ID, assistantEvent); err != nil {
-		return domain.NotebookCell{}, userEvent, domain.SessionEvent{}, err
+		return domain.NotebookCell{}, userEvent, domain.SandboxEvent{}, err
 	}
 	if e.streams != nil {
 		e.streams.PublishEventAdded(session.Summary.ID, assistantEvent)
@@ -256,14 +258,14 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 	return cellSnapshot, userEvent, assistantEvent, nil
 }
 
-func cloneSessionForAgentExecution(session *domain.Session, providerEnvItems []domain.SessionEnvVar) *domain.Session {
+func cloneSessionForAgentExecution(session *domain.Sandbox, providerEnvItems []domain.SandboxEnvVar) *domain.Sandbox {
 	if session == nil {
 		return nil
 	}
 	execSession := *session
-	execSession.EnvItems = append([]domain.SessionEnvVar(nil), session.EnvItems...)
-	execSession.RuntimeEnvItems = append([]domain.SessionEnvVar(nil), session.RuntimeEnvItems...)
-	execSession.ProviderEnvItems = append([]domain.SessionEnvVar(nil), session.ProviderEnvItems...)
+	execSession.EnvItems = append([]domain.SandboxEnvVar(nil), session.EnvItems...)
+	execSession.RuntimeEnvItems = append([]domain.SandboxEnvVar(nil), session.RuntimeEnvItems...)
+	execSession.ProviderEnvItems = append([]domain.SandboxEnvVar(nil), session.ProviderEnvItems...)
 	execution.ApplyAgentProviderEnv(&execSession, providerEnvItems)
 	return &execSession
 }

@@ -47,7 +47,7 @@ func TestResolverBootstrapAndRuntimeTargetWorkflows(t *testing.T) {
 		t.Fatalf("default target = %#v", target)
 	}
 
-	store.global = []domain.SessionEnvVar{
+	store.global = []domain.SandboxEnvVar{
 		{Name: "ANTHROPIC_AUTH_TOKEN", Value: "anthropic-token"},
 		{Name: "ANTHROPIC_MODEL", Value: "claude-default"},
 		{Name: "ANTHROPIC_BASE_URL", Value: "https://api.anthropic.test"},
@@ -64,7 +64,7 @@ func TestResolverBootstrapAndRuntimeTargetWorkflows(t *testing.T) {
 	}
 
 	sessionStore := newResolverCoverageStore()
-	runtimeTarget, err := ResolveRuntimeLLMTargetWithEnv(ctx, &appconfig.Config{}, sessionStore, "session-1", ProviderFamilyOpenAI, "", "", []domain.SessionEnvVar{
+	runtimeTarget, err := ResolveRuntimeLLMTargetWithEnv(ctx, &appconfig.Config{}, sessionStore, "session-1", ProviderFamilyOpenAI, "", "", []domain.SandboxEnvVar{
 		{Name: "OPENAI_API_KEY", Value: "session-key"},
 		{Name: "LLM_MODEL", Value: "gpt-session"},
 		{Name: "LLM_API_PROTOCOL", Value: "responses"},
@@ -112,7 +112,7 @@ type resolverCoverageStore struct {
 	providers []Provider
 	models    []Model
 	wire      map[string]string
-	global    []domain.SessionEnvVar
+	global    []domain.SandboxEnvVar
 }
 
 func newResolverCoverageStore() *resolverCoverageStore {
@@ -171,6 +171,6 @@ func (s *resolverCoverageStore) LLMProviderModelWireAPI(_ context.Context, provi
 	return wire, ok, nil
 }
 
-func (s *resolverCoverageStore) ListGlobalEnv(context.Context) ([]domain.SessionEnvVar, error) {
+func (s *resolverCoverageStore) ListGlobalEnv(context.Context) ([]domain.SandboxEnvVar, error) {
 	return s.global, nil
 }

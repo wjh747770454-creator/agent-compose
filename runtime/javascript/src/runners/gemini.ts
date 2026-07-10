@@ -16,7 +16,7 @@ export class GeminiRunner {
 
     const result: AgentResult = {
       provider: "gemini",
-      sessionId: "",
+      threadId: "",
       stopReason: "completed",
       finalText: "",
       transcript: "",
@@ -57,7 +57,7 @@ export class GeminiRunner {
       }
       const eventType = String(event?.type || "");
       if (eventType === "init") {
-        result.sessionId = String(event.sessionId || event.session_id || result.sessionId);
+        result.threadId = String(event.sessionId || event.session_id || result.threadId);
         continue;
       }
       if (eventType === "message") {

@@ -11,9 +11,9 @@ import (
 
 func TestAggregatorAndHubWorkflows(t *testing.T) {
 	ctx := context.Background()
-	store := dashboardSessionStore{sessions: []*domain.Session{
-		{Summary: domain.SessionSummary{ID: "pending", VMStatus: domain.VMStatusPending}},
-		{Summary: domain.SessionSummary{ID: "failed", VMStatus: domain.VMStatusFailed}},
+	store := dashboardSandboxStore{sessions: []*domain.Sandbox{
+		{Summary: domain.SandboxSummary{ID: "pending", VMStatus: domain.VMStatusPending}},
+		{Summary: domain.SandboxSummary{ID: "failed", VMStatus: domain.VMStatusFailed}},
 	}}
 	runs := dashboardRunStore{runs: []domain.LoaderRunSummary{{ID: "run", Status: "running"}, {ID: "skip", Status: "skipped"}}}
 	aggregator := NewAggregator(store, runs)
@@ -68,11 +68,11 @@ func TestAggregatorAndHubWorkflows(t *testing.T) {
 }
 
 func TestAggregatorReturnsStoreErrors(t *testing.T) {
-	_, err := NewAggregator(dashboardSessionStore{err: errors.New("sessions")}, dashboardRunStore{}).Build(context.Background())
+	_, err := NewAggregator(dashboardSandboxStore{err: errors.New("sessions")}, dashboardRunStore{}).Build(context.Background())
 	if err == nil {
 		t.Fatalf("expected session store error")
 	}
-	_, err = NewAggregator(dashboardSessionStore{}, dashboardRunStore{err: errors.New("runs")}).Build(context.Background())
+	_, err = NewAggregator(dashboardSandboxStore{}, dashboardRunStore{err: errors.New("runs")}).Build(context.Background())
 	if err == nil {
 		t.Fatalf("expected run store error")
 	}
@@ -87,13 +87,13 @@ func TestE2EDashboardOverviewWorkflows(t *testing.T) {
 	TestIntegrationDashboardOverviewWorkflows(t)
 }
 
-type dashboardSessionStore struct {
-	sessions []*domain.Session
+type dashboardSandboxStore struct {
+	sessions []*domain.Sandbox
 	err      error
 }
 
-func (s dashboardSessionStore) ListSessions(context.Context, domain.SessionListOptions) (domain.SessionListResult, error) {
-	return domain.SessionListResult{Sessions: s.sessions}, s.err
+func (s dashboardSandboxStore) ListSandboxes(context.Context, domain.SandboxListOptions) (domain.SandboxListResult, error) {
+	return domain.SandboxListResult{Sandboxes: s.sessions}, s.err
 }
 
 type dashboardRunStore struct {

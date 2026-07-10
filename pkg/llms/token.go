@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func NewFacadeToken(sessionID, model, providerID, wireAPI, source, runID string) (string, FacadeToken, error) {
+func NewFacadeToken(sandboxID, model, providerID, wireAPI, source, runID string) (string, FacadeToken, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", FacadeToken{}, err
@@ -17,7 +17,7 @@ func NewFacadeToken(sessionID, model, providerID, wireAPI, source, runID string)
 	hash, fingerprint := HashFacadeToken(tokenValue)
 	now := time.Now().UTC()
 	return tokenValue, FacadeToken{
-		SessionID:        strings.TrimSpace(sessionID),
+		SandboxID:        strings.TrimSpace(sandboxID),
 		TokenHash:        hash,
 		TokenFingerprint: fingerprint,
 		Model:            strings.TrimSpace(model),

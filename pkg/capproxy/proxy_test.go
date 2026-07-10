@@ -15,12 +15,12 @@ import (
 )
 
 type testResolver struct {
-	binding SessionBinding
+	binding SandboxBinding
 }
 
-func (r testResolver) ResolveCapabilitySession(_ context.Context, token string) (SessionBinding, error) {
-	if token != "session-token" {
-		return SessionBinding{}, status.Error(codes.Unauthenticated, "bad token")
+func (r testResolver) ResolveCapabilitySandbox(_ context.Context, token string) (SandboxBinding, error) {
+	if token != "sandbox-token" {
+		return SandboxBinding{}, status.Error(codes.Unauthenticated, "bad token")
 	}
 	return r.binding, nil
 }
@@ -42,7 +42,7 @@ func TestProxyInjectsOctoBusMetadata(t *testing.T) {
 		return stream.SendMsg(rawFrame("ok:" + string(req)))
 	})
 	defer stopOcto()
-	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "octo-token")}, testResolver{binding: SessionBinding{SessionID: "s1", CapsetIDs: []string{"dev"}}})
+	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "octo-token")}, testResolver{binding: SandboxBinding{SandboxID: "s1", CapsetIDs: []string{"dev"}}})
 	defer stopProxy()
 
 	conn, err := grpc.NewClient(proxyAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})))
@@ -51,7 +51,7 @@ func TestProxyInjectsOctoBusMetadata(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs(
-		SessionTokenMetadata, "session-token",
+		SandboxTokenMetadata, "sandbox-token",
 		"x-octobus-instance", "inst",
 	))
 	out := rawFrame(nil)
@@ -83,7 +83,7 @@ func TestProxyForwardsGuestInstance(t *testing.T) {
 		return stream.SendMsg(rawFrame("ok:" + string(req)))
 	})
 	defer stopOcto()
-	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "")}, testResolver{binding: SessionBinding{SessionID: "s1", CapsetIDs: []string{"dev"}}})
+	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "")}, testResolver{binding: SandboxBinding{SandboxID: "s1", CapsetIDs: []string{"dev"}}})
 	defer stopProxy()
 
 	conn, err := grpc.NewClient(proxyAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})))
@@ -92,7 +92,7 @@ func TestProxyForwardsGuestInstance(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.MD{
-		SessionTokenMetadata: []string{"session-token"},
+		SandboxTokenMetadata: []string{"sandbox-token"},
 		"x-octobus-instance": []string{"guest-inst"},
 		"x-octobus-capset":   []string{"dev"},
 	})
@@ -113,7 +113,7 @@ func TestProxyForwardsGuestInstance(t *testing.T) {
 func TestProxyRejectsMissingInstanceForBusinessCall(t *testing.T) {
 	octoAddr, stopOcto := startTestRawGRPC(t, func(_ any, stream grpc.ServerStream) error { return nil })
 	defer stopOcto()
-	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "")}, testResolver{binding: SessionBinding{SessionID: "s1", CapsetIDs: []string{"dev"}}})
+	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "")}, testResolver{binding: SandboxBinding{SandboxID: "s1", CapsetIDs: []string{"dev"}}})
 	defer stopProxy()
 
 	conn, err := grpc.NewClient(proxyAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})))
@@ -121,7 +121,7 @@ func TestProxyRejectsMissingInstanceForBusinessCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs(SessionTokenMetadata, "session-token"))
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs(SandboxTokenMetadata, "sandbox-token"))
 	out := rawFrame(nil)
 	err = conn.Invoke(ctx, "/pkg.Service/Call", rawFrame("ping"), &out)
 	if status.Code(err) != codes.FailedPrecondition {
@@ -132,7 +132,7 @@ func TestProxyRejectsMissingInstanceForBusinessCall(t *testing.T) {
 func TestProxyRejectsCapsetOutsideAllowedSet(t *testing.T) {
 	octoAddr, stopOcto := startTestRawGRPC(t, func(_ any, stream grpc.ServerStream) error { return nil })
 	defer stopOcto()
-	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "")}, testResolver{binding: SessionBinding{SessionID: "s1", CapsetIDs: []string{"dev"}}})
+	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "")}, testResolver{binding: SandboxBinding{SandboxID: "s1", CapsetIDs: []string{"dev"}}})
 	defer stopProxy()
 
 	conn, err := grpc.NewClient(proxyAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})))
@@ -140,9 +140,9 @@ func TestProxyRejectsCapsetOutsideAllowedSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	// Guest requests a capset the session is not allowed to use.
+	// Guest requests a capset the sandbox is not allowed to use.
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.MD{
-		SessionTokenMetadata: []string{"session-token"},
+		SandboxTokenMetadata: []string{"sandbox-token"},
 		"x-octobus-capset":   []string{"other"},
 	})
 	out := rawFrame(nil)
@@ -152,10 +152,10 @@ func TestProxyRejectsCapsetOutsideAllowedSet(t *testing.T) {
 	}
 }
 
-func TestProxyRejectsMissingSessionToken(t *testing.T) {
+func TestProxyRejectsMissingSandboxToken(t *testing.T) {
 	octoAddr, stopOcto := startTestRawGRPC(t, func(_ any, stream grpc.ServerStream) error { return nil })
 	defer stopOcto()
-	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "")}, testResolver{binding: SessionBinding{SessionID: "s1", CapsetIDs: []string{"dev"}}})
+	proxyAddr, stopProxy := startTestProxy(t, Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus(octoAddr, "")}, testResolver{binding: SandboxBinding{SandboxID: "s1", CapsetIDs: []string{"dev"}}})
 	defer stopProxy()
 
 	conn, err := grpc.NewClient(proxyAddr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})))
@@ -182,7 +182,7 @@ func TestServerConfiguredAndServeBranches(t *testing.T) {
 		t.Fatal("nil OctoBus resolver should not be configured")
 	}
 	if NewServer(Config{Listen: "127.0.0.1:0", OctoBus: staticOctoBus("127.0.0.1:1", "")}, nil).Configured() {
-		t.Fatal("nil session resolver should not be configured")
+		t.Fatal("nil sandbox resolver should not be configured")
 	}
 	if err := NewServer(Config{}, nil).Serve(context.Background()); err != nil {
 		t.Fatalf("unconfigured Serve returned error: %v", err)
@@ -197,32 +197,37 @@ func TestServerConfiguredAndServeBranches(t *testing.T) {
 	}
 }
 
-func TestResolveSessionBearerFallbackAndErrors(t *testing.T) {
-	server := NewServer(Config{}, testResolver{binding: SessionBinding{SessionID: "s1", CapsetIDs: []string{"dev"}}})
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer session-token"))
-	binding, err := server.resolveSession(ctx)
+func TestResolveSandboxBearerFallbackAndErrors(t *testing.T) {
+	server := NewServer(Config{}, testResolver{binding: SandboxBinding{SandboxID: "s1", CapsetIDs: []string{"dev"}}})
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer sandbox-token"))
+	binding, err := server.resolveSandbox(ctx)
 	if err != nil {
-		t.Fatalf("resolveSession returned error: %v", err)
+		t.Fatalf("resolveSandbox returned error: %v", err)
 	}
-	if binding.SessionID != "s1" {
-		t.Fatalf("binding SessionID = %q, want s1", binding.SessionID)
+	if binding.SandboxID != "s1" {
+		t.Fatalf("binding SandboxID = %q, want s1", binding.SandboxID)
+	}
+
+	ctx = metadata.NewIncomingContext(context.Background(), metadata.Pairs(deprecatedSessionTokenMetadata, "sandbox-token"))
+	if _, err := server.resolveSandbox(ctx); err != nil {
+		t.Fatalf("deprecated token header fallback returned error: %v", err)
 	}
 
 	ctx = metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer bad-token"))
-	if _, err := server.resolveSession(ctx); status.Code(err) != codes.Unauthenticated {
+	if _, err := server.resolveSandbox(ctx); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("bad token code = %s, want %s; err=%v", status.Code(err), codes.Unauthenticated, err)
 	}
 
-	server = NewServer(Config{}, testResolver{binding: SessionBinding{SessionID: "s1"}})
-	ctx = metadata.NewIncomingContext(context.Background(), metadata.Pairs(SessionTokenMetadata, "session-token"))
-	if _, err := server.resolveSession(ctx); status.Code(err) != codes.FailedPrecondition {
+	server = NewServer(Config{}, testResolver{binding: SandboxBinding{SandboxID: "s1"}})
+	ctx = metadata.NewIncomingContext(context.Background(), metadata.Pairs(SandboxTokenMetadata, "sandbox-token"))
+	if _, err := server.resolveSandbox(ctx); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("empty capset code = %s, want %s; err=%v", status.Code(err), codes.FailedPrecondition, err)
 	}
 }
 
 func TestCapsetResolutionAndOutgoingMetadataHelpers(t *testing.T) {
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{
-		SessionTokenMetadata: []string{"session-token"},
+		SandboxTokenMetadata: []string{"sandbox-token"},
 		"authorization":      []string{"Bearer guest-token"},
 		"x-octobus-capset":   []string{"old"},
 		"x-custom":           []string{"kept"},
@@ -241,13 +246,17 @@ func TestCapsetResolutionAndOutgoingMetadataHelpers(t *testing.T) {
 	}
 
 	outgoing := buildOutgoingMetadata(metadata.NewIncomingContext(context.Background(), metadata.MD{
-		SessionTokenMetadata: []string{"session-token"},
-		"authorization":      []string{"Bearer guest-token"},
-		"x-octobus-capset":   []string{"old"},
-		"x-custom":           []string{"kept"},
+		SandboxTokenMetadata:           []string{"sandbox-token"},
+		deprecatedSessionTokenMetadata: []string{"sandbox-token"},
+		"authorization":                []string{"Bearer guest-token"},
+		"x-octobus-capset":             []string{"old"},
+		"x-custom":                     []string{"kept"},
 	}), "new")
-	if got := firstMetadata(outgoing, SessionTokenMetadata); got != "" {
-		t.Fatalf("session token metadata was forwarded: %q", got)
+	if got := firstMetadata(outgoing, SandboxTokenMetadata); got != "" {
+		t.Fatalf("sandbox token metadata was forwarded: %q", got)
+	}
+	if got := firstMetadata(outgoing, deprecatedSessionTokenMetadata); got != "" {
+		t.Fatalf("deprecated token metadata was forwarded: %q", got)
 	}
 	if got := firstMetadata(outgoing, "authorization"); got != "" {
 		t.Fatalf("authorization metadata was forwarded: %q", got)
@@ -324,7 +333,7 @@ func TestProxyHelpersAndRawCodecBranches(t *testing.T) {
 	}
 }
 
-func startTestProxy(t *testing.T, config Config, resolver SessionResolver) (string, func()) {
+func startTestProxy(t *testing.T, config Config, resolver SandboxResolver) (string, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", config.Listen)
 	if err != nil {

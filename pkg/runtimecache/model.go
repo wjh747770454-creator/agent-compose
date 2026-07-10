@@ -15,7 +15,7 @@ const (
 	DomainOCIImageStore          Domain = "oci-image-store"
 	DomainMaterializedImageCache Domain = "materialized-image-cache"
 	DomainRuntimeDerivedCache    Domain = "runtime-derived-cache"
-	DomainSessionEphemeralState  Domain = "session-ephemeral-state"
+	DomainSandboxEphemeralState  Domain = "sandbox-ephemeral-state"
 )
 
 type CacheType string
@@ -24,7 +24,7 @@ const (
 	CacheTypeOCI          CacheType = "oci"
 	CacheTypeMaterialized CacheType = "materialized"
 	CacheTypeRuntime      CacheType = "runtime"
-	CacheTypeSession      CacheType = "session"
+	CacheTypeSandbox      CacheType = "sandbox"
 )
 
 type Status string
@@ -57,7 +57,6 @@ type Item struct {
 	ImageID        string
 	ImageRef       string
 	ResolvedRef    string
-	SessionID      string
 	SandboxID      string
 	Status         Status
 	Removable      bool

@@ -139,29 +139,57 @@ func TestMicrosandboxPrepareEnvironmentPreservesDockerDisks(t *testing.T) {
 func TestMicrosandboxRemoveDockerDiskOnlyCurrentSession(t *testing.T) {
 	config := testMicrosandboxConfig(t)
 	runtime := &microsandboxRuntime{config: config}
-	current := writeMicrosandboxFile(t, config.MicrosandboxHome, "docker-disks", "current.raw")
-	other := writeMicrosandboxFile(t, config.MicrosandboxHome, "docker-disks", "other.raw")
+	currentID := identity.NewRandomID(identity.ResourceSandbox)
+	otherID := identity.NewRandomID(identity.ResourceSandbox)
+	current := writeMicrosandboxFile(t, config.MicrosandboxHome, "docker-disks", microsandboxDockerDiskName(currentID)+".raw")
+	legacyCurrent := writeMicrosandboxFile(t, config.MicrosandboxHome, "docker-disks", currentID+".raw")
+	other := writeMicrosandboxFile(t, config.MicrosandboxHome, "docker-disks", microsandboxDockerDiskName(otherID)+".raw")
 
-	runtime.removeDockerDisk("current")
+	runtime.removeDockerDisk(currentID)
 
 	if _, err := os.Stat(current); !os.IsNotExist(err) {
 		t.Fatalf("current disk exists after removeDockerDisk, err=%v", err)
+	}
+	if _, err := os.Stat(legacyCurrent); !os.IsNotExist(err) {
+		t.Fatalf("legacy current disk exists after removeDockerDisk, err=%v", err)
 	}
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("other disk missing after removeDockerDisk: %v", err)
 	}
 }
 
+func TestMicrosandboxEnsureDockerDiskMigratesLegacyPath(t *testing.T) {
+	config := testMicrosandboxConfig(t)
+	runtime := &microsandboxRuntime{config: config}
+	sandboxID := identity.NewRandomID(identity.ResourceSandbox)
+	legacy := writeMicrosandboxFile(t, config.MicrosandboxHome, "docker-disks", sandboxID+".raw")
+
+	got, err := runtime.ensureDockerDisk(sandboxID)
+	if err != nil {
+		t.Fatalf("ensureDockerDisk: %v", err)
+	}
+	want := runtime.dockerDiskPath(sandboxID)
+	if got != want {
+		t.Fatalf("ensureDockerDisk path = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("migrated docker disk missing: %v", err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy docker disk still exists after migration, err=%v", err)
+	}
+}
+
 func TestMicrosandboxDockerDiskPathUsesIdentityHash(t *testing.T) {
 	config := testMicrosandboxConfig(t)
 	runtime := &microsandboxRuntime{config: config}
-	sessionID := identity.NewRandomID(identity.ResourceSandbox)
-	hash, err := identity.Hash(sessionID)
+	sandboxID := identity.NewRandomID(identity.ResourceSandbox)
+	hash, err := identity.Hash(sandboxID)
 	if err != nil {
-		t.Fatalf("hash session id: %v", err)
+		t.Fatalf("hash sandbox id: %v", err)
 	}
 
-	got := runtime.dockerDiskPath(sessionID)
+	got := runtime.dockerDiskPath(sandboxID)
 	want := filepath.Join(config.MicrosandboxHome, "docker-disks", hash+".raw")
 	if got != want {
 		t.Fatalf("dockerDiskPath = %q, want %q", got, want)
@@ -207,22 +235,23 @@ func TestMicrosandboxBindMountFallsBackToBoxDiskSize(t *testing.T) {
 	}
 }
 
-func TestListMicrosandboxSessionEphemeralCaches(t *testing.T) {
+func TestListMicrosandboxSandboxEphemeralCaches(t *testing.T) {
 	home := t.TempDir()
-	diskPath := writeMicrosandboxFile(t, home, "docker-disks", "running.raw")
+	runningID := identity.NewRandomID(identity.ResourceSandbox)
+	diskPath := writeMicrosandboxFile(t, home, "docker-disks", microsandboxDockerDiskName(runningID)+".raw")
 	orphanDisk := writeMicrosandboxFile(t, home, "docker-disks", "orphan.raw")
 	_ = writeMicrosandboxFile(t, home, "docker-disks", "ignored.txt")
 	sandboxPath := writeMicrosandboxFile(t, home, "sandboxes", "stopped-sandbox", "state.json")
-	result, err := listMicrosandboxSessionEphemeralCaches(context.Background(), home, microsandboxCacheReferenceState{
-		ActiveSessions: map[string]runtimecache.Reference{
-			"running": {Name: "running-session"},
+	result, err := listMicrosandboxSandboxEphemeralCaches(context.Background(), home, microsandboxCacheReferenceState{
+		ActiveSandboxes: map[string]runtimecache.Reference{
+			runningID: {Name: "running sandbox"},
 		},
 		ReferencedSandboxes: map[string]runtimecache.Reference{
-			"stopped-sandbox": {Name: "stopped session"},
+			"stopped-sandbox": {Name: "stopped sandbox"},
 		},
 	})
 	if err != nil {
-		t.Fatalf("listMicrosandboxSessionEphemeralCaches: %v", err)
+		t.Fatalf("listMicrosandboxSandboxEphemeralCaches: %v", err)
 	}
 	if len(result.Items) != 3 {
 		t.Fatalf("item count = %d, want 3 (%#v)", len(result.Items), result.Items)
@@ -230,8 +259,8 @@ func TestListMicrosandboxSessionEphemeralCaches(t *testing.T) {
 	byPath := map[string]runtimecache.Item{}
 	for _, item := range result.Items {
 		byPath[item.Path] = item
-		if item.Domain != runtimecache.DomainSessionEphemeralState {
-			t.Fatalf("domain = %q, want %q", item.Domain, runtimecache.DomainSessionEphemeralState)
+		if item.Domain != runtimecache.DomainSandboxEphemeralState {
+			t.Fatalf("domain = %q, want %q", item.Domain, runtimecache.DomainSandboxEphemeralState)
 		}
 		if item.Driver != runtimecache.DriverMicrosandbox {
 			t.Fatalf("driver = %q, want %q", item.Driver, runtimecache.DriverMicrosandbox)
@@ -243,6 +272,9 @@ func TestListMicrosandboxSessionEphemeralCaches(t *testing.T) {
 	if got := byPath[diskPath]; got.Status != runtimecache.StatusActive || got.Removable {
 		t.Fatalf("running disk status/removable = %s/%v, want active/false (%#v)", got.Status, got.Removable, got)
 	}
+	if got := byPath[diskPath]; got.SandboxID != runningID || len(got.References) != 1 || got.References[0].ID != runningID {
+		t.Fatalf("running disk reference = sandboxID %q refs %#v, want original sandbox id %q", got.SandboxID, got.References, runningID)
+	}
 	if got := byPath[orphanDisk]; got.Status != runtimecache.StatusOrphaned || !got.Removable {
 		t.Fatalf("orphan disk status/removable = %s/%v, want orphaned/true (%#v)", got.Status, got.Removable, got)
 	}
@@ -251,19 +283,19 @@ func TestListMicrosandboxSessionEphemeralCaches(t *testing.T) {
 	}
 }
 
-func TestMicrosandboxSessionEphemeralPruneDryRunAndForce(t *testing.T) {
+func TestMicrosandboxSandboxEphemeralPruneDryRunAndForce(t *testing.T) {
 	home := t.TempDir()
 	orphan := writeMicrosandboxFile(t, home, "docker-disks", "orphan.raw")
 	active := writeMicrosandboxFile(t, home, "docker-disks", "active.raw")
 	refs := microsandboxCacheReferenceState{
-		ActiveSessions: map[string]runtimecache.Reference{"active": {Name: "active session"}},
+		ActiveSandboxes: map[string]runtimecache.Reference{"active": {Name: "active sandbox"}},
 	}
 
-	dryRun, err := pruneMicrosandboxSessionEphemeralCaches(context.Background(), home, refs, runtimecache.PruneRequest{
-		Filter: runtimecache.Filter{Driver: runtimecache.DriverMicrosandbox, Domain: runtimecache.DomainSessionEphemeralState},
+	dryRun, err := pruneMicrosandboxSandboxEphemeralCaches(context.Background(), home, refs, runtimecache.PruneRequest{
+		Filter: runtimecache.Filter{Driver: runtimecache.DriverMicrosandbox, Domain: runtimecache.DomainSandboxEphemeralState},
 	})
 	if err != nil {
-		t.Fatalf("pruneMicrosandboxSessionEphemeralCaches dry-run: %v", err)
+		t.Fatalf("pruneMicrosandboxSandboxEphemeralCaches dry-run: %v", err)
 	}
 	if !dryRun.DryRun || len(dryRun.Removed) != 0 {
 		t.Fatalf("dry-run result = %#v, want no removal", dryRun)
@@ -272,12 +304,12 @@ func TestMicrosandboxSessionEphemeralPruneDryRunAndForce(t *testing.T) {
 		t.Fatalf("orphan disk missing after dry-run: %v", err)
 	}
 
-	forced, err := pruneMicrosandboxSessionEphemeralCaches(context.Background(), home, refs, runtimecache.PruneRequest{
-		Filter: runtimecache.Filter{Driver: runtimecache.DriverMicrosandbox, Domain: runtimecache.DomainSessionEphemeralState},
+	forced, err := pruneMicrosandboxSandboxEphemeralCaches(context.Background(), home, refs, runtimecache.PruneRequest{
+		Filter: runtimecache.Filter{Driver: runtimecache.DriverMicrosandbox, Domain: runtimecache.DomainSandboxEphemeralState},
 		Force:  true,
 	})
 	if err != nil {
-		t.Fatalf("pruneMicrosandboxSessionEphemeralCaches force: %v", err)
+		t.Fatalf("pruneMicrosandboxSandboxEphemeralCaches force: %v", err)
 	}
 	if len(forced.Removed) != 1 {
 		t.Fatalf("removed = %#v, want one orphan removal", forced.Removed)
@@ -293,21 +325,21 @@ func TestMicrosandboxSessionEphemeralPruneDryRunAndForce(t *testing.T) {
 	}
 }
 
-func TestMicrosandboxSessionEphemeralReferencedRequiresIncludeReferenced(t *testing.T) {
+func TestMicrosandboxSandboxEphemeralReferencedRequiresIncludeReferenced(t *testing.T) {
 	home := t.TempDir()
 	statePath := filepath.Dir(writeMicrosandboxFile(t, home, "sandboxes", "stopped-sandbox", "state.json"))
 	refs := microsandboxCacheReferenceState{
-		ReferencedSandboxes: map[string]runtimecache.Reference{"stopped-sandbox": {Name: "stopped session"}},
+		ReferencedSandboxes: map[string]runtimecache.Reference{"stopped-sandbox": {Name: "stopped sandbox"}},
 	}
-	list, err := listMicrosandboxSessionEphemeralCaches(context.Background(), home, refs)
+	list, err := listMicrosandboxSandboxEphemeralCaches(context.Background(), home, refs)
 	if err != nil {
-		t.Fatalf("listMicrosandboxSessionEphemeralCaches: %v", err)
+		t.Fatalf("listMicrosandboxSandboxEphemeralCaches: %v", err)
 	}
 	cacheID := list.Items[0].CacheID
 
-	dryRun, err := removeMicrosandboxSessionEphemeralCache(context.Background(), home, refs, runtimecache.RemoveRequest{CacheID: cacheID, Force: true})
+	dryRun, err := removeMicrosandboxSandboxEphemeralCache(context.Background(), home, refs, runtimecache.RemoveRequest{CacheID: cacheID, Force: true})
 	if err != nil {
-		t.Fatalf("removeMicrosandboxSessionEphemeralCache without include referenced: %v", err)
+		t.Fatalf("removeMicrosandboxSandboxEphemeralCache without include referenced: %v", err)
 	}
 	if len(dryRun.Removed) != 0 || len(dryRun.Skipped) != 1 {
 		t.Fatalf("remove result = %#v, want referenced skipped", dryRun)
@@ -316,13 +348,13 @@ func TestMicrosandboxSessionEphemeralReferencedRequiresIncludeReferenced(t *test
 		t.Fatalf("referenced sandbox state missing after skipped remove: %v", err)
 	}
 
-	forced, err := pruneMicrosandboxSessionEphemeralCaches(context.Background(), home, refs, runtimecache.PruneRequest{
+	forced, err := pruneMicrosandboxSandboxEphemeralCaches(context.Background(), home, refs, runtimecache.PruneRequest{
 		Filter:            runtimecache.Filter{CacheID: cacheID},
 		IncludeReferenced: true,
 		Force:             true,
 	})
 	if err != nil {
-		t.Fatalf("pruneMicrosandboxSessionEphemeralCaches include referenced: %v", err)
+		t.Fatalf("pruneMicrosandboxSandboxEphemeralCaches include referenced: %v", err)
 	}
 	if len(forced.Removed) != 1 {
 		t.Fatalf("removed = %#v, want referenced removal", forced.Removed)
@@ -332,16 +364,16 @@ func TestMicrosandboxSessionEphemeralReferencedRequiresIncludeReferenced(t *test
 	}
 }
 
-func TestMicrosandboxSessionEphemeralUnknownAndSymlinkEscapeNotRemoved(t *testing.T) {
+func TestMicrosandboxSandboxEphemeralUnknownAndSymlinkEscapeNotRemoved(t *testing.T) {
 	home := t.TempDir()
 	unknown := writeMicrosandboxFile(t, home, "docker-disks", "unknown.raw")
 	refs := microsandboxCacheReferenceState{Unknown: true}
-	result, err := pruneMicrosandboxSessionEphemeralCaches(context.Background(), home, refs, runtimecache.PruneRequest{
-		Filter: runtimecache.Filter{Driver: runtimecache.DriverMicrosandbox, Domain: runtimecache.DomainSessionEphemeralState},
+	result, err := pruneMicrosandboxSandboxEphemeralCaches(context.Background(), home, refs, runtimecache.PruneRequest{
+		Filter: runtimecache.Filter{Driver: runtimecache.DriverMicrosandbox, Domain: runtimecache.DomainSandboxEphemeralState},
 		Force:  true,
 	})
 	if err != nil {
-		t.Fatalf("pruneMicrosandboxSessionEphemeralCaches unknown: %v", err)
+		t.Fatalf("pruneMicrosandboxSandboxEphemeralCaches unknown: %v", err)
 	}
 	if len(result.Removed) != 0 || len(result.Skipped) != 1 || result.Skipped[0].Status != runtimecache.StatusUnknown {
 		t.Fatalf("unknown prune result = %#v, want unknown skipped", result)
@@ -363,16 +395,16 @@ func TestMicrosandboxSessionEphemeralUnknownAndSymlinkEscapeNotRemoved(t *testin
 	if err := os.Symlink(outside, linkPath); err != nil {
 		t.Fatalf("symlink outside target: %v", err)
 	}
-	list, err := listMicrosandboxSessionEphemeralCaches(context.Background(), home, microsandboxCacheReferenceState{})
+	list, err := listMicrosandboxSandboxEphemeralCaches(context.Background(), home, microsandboxCacheReferenceState{})
 	if err != nil {
-		t.Fatalf("listMicrosandboxSessionEphemeralCaches symlink: %v", err)
+		t.Fatalf("listMicrosandboxSandboxEphemeralCaches symlink: %v", err)
 	}
-	result, err = removeMicrosandboxSessionEphemeralCache(context.Background(), home, microsandboxCacheReferenceState{}, runtimecache.RemoveRequest{
+	result, err = removeMicrosandboxSandboxEphemeralCache(context.Background(), home, microsandboxCacheReferenceState{}, runtimecache.RemoveRequest{
 		CacheID: list.Items[0].CacheID,
 		Force:   true,
 	})
 	if err != nil {
-		t.Fatalf("removeMicrosandboxSessionEphemeralCache symlink: %v", err)
+		t.Fatalf("removeMicrosandboxSandboxEphemeralCache symlink: %v", err)
 	}
 	if len(result.Removed) != 0 || len(result.Skipped) != 1 || len(result.Warnings) == 0 {
 		t.Fatalf("symlink remove result = %#v, want skipped warning", result)

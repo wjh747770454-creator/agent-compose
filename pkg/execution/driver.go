@@ -5,21 +5,21 @@ import (
 	domain "agent-compose/pkg/model"
 )
 
-func ToDriverSession(session *domain.Session) *driverpkg.Session {
+func ToDriverSandbox(session *domain.Sandbox) *driverpkg.Sandbox {
 	if session == nil {
 		return nil
 	}
-	envItems := make([]driverpkg.SessionEnvVar, 0, len(session.EnvItems))
+	envItems := make([]driverpkg.SandboxEnvVar, 0, len(session.EnvItems))
 	for _, item := range session.EnvItems {
-		envItems = append(envItems, driverpkg.SessionEnvVar{Name: item.Name, Value: item.Value, Secret: item.Secret})
+		envItems = append(envItems, driverpkg.SandboxEnvVar{Name: item.Name, Value: item.Value, Secret: item.Secret})
 	}
-	runtimeEnvItems := make([]driverpkg.SessionEnvVar, 0, len(session.RuntimeEnvItems))
+	runtimeEnvItems := make([]driverpkg.SandboxEnvVar, 0, len(session.RuntimeEnvItems))
 	for _, item := range session.RuntimeEnvItems {
-		runtimeEnvItems = append(runtimeEnvItems, driverpkg.SessionEnvVar{Name: item.Name, Value: item.Value, Secret: item.Secret})
+		runtimeEnvItems = append(runtimeEnvItems, driverpkg.SandboxEnvVar{Name: item.Name, Value: item.Value, Secret: item.Secret})
 	}
-	volumeMounts := make([]driverpkg.SessionVolumeMount, 0, len(session.VolumeMounts))
+	volumeMounts := make([]driverpkg.SandboxVolumeMount, 0, len(session.VolumeMounts))
 	for _, item := range session.VolumeMounts {
-		volumeMounts = append(volumeMounts, driverpkg.SessionVolumeMount{
+		volumeMounts = append(volumeMounts, driverpkg.SandboxVolumeMount{
 			ID:       item.ID,
 			Type:     item.Type,
 			Source:   item.Source,
@@ -30,8 +30,8 @@ func ToDriverSession(session *domain.Session) *driverpkg.Session {
 			HostPath: item.HostPath,
 		})
 	}
-	return &driverpkg.Session{
-		Summary: driverpkg.SessionSummary{
+	return &driverpkg.Sandbox{
+		Summary: driverpkg.SandboxSummary{
 			ID:            session.Summary.ID,
 			Driver:        session.Summary.Driver,
 			GuestImage:    session.Summary.GuestImage,
@@ -101,8 +101,8 @@ func ToDriverExecSpec(spec domain.ExecSpec) driverpkg.ExecSpec {
 	}
 }
 
-func FromDriverSessionVMInfo(info driverpkg.SessionVMInfo) domain.SessionVMInfo {
-	result := domain.SessionVMInfo{BoxID: info.BoxID, JupyterURL: info.JupyterURL}
+func FromDriverSandboxVMInfo(info driverpkg.SandboxVMInfo) domain.SandboxVMInfo {
+	result := domain.SandboxVMInfo{BoxID: info.BoxID, JupyterURL: info.JupyterURL}
 	if info.ProxyState != nil {
 		proxyState := FromDriverProxyState(*info.ProxyState)
 		result.ProxyState = &proxyState

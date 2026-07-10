@@ -131,7 +131,7 @@ func TestResolveBoxliteImageLayoutPullPolicyErrorSkipsMaterialize(t *testing.T) 
 }
 
 func TestImageCacheRootForDriverDefaultsToDataRoot(t *testing.T) {
-	if got := imageCacheRootForDriver(testPrepareSessionStartConfig("/tmp/data-root")); got != "/tmp/data-root/images" {
+	if got := imageCacheRootForDriver(testPrepareSandboxStartConfig("/tmp/data-root")); got != "/tmp/data-root/images" {
 		t.Fatalf("imageCacheRootForDriver = %q", got)
 	}
 }

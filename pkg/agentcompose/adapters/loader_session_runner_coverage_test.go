@@ -11,18 +11,18 @@ import (
 	"agent-compose/pkg/volumes"
 )
 
-func TestLoaderSessionRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
+func TestLoaderSandboxRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
 	ctx := context.Background()
-	bridge, driver := newTestSessionRPCBridge(t)
+	bridge, driver := newTestSandboxRPCBridge(t)
 	publisher := &loaderSessionPublisherFake{}
-	runner := NewLoaderSessionRunner(bridge.config, bridge.store, bridge.configDB, driver, nil, nil, bridge.streams, publisher)
+	runner := NewLoaderSandboxRunner(bridge.config, bridge.store, bridge.configDB, driver, nil, nil, bridge.streams, publisher, nil)
 
-	running, err := bridge.store.CreateSession(ctx, "running", "", driverpkg.RuntimeDriverBoxlite, "", "", "loader", nil, nil, nil)
+	running, err := bridge.store.CreateSandbox(ctx, "running", "", driverpkg.RuntimeDriverBoxlite, "", "", "loader", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession running returned error: %v", err)
 	}
 	running.Summary.VMStatus = domain.VMStatusRunning
-	if err := bridge.store.UpdateSession(ctx, running); err != nil {
+	if err := bridge.store.UpdateSandbox(ctx, running); err != nil {
 		t.Fatalf("UpdateSession running returned error: %v", err)
 	}
 	loaded, err := runner.Load(ctx, running.Summary.ID)
@@ -34,17 +34,17 @@ func TestLoaderSessionRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
 		t.Fatalf("LoadOrResume running resumed=%#v event=%q err=%v starts=%#v", resumed, eventType, err, driver.startCalls)
 	}
 
-	stopped, err := bridge.store.CreateSession(ctx, "stopped", "", driverpkg.RuntimeDriverBoxlite, "", "", "loader", nil, nil, nil)
+	stopped, err := bridge.store.CreateSandbox(ctx, "stopped", "", driverpkg.RuntimeDriverBoxlite, "", "", "loader", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSession stopped returned error: %v", err)
 	}
 	stopped.Summary.VMStatus = domain.VMStatusStopped
-	stopped.Summary.Tags = []domain.SessionTag{{Name: "capset", Value: "dev"}}
-	if err := bridge.store.UpdateSession(ctx, stopped); err != nil {
+	stopped.Summary.Tags = []domain.SandboxTag{{Name: "capset", Value: "dev"}}
+	if err := bridge.store.UpdateSandbox(ctx, stopped); err != nil {
 		t.Fatalf("UpdateSession stopped returned error: %v", err)
 	}
 	resumed, eventType, err = runner.LoadOrResume(ctx, stopped.Summary.ID)
-	if err != nil || resumed.Summary.VMStatus != domain.VMStatusRunning || eventType != "loader.session.resumed" || len(driver.startCalls) != 1 {
+	if err != nil || resumed.Summary.VMStatus != domain.VMStatusRunning || eventType != "loader.sandbox.resumed" || len(driver.startCalls) != 1 {
 		t.Fatalf("LoadOrResume stopped resumed=%#v event=%q err=%v starts=%#v", resumed, eventType, err, driver.startCalls)
 	}
 	if len(publisher.events) != 1 || publisher.events[0].Topic != "agent-compose.session.resumed" {
@@ -57,7 +57,7 @@ func TestLoaderSessionRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
 	if err := runner.Shutdown(ctx, resumed.Summary.ID); err != nil {
 		t.Fatalf("Shutdown running returned error: %v", err)
 	}
-	shutdownLoaded, err := bridge.store.GetSession(ctx, resumed.Summary.ID)
+	shutdownLoaded, err := bridge.store.GetSandbox(ctx, resumed.Summary.ID)
 	if err != nil {
 		t.Fatalf("GetSession shutdown returned error: %v", err)
 	}
@@ -71,8 +71,8 @@ func TestLoaderSessionRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
 		t.Fatalf("Shutdown stopped should not call driver again: %#v", driver.stopCalls)
 	}
 
-	if snapshot := toSessionWorkspaceSnapshot(domain.WorkspaceConfig{ID: "workspace-1", Name: "Workspace", Type: "file", ConfigJSON: "{}"}); snapshot.ID != "workspace-1" || snapshot.Name != "Workspace" {
-		t.Fatalf("toSessionWorkspaceSnapshot = %#v", snapshot)
+	if snapshot := toSandboxWorkspaceSnapshot(domain.WorkspaceConfig{ID: "workspace-1", Name: "Workspace", Type: "file", ConfigJSON: "{}"}); snapshot.ID != "workspace-1" || snapshot.Name != "Workspace" {
+		t.Fatalf("toSandboxWorkspaceSnapshot = %#v", snapshot)
 	}
 	if workspace, err := runner.workspaceSnapshot(ctx, ""); err != nil || workspace != nil {
 		t.Fatalf("workspaceSnapshot empty workspace=%#v err=%v", workspace, err)
@@ -85,12 +85,12 @@ func TestLoaderSessionRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
 	}
 }
 
-func TestLoaderSessionRunnerResolvesVolumeMounts(t *testing.T) {
+func TestLoaderSandboxRunnerResolvesVolumeMounts(t *testing.T) {
 	ctx := context.Background()
-	bridge, driver := newTestSessionRPCBridge(t)
+	bridge, driver := newTestSandboxRPCBridge(t)
 	hostPath := t.TempDir()
 	resolver := &loaderVolumeResolverFake{
-		mounts: []domain.SessionVolumeMount{{
+		mounts: []domain.SandboxVolumeMount{{
 			ID:       "mount-cache",
 			Type:     domain.VolumeMountTypeVolume,
 			Source:   "request-cache",
@@ -101,7 +101,7 @@ func TestLoaderSessionRunnerResolvesVolumeMounts(t *testing.T) {
 		}},
 		warnings: []string{"volume target /cache overlaps test path"},
 	}
-	runner := NewLoaderSessionRunner(bridge.config, bridge.store, bridge.configDB, driver, nil, resolver, bridge.streams, nil)
+	runner := NewLoaderSandboxRunner(bridge.config, bridge.store, bridge.configDB, driver, nil, resolver, bridge.streams, nil, nil)
 	projectRoot := t.TempDir()
 	projectPath := filepath.Join(projectRoot, "agent-compose.yml")
 	if _, err := bridge.configDB.UpsertProject(ctx, domain.ProjectRecord{ID: "project-1", Name: "Project", SourcePath: projectPath}); err != nil {
@@ -123,7 +123,7 @@ func TestLoaderSessionRunnerResolvesVolumeMounts(t *testing.T) {
 		}},
 	}
 	request := domain.LoaderAgentRequest{
-		SessionPolicy: domain.LoaderSessionPolicyNew,
+		SandboxPolicy: domain.LoaderSandboxPolicyNew,
 		Volumes: []domain.VolumeMountSpec{{
 			Type:   domain.VolumeMountTypeVolume,
 			Source: "request-cache",
@@ -134,7 +134,7 @@ func TestLoaderSessionRunnerResolvesVolumeMounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ensure returned error: %v", err)
 	}
-	if eventType != "loader.session.created" || len(driver.startCalls) != 1 {
+	if eventType != "loader.sandbox.created" || len(driver.startCalls) != 1 {
 		t.Fatalf("eventType=%q startCalls=%#v", eventType, driver.startCalls)
 	}
 	if len(resolver.specs) != 1 || resolver.specs[0].Source != "request-cache" {
@@ -155,21 +155,21 @@ func TestLoaderSessionRunnerResolvesVolumeMounts(t *testing.T) {
 	}
 	var foundWarning bool
 	for _, event := range events {
-		if event.Type == "session.volume.warning" {
+		if event.Type == "sandbox.volume.warning" {
 			foundWarning = true
 		}
 	}
 	if !foundWarning {
-		t.Fatalf("expected session.volume.warning event, got %#v", events)
+		t.Fatalf("expected sandbox.volume.warning event, got %#v", events)
 	}
 }
 
-func TestIntegrationLoaderSessionRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
-	TestLoaderSessionRunnerLoadResumeAndShutdownCoverage(t)
+func TestIntegrationLoaderSandboxRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
+	TestLoaderSandboxRunnerLoadResumeAndShutdownCoverage(t)
 }
 
-func TestE2ELoaderSessionRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
-	TestLoaderSessionRunnerLoadResumeAndShutdownCoverage(t)
+func TestE2ELoaderSandboxRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
+	TestLoaderSandboxRunnerLoadResumeAndShutdownCoverage(t)
 }
 
 type loaderSessionPublisherFake struct {
@@ -186,16 +186,16 @@ var _ loaders.ControllerPublisher = (*loaderSessionPublisherFake)(nil)
 type loaderVolumeResolverFake struct {
 	specs    []domain.VolumeMountSpec
 	options  volumes.ResolveOptions
-	mounts   []domain.SessionVolumeMount
+	mounts   []domain.SandboxVolumeMount
 	warnings []string
 	err      error
 }
 
-func (r *loaderVolumeResolverFake) ResolveMounts(_ context.Context, specs []domain.VolumeMountSpec, options volumes.ResolveOptions) ([]domain.SessionVolumeMount, []string, error) {
+func (r *loaderVolumeResolverFake) ResolveMounts(_ context.Context, specs []domain.VolumeMountSpec, options volumes.ResolveOptions) ([]domain.SandboxVolumeMount, []string, error) {
 	r.specs = append([]domain.VolumeMountSpec(nil), specs...)
 	r.options = options
 	if r.err != nil {
 		return nil, nil, r.err
 	}
-	return append([]domain.SessionVolumeMount(nil), r.mounts...), append([]string(nil), r.warnings...), nil
+	return append([]domain.SandboxVolumeMount(nil), r.mounts...), append([]string(nil), r.warnings...), nil
 }

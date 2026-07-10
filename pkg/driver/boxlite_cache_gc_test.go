@@ -100,9 +100,9 @@ func TestCleanupExpiredCacheDirsPrunesStaleArtifactsInsideCurrentEntry(t *testin
 }
 
 func TestBoxliteStartupPathsDoNotCallCacheCleanupHelpers(t *testing.T) {
-	ensureCalls := boxliteMethodCalls(t, "EnsureSession")
+	ensureCalls := boxliteMethodCalls(t, "EnsureSandbox")
 	if containsString(ensureCalls, "cleanupLegacyBoxliteCaches") {
-		t.Fatalf("EnsureSession calls cleanupLegacyBoxliteCaches: %#v", ensureCalls)
+		t.Fatalf("EnsureSandbox calls cleanupLegacyBoxliteCaches: %#v", ensureCalls)
 	}
 	resolveCalls := boxliteMethodCalls(t, "resolveRootfsPath")
 	if containsString(resolveCalls, "maybeRunCacheGC") {
@@ -130,13 +130,13 @@ func TestResolveRootfsPathDoesNotPruneMaterializedCache(t *testing.T) {
 			t.Fatalf("chtimes %s: %v", path, err)
 		}
 	}
-	runtime := &cgoBoxRuntime{config: &appconfig.Config{
+	runtime := &cgoSandboxRuntime{config: &appconfig.Config{
 		DataRoot:      dataRoot,
 		BoxRootfsPath: "/prebuilt/rootfs",
 		BoxCacheTTL:   time.Nanosecond,
 	}}
 
-	rootfsPath, err := runtime.resolveRootfsPath(context.Background(), "guest:latest")
+	rootfsPath, err := runtime.resolveRootfsPath(context.Background(), "guest:latest", "", defaultImagePullTimeout)
 	if err != nil {
 		t.Fatalf("resolveRootfsPath: %v", err)
 	}

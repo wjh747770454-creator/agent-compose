@@ -65,6 +65,8 @@ type loaderExecutionState struct {
 	host          LoaderHost
 	registrations []loaderRegistration
 	seenIDs       map[string]struct{}
+	warnings      []string
+	warningSet    map[string]struct{}
 }
 
 func NewLoaderEngine(do.Injector) (LoaderEngine, error) {
@@ -111,6 +113,7 @@ func (e *QJSLoaderEngine) execute(ctx context.Context, request LoaderExecutionRe
 		host:          host,
 		registrations: make([]loaderRegistration, 0),
 		seenIDs:       make(map[string]struct{}),
+		warningSet:    make(map[string]struct{}),
 	}
 
 	if _, err = e.installRuntime(jsctx, state); err != nil {
@@ -131,7 +134,7 @@ func (e *QJSLoaderEngine) execute(ctx context.Context, request LoaderExecutionRe
 		}
 	}
 
-	warnings := make([]string, 0)
+	warnings := append([]string(nil), state.warnings...)
 	if len(state.registrations) == 0 {
 		mainFn := jsctx.Global().GetPropertyStr("main")
 		hasMain := mainFn.IsFunction()
@@ -184,6 +187,7 @@ func (e *QJSLoaderEngine) execute(ctx context.Context, request LoaderExecutionRe
 		state.freeCallbacks()
 		return LoaderExecutionResult{}, err
 	}
+	result.Warnings = append([]string(nil), state.warnings...)
 	state.freeCallbacks()
 	return result, nil
 }
@@ -415,7 +419,7 @@ func (e *QJSLoaderEngine) installRuntime(jsctx *qjs.Context, state *loaderExecut
 		if prompt == "" {
 			return nil, fmt.Errorf("scheduler.agent requires a non-empty prompt")
 		}
-		options, err := parseLoaderAgentRequest(args)
+		options, err := parseLoaderAgentRequest(args, state)
 		if err != nil {
 			return nil, err
 		}
@@ -456,7 +460,7 @@ func (e *QJSLoaderEngine) installRuntime(jsctx *qjs.Context, state *loaderExecut
 		if state.host == nil {
 			return nil, fmt.Errorf("scheduler.exec is unavailable during validation")
 		}
-		request, err := parseLoaderExecRequest(call.Args())
+		request, err := parseLoaderExecRequest(call.Args(), state)
 		if err != nil {
 			return nil, err
 		}
@@ -472,7 +476,7 @@ func (e *QJSLoaderEngine) installRuntime(jsctx *qjs.Context, state *loaderExecut
 		if state.host == nil {
 			return nil, fmt.Errorf("scheduler.shell is unavailable during validation")
 		}
-		request, err := parseLoaderShellRequest(call.Args())
+		request, err := parseLoaderShellRequest(call.Args(), state)
 		if err != nil {
 			return nil, err
 		}
@@ -617,6 +621,7 @@ func (e *QJSLoaderEngine) installRuntime(jsctx *qjs.Context, state *loaderExecut
 		methodNameCopy := methodName
 		apiNameCopy := apiName
 		sessionFn := jsctx.Function(func(call *qjs.This) (*qjs.Value, error) {
+			state.addDeprecatedWarning(apiNameCopy, strings.Replace(apiNameCopy, "scheduler.session.", "scheduler.sandbox.", 1))
 			if state.host == nil {
 				return nil, fmt.Errorf("%s is unavailable during validation", apiNameCopy)
 			}
@@ -640,6 +645,52 @@ func (e *QJSLoaderEngine) installRuntime(jsctx *qjs.Context, state *loaderExecut
 		}
 	}
 	schedulerObj.SetPropertyStr("session", sessionObj)
+
+	sandboxObj := jsctx.NewObject()
+	for _, binding := range []struct {
+		jsName     string
+		methodName string
+	}{
+		{jsName: "createSandbox", methodName: "CreateSession"},
+		{jsName: "resumeSandbox", methodName: "ResumeSession"},
+		{jsName: "stopSandbox", methodName: "StopSession"},
+		{jsName: "getSandbox", methodName: "GetSession"},
+		{jsName: "listSandboxes", methodName: "ListSessions"},
+		{jsName: "getSandboxProxy", methodName: "GetSessionProxy"},
+	} {
+		jsNameCopy := binding.jsName
+		methodNameCopy := binding.methodName
+		apiNameCopy := "scheduler.sandbox." + jsNameCopy
+		sandboxFn := jsctx.Function(func(call *qjs.This) (*qjs.Value, error) {
+			if state.host == nil {
+				return nil, fmt.Errorf("%s is unavailable during validation", apiNameCopy)
+			}
+			requestJSON, err := loaderRPCRequestJSON(call.Args(), apiNameCopy)
+			if err != nil {
+				return nil, err
+			}
+			requestJSON, err = sandboxRPCRequestToSessionJSON(requestJSON)
+			if err != nil {
+				return nil, fmt.Errorf("encode %s request: %w", apiNameCopy, err)
+			}
+			responseJSON, err := state.host.CallSessionRPC(state.ctx, methodNameCopy, requestJSON)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", apiNameCopy, err)
+			}
+			responseJSON, err = sessionRPCResponseToSandboxJSON(responseJSON)
+			if err != nil {
+				return nil, fmt.Errorf("decode %s response: %w", apiNameCopy, err)
+			}
+			response, err := payloadValueFromJSON(jsctx, responseJSON)
+			if err != nil {
+				return nil, fmt.Errorf("decode %s response: %w", apiNameCopy, err)
+			}
+			return response, nil
+		})
+		sandboxObj.SetPropertyStr(jsNameCopy, sandboxFn)
+		sandboxObj.SetPropertyStr(upperFirstASCII(jsNameCopy), sandboxFn.Clone())
+	}
+	schedulerObj.SetPropertyStr("sandbox", sandboxObj)
 
 	runtimeObj := jsctx.NewObject()
 	runtimeObj.SetPropertyStr("name", jsctx.NewString("scheduler"))
@@ -764,6 +815,36 @@ func (s *loaderExecutionState) register(trigger domain.LoaderTrigger, callback *
 		order:    len(s.registrations),
 	})
 	return nil
+}
+
+func (s *loaderExecutionState) addDeprecatedWarning(alias, replacement string) {
+	if s == nil {
+		return
+	}
+	alias = strings.TrimSpace(alias)
+	replacement = strings.TrimSpace(replacement)
+	if alias == "" || replacement == "" {
+		return
+	}
+	s.addWarning(fmt.Sprintf("%s is deprecated; use %s", alias, replacement))
+}
+
+func (s *loaderExecutionState) addWarning(message string) {
+	if s == nil {
+		return
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	if s.warningSet == nil {
+		s.warningSet = make(map[string]struct{})
+	}
+	if _, ok := s.warningSet[message]; ok {
+		return
+	}
+	s.warningSet[message] = struct{}{}
+	s.warnings = append(s.warnings, message)
 }
 
 func (s *loaderExecutionState) unregister(id string, kinds ...string) bool {
@@ -982,7 +1063,7 @@ func parseEventRegistration(args []*qjs.Value) (string, string, *qjs.Value, bool
 	return topic, id, callback, autoID, nil
 }
 
-func parseLoaderAgentRequest(args []*qjs.Value) (domain.LoaderAgentRequest, error) {
+func parseLoaderAgentRequest(args []*qjs.Value, state *loaderExecutionState) (domain.LoaderAgentRequest, error) {
 	request := domain.LoaderAgentRequest{}
 	if len(args) < 2 || args[1] == nil || args[1].IsUndefined() || args[1].IsNull() {
 		return request, nil
@@ -992,7 +1073,7 @@ func parseLoaderAgentRequest(args []*qjs.Value) (domain.LoaderAgentRequest, erro
 		return domain.LoaderAgentRequest{}, fmt.Errorf("decode scheduler.agent options: %w", err)
 	}
 	request.Agent = normalizeAgentKind(loaderStringOption(options, "agent"))
-	request.SessionPolicy = normalizeLoaderSessionPolicy(loaderStringOption(options, "sessionPolicy", "session_policy"))
+	request.SandboxPolicy = loaderSandboxPolicyOption(options, state, "scheduler.agent")
 	request.Timeout, err = loaderDurationOption(options, "timeout", "agentTimeout", "agent_timeout")
 	if err != nil {
 		return domain.LoaderAgentRequest{}, fmt.Errorf("decode scheduler.agent timeout: %w", err)
@@ -1003,7 +1084,7 @@ func parseLoaderAgentRequest(args []*qjs.Value) (domain.LoaderAgentRequest, erro
 	request.PullPolicy = normalizeImagePullPolicy(loaderStringOption(options, "pullPolicy", "pull_policy"))
 	request.WorkspaceID = loaderStringOption(options, "workspaceId", "workspace_id")
 	request.JupyterEnabled = loaderBoolOption(options, "jupyter")
-	request.SessionEnv, err = loaderSessionEnvOption(options)
+	request.SandboxEnv, err = loaderSandboxEnvOption(options, state, "scheduler.agent")
 	if err != nil {
 		return domain.LoaderAgentRequest{}, err
 	}
@@ -1092,7 +1173,7 @@ func validateLoaderJSONWithSchema(jsctx *qjs.Context, schemaValue, responseValue
 	return nil
 }
 
-func parseLoaderExecRequest(args []*qjs.Value) (domain.LoaderCommandRequest, error) {
+func parseLoaderExecRequest(args []*qjs.Value, state *loaderExecutionState) (domain.LoaderCommandRequest, error) {
 	if len(args) != 1 || args[0] == nil || args[0].IsUndefined() || args[0].IsNull() || !args[0].IsObject() || args[0].IsArray() {
 		return domain.LoaderCommandRequest{}, fmt.Errorf("scheduler.exec requires a request object")
 	}
@@ -1100,7 +1181,7 @@ func parseLoaderExecRequest(args []*qjs.Value) (domain.LoaderCommandRequest, err
 	if err != nil {
 		return domain.LoaderCommandRequest{}, fmt.Errorf("decode scheduler.exec request: %w", err)
 	}
-	request, err := loaderCommandRequestFromOptions(options, "scheduler.exec")
+	request, err := loaderCommandRequestFromOptions(options, "scheduler.exec", state)
 	if err != nil {
 		return domain.LoaderCommandRequest{}, err
 	}
@@ -1116,7 +1197,7 @@ func parseLoaderExecRequest(args []*qjs.Value) (domain.LoaderCommandRequest, err
 	return request, nil
 }
 
-func parseLoaderShellRequest(args []*qjs.Value) (domain.LoaderCommandRequest, error) {
+func parseLoaderShellRequest(args []*qjs.Value, state *loaderExecutionState) (domain.LoaderCommandRequest, error) {
 	if len(args) == 0 || args[0] == nil || args[0].IsUndefined() || args[0].IsNull() {
 		return domain.LoaderCommandRequest{}, fmt.Errorf("scheduler.shell requires a script")
 	}
@@ -1138,7 +1219,7 @@ func parseLoaderShellRequest(args []*qjs.Value) (domain.LoaderCommandRequest, er
 		}
 		options = decoded
 	}
-	request, err := loaderCommandRequestFromOptions(options, "scheduler.shell")
+	request, err := loaderCommandRequestFromOptions(options, "scheduler.shell", state)
 	if err != nil {
 		return domain.LoaderCommandRequest{}, err
 	}
@@ -1147,11 +1228,11 @@ func parseLoaderShellRequest(args []*qjs.Value) (domain.LoaderCommandRequest, er
 	return request, nil
 }
 
-func loaderCommandRequestFromOptions(options map[string]any, apiName string) (domain.LoaderCommandRequest, error) {
+func loaderCommandRequestFromOptions(options map[string]any, apiName string, state *loaderExecutionState) (domain.LoaderCommandRequest, error) {
 	var err error
 	request := domain.LoaderCommandRequest{
 		Cwd:            loaderStringOption(options, "cwd"),
-		SessionPolicy:  normalizeLoaderSessionPolicy(loaderStringOption(options, "sessionPolicy", "session_policy")),
+		SandboxPolicy:  loaderSandboxPolicyOption(options, state, apiName),
 		Title:          loaderStringOption(options, "title"),
 		Driver:         loaderStringOption(options, "driver"),
 		GuestImage:     loaderStringOption(options, "guestImage", "guest_image"),
@@ -1171,7 +1252,7 @@ func loaderCommandRequestFromOptions(options map[string]any, apiName string) (do
 	if err != nil {
 		return domain.LoaderCommandRequest{}, fmt.Errorf("decode %s maxOutputBytes: %w", apiName, err)
 	}
-	request.SessionEnv, err = loaderSessionEnvOption(options)
+	request.SandboxEnv, err = loaderSandboxEnvOption(options, state, apiName)
 	if err != nil {
 		return domain.LoaderCommandRequest{}, fmt.Errorf("%s", strings.Replace(err.Error(), "scheduler.agent", apiName, 1))
 	}
@@ -1403,22 +1484,74 @@ func loaderInt64Option(options map[string]any, keys ...string) (int64, error) {
 	return 0, nil
 }
 
-func loaderSessionEnvOption(options map[string]any) ([]domain.SessionEnvVar, error) {
+func loaderSandboxPolicyOption(options map[string]any, state *loaderExecutionState, apiName string) string {
+	for _, key := range []string{"sandboxPolicy", "sandbox_policy"} {
+		if value := loaderStringOption(options, key); strings.TrimSpace(value) != "" {
+			return normalizeLoaderSandboxPolicy(value)
+		}
+	}
+	for _, key := range []string{"sessionPolicy", "session_policy"} {
+		if value := loaderStringOption(options, key); strings.TrimSpace(value) != "" {
+			state.addDeprecatedWarning(apiName+"."+key, apiName+"."+preferredSandboxPolicyKey(key))
+			return normalizeLoaderSandboxPolicy(value)
+		}
+	}
+	return ""
+}
+
+func preferredSandboxPolicyKey(alias string) string {
+	if strings.Contains(alias, "_") {
+		return "sandbox_policy"
+	}
+	return "sandboxPolicy"
+}
+
+func loaderSandboxEnvOption(options map[string]any, state *loaderExecutionState, apiName string) ([]domain.SandboxEnvVar, error) {
+	if items, ok, err := loaderEnvOption(options, []string{"sandboxEnv", "sandbox_env"}, apiName, "sandboxEnv"); ok || err != nil {
+		return items, err
+	}
 	for _, key := range []string{"sessionEnv", "session_env"} {
 		value, ok := options[key]
 		if !ok {
 			continue
 		}
-		items, err := loaderSessionEnvItems(value)
-		if err != nil {
-			return nil, fmt.Errorf("decode scheduler.agent %s: %w", key, err)
-		}
-		return items, nil
+		state.addDeprecatedWarning(apiName+"."+key, apiName+"."+preferredSandboxEnvKey(key))
+		return loaderEnvOptionValue(value, apiName, key)
 	}
 	return nil, nil
 }
 
-func loaderSessionEnvItems(value any) ([]domain.SessionEnvVar, error) {
+func preferredSandboxEnvKey(alias string) string {
+	if strings.Contains(alias, "_") {
+		return "sandbox_env"
+	}
+	return "sandboxEnv"
+}
+
+func loaderEnvOption(options map[string]any, keys []string, apiName, label string) ([]domain.SandboxEnvVar, bool, error) {
+	for _, key := range keys {
+		value, ok := options[key]
+		if !ok {
+			continue
+		}
+		items, err := loaderSandboxEnvItems(value)
+		if err != nil {
+			return nil, true, fmt.Errorf("decode %s %s: %w", apiName, label, err)
+		}
+		return items, true, nil
+	}
+	return nil, false, nil
+}
+
+func loaderEnvOptionValue(value any, apiName, key string) ([]domain.SandboxEnvVar, error) {
+	items, err := loaderSandboxEnvItems(value)
+	if err != nil {
+		return nil, fmt.Errorf("decode %s %s: %w", apiName, key, err)
+	}
+	return items, nil
+}
+
+func loaderSandboxEnvItems(value any) ([]domain.SandboxEnvVar, error) {
 	switch typed := value.(type) {
 	case nil:
 		return nil, nil
@@ -1431,21 +1564,21 @@ func loaderSessionEnvItems(value any) ([]domain.SessionEnvVar, error) {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		items := make([]domain.SessionEnvVar, 0, len(keys))
+		items := make([]domain.SandboxEnvVar, 0, len(keys))
 		for _, key := range keys {
 			name := strings.TrimSpace(key)
 			if name == "" {
 				continue
 			}
-			envValue, secret, err := loaderSessionEnvValue(name, typed[key])
+			envValue, secret, err := loaderSandboxEnvValue(name, typed[key])
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
-			items = append(items, domain.SessionEnvVar{Name: name, Value: envValue, Secret: secret})
+			items = append(items, domain.SandboxEnvVar{Name: name, Value: envValue, Secret: secret})
 		}
 		return normalizeEnvItems(items), nil
 	case []any:
-		items := make([]domain.SessionEnvVar, 0, len(typed))
+		items := make([]domain.SandboxEnvVar, 0, len(typed))
 		for index, rawItem := range typed {
 			entry, ok := rawItem.(map[string]any)
 			if !ok {
@@ -1455,7 +1588,7 @@ func loaderSessionEnvItems(value any) ([]domain.SessionEnvVar, error) {
 			if name == "" {
 				return nil, fmt.Errorf("item %d requires a non-empty name", index)
 			}
-			envValue, secret, err := loaderSessionEnvValue(name, entry["value"])
+			envValue, secret, err := loaderSandboxEnvValue(name, entry["value"])
 			if err != nil {
 				return nil, fmt.Errorf("item %d: %w", index, err)
 			}
@@ -1471,7 +1604,7 @@ func loaderSessionEnvItems(value any) ([]domain.SessionEnvVar, error) {
 					return nil, fmt.Errorf("item %d secret must be a boolean", index)
 				}
 			}
-			items = append(items, domain.SessionEnvVar{Name: name, Value: envValue, Secret: secret})
+			items = append(items, domain.SandboxEnvVar{Name: name, Value: envValue, Secret: secret})
 		}
 		return normalizeEnvItems(items), nil
 	default:
@@ -1479,7 +1612,7 @@ func loaderSessionEnvItems(value any) ([]domain.SessionEnvVar, error) {
 	}
 }
 
-func loaderSessionEnvValue(name string, value any) (string, bool, error) {
+func loaderSandboxEnvValue(name string, value any) (string, bool, error) {
 	secret := loaderSecretEnvName(name)
 	switch typed := value.(type) {
 	case nil:
@@ -1494,7 +1627,7 @@ func loaderSessionEnvValue(name string, value any) (string, bool, error) {
 	case float64:
 		return strings.TrimSpace(strings.TrimRight(strings.TrimRight(fmt.Sprintf("%f", typed), "0"), ".")), secret, nil
 	case map[string]any:
-		envValue, nestedSecret, err := loaderSessionEnvValue(name, typed["value"])
+		envValue, nestedSecret, err := loaderSandboxEnvValue(name, typed["value"])
 		if err != nil {
 			return "", false, err
 		}
@@ -1566,6 +1699,70 @@ func loaderRPCRequestJSON(args []*qjs.Value, apiName string) (string, error) {
 	return strings.TrimSpace(requestJSON), nil
 }
 
+func sandboxRPCRequestToSessionJSON(requestJSON string) (string, error) {
+	return translateJSONKeys(requestJSON, map[string]string{
+		"sandboxId":       "sessionId",
+		"sandbox_id":      "session_id",
+		"sandboxShortId":  "sessionShortId",
+		"sandbox_shortId": "session_shortId",
+	})
+}
+
+func sessionRPCResponseToSandboxJSON(responseJSON string) (string, error) {
+	return translateJSONKeys(responseJSON, map[string]string{
+		"session":          "sandbox",
+		"sessions":         "sandboxes",
+		"sessionId":        "sandboxId",
+		"session_id":       "sandbox_id",
+		"sessionShortId":   "sandboxShortId",
+		"session_short_id": "sandbox_short_id",
+		"agentSessionId":   "agentThreadId",
+		"agent_session_id": "agent_thread_id",
+	})
+}
+
+func translateJSONKeys(raw string, replacements map[string]string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+	translated := translateJSONValueKeys(value, replacements)
+	data, err := json.Marshal(translated)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func translateJSONValueKeys(value any, replacements map[string]string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			targetKey := key
+			if replacement, ok := replacements[key]; ok {
+				targetKey = replacement
+			}
+			result[targetKey] = translateJSONValueKeys(item, replacements)
+		}
+		return result
+	case []any:
+		result := make([]any, len(typed))
+		for index, item := range typed {
+			result[index] = translateJSONValueKeys(item, replacements)
+		}
+		return result
+	default:
+		return value
+	}
+}
+
 func lowerFirstASCII(value string) string {
 	if value == "" {
 		return ""
@@ -1574,6 +1771,16 @@ func lowerFirstASCII(value string) string {
 		return strings.ToLower(value)
 	}
 	return strings.ToLower(value[:1]) + value[1:]
+}
+
+func upperFirstASCII(value string) string {
+	if value == "" {
+		return ""
+	}
+	if len(value) == 1 {
+		return strings.ToUpper(value)
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
 }
 
 func payloadValueFromJSON(jsctx *qjs.Context, payloadJSON string) (*qjs.Value, error) {

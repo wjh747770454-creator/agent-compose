@@ -27,7 +27,7 @@ func ScanLoaderSummary(scan func(dest ...any) error) (domain.LoaderSummary, erro
 		&item.Driver,
 		&item.GuestImage,
 		&item.DefaultAgent,
-		&item.SessionPolicy,
+		&item.SandboxPolicy,
 		&item.ConcurrencyPolicy,
 		&capsetIDsRaw,
 		&item.ManagedProjectID,
@@ -75,7 +75,7 @@ func ScanLoader(scan func(dest ...any) error) (domain.Loader, error) {
 		&item.Summary.Driver,
 		&item.Summary.GuestImage,
 		&item.Summary.DefaultAgent,
-		&item.Summary.SessionPolicy,
+		&item.Summary.SandboxPolicy,
 		&item.Summary.ConcurrencyPolicy,
 		&capsetIDsRaw,
 		&envJSON,
@@ -142,7 +142,7 @@ func ScanLoaderRun(scan func(dest ...any) error) (domain.LoaderRunSummary, error
 func ScanLoaderEvent(scan func(dest ...any) error) (domain.LoaderEvent, error) {
 	var item domain.LoaderEvent
 	var createdAtRaw any
-	if err := scan(&item.LoaderID, &item.ID, &item.RunID, &item.TriggerID, &item.Type, &item.Level, &item.Message, &item.PayloadJSON, &item.LinkedSessionID, &item.LinkedCellID, &item.LinkedAgentSessionID, &createdAtRaw); err != nil {
+	if err := scan(&item.LoaderID, &item.ID, &item.RunID, &item.TriggerID, &item.Type, &item.Level, &item.Message, &item.PayloadJSON, &item.LinkedSandboxID, &item.LinkedCellID, &item.LinkedAgentThreadID, &createdAtRaw); err != nil {
 		return domain.LoaderEvent{}, fmt.Errorf("scan loader event: %w", err)
 	}
 	item.CreatedAt = parseStoredTime(createdAtRaw)
@@ -153,7 +153,7 @@ func ScanLoaderBinding(scan func(dest ...any) error) (domain.LoaderBinding, erro
 	var item domain.LoaderBinding
 	var createdAtRaw any
 	var updatedAtRaw any
-	if err := scan(&item.LoaderID, &item.SessionID, &createdAtRaw, &updatedAtRaw); err != nil {
+	if err := scan(&item.LoaderID, &item.SandboxID, &createdAtRaw, &updatedAtRaw); err != nil {
 		return domain.LoaderBinding{}, fmt.Errorf("scan loader binding: %w", err)
 	}
 	item.CreatedAt = parseStoredTime(createdAtRaw)
@@ -237,7 +237,7 @@ func SelectLoaderSummarySQL() string {
         l.driver,
         l.guest_image,
         l.default_agent,
-        l.session_policy,
+        l.sandbox_policy,
         l.concurrency_policy,
         l.capset_ids,
         l.managed_project_id,
@@ -257,7 +257,7 @@ func SelectLoaderSummarySQL() string {
 
 func SelectLoaderSQL() string {
 	return `SELECT
-        id, name, description, runtime, script, workspace_id, agent_id, driver, guest_image, default_agent, session_policy, concurrency_policy, capset_ids, env_json, volumes_json,
+        id, name, description, runtime, script, workspace_id, agent_id, driver, guest_image, default_agent, sandbox_policy, concurrency_policy, capset_ids, env_json, volumes_json,
         managed_project_id, managed_project_revision, managed_agent_name, managed_scheduler_id, enabled, last_error, created_at, updated_at
         FROM loader`
 }
@@ -273,10 +273,10 @@ func SelectLoaderRunSQL() string {
 }
 
 func SelectLoaderEventSQL() string {
-	return `SELECT loader_id, event_id, run_id, trigger_id, type, level, message, payload_json, linked_session_id, linked_cell_id, linked_agent_session_id, created_at
+	return `SELECT loader_id, event_id, run_id, trigger_id, type, level, message, payload_json, linked_sandbox_id, linked_cell_id, linked_agent_thread_id, created_at
         FROM loader_event`
 }
 
 func SelectLoaderBindingSQL() string {
-	return `SELECT loader_id, session_id, created_at, updated_at FROM loader_binding`
+	return `SELECT loader_id, sandbox_id, created_at, updated_at FROM loader_binding`
 }

@@ -20,7 +20,7 @@ func LoaderSummaryToProto(item domain.LoaderSummary) *agentcomposev1.LoaderSumma
 		Driver:            item.Driver,
 		GuestImage:        item.GuestImage,
 		DefaultAgent:      item.DefaultAgent,
-		SessionPolicy:     item.SessionPolicy,
+		SessionPolicy:     item.SandboxPolicy,
 		ConcurrencyPolicy: item.ConcurrencyPolicy,
 		CapsetIds:         item.CapsetIDs,
 		CreatedAt:         item.CreatedAt.Format(time.RFC3339Nano),
@@ -100,9 +100,9 @@ func LoaderEventToProto(item domain.LoaderEvent) *agentcomposev1.LoaderEvent {
 		Level:                item.Level,
 		Message:              item.Message,
 		PayloadJson:          item.PayloadJSON,
-		LinkedSessionId:      item.LinkedSessionID,
+		LinkedSessionId:      item.LinkedSandboxID,
 		LinkedCellId:         item.LinkedCellID,
-		LinkedAgentSessionId: item.LinkedAgentSessionID,
+		LinkedAgentSessionId: item.LinkedAgentThreadID,
 		CreatedAt:            item.CreatedAt.Format(time.RFC3339Nano),
 	}
 }

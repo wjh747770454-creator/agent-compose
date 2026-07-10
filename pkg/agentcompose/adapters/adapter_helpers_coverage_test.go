@@ -33,18 +33,18 @@ func TestAdapterHelperCoverage(t *testing.T) {
 		}
 	})
 
-	t.Run("loader session rpc linked session id", func(t *testing.T) {
-		if got := LoaderSessionRPCLinkedSessionID("CreateSession", `{"sessionId":"request-session"}`, `{"session":{"summary":{"sessionId":"response-session"}}}`); got != "response-session" {
-			t.Fatalf("response session id = %q", got)
+	t.Run("loader sandbox rpc linked sandbox id", func(t *testing.T) {
+		if got := LoaderSandboxRPCLinkedSandboxID("CreateSession", `{"sessionId":"request-sandbox"}`, `{"session":{"summary":{"sessionId":"response-sandbox"}}}`); got != "response-sandbox" {
+			t.Fatalf("response sandbox id = %q", got)
 		}
-		if got := LoaderSessionRPCLinkedSessionID("StopSession", `{"sessionId":" request-session "}`, `{bad`); got != "request-session" {
-			t.Fatalf("request session id = %q", got)
+		if got := LoaderSandboxRPCLinkedSandboxID("StopSession", `{"sessionId":" request-sandbox "}`, `{bad`); got != "request-sandbox" {
+			t.Fatalf("request sandbox id = %q", got)
 		}
-		if got := LoaderSessionRPCLinkedSessionID("ListSessions", `{"sessionId":"ignored"}`, `{}`); got != "" {
+		if got := LoaderSandboxRPCLinkedSandboxID("ListSessions", `{"sessionId":"ignored"}`, `{}`); got != "" {
 			t.Fatalf("ListSessions linked id = %q, want empty", got)
 		}
-		if got := loaderSessionIDFromJSON(`{"session":{"summary":{"sessionId":" nested "}}}`); got != "nested" {
-			t.Fatalf("nested session id = %q", got)
+		if got := loaderSandboxIDFromJSON(`{"session":{"summary":{"sessionId":" nested "}}}`); got != "nested" {
+			t.Fatalf("nested sandbox id = %q", got)
 		}
 	})
 
@@ -66,7 +66,7 @@ func TestAdapterHelperCoverage(t *testing.T) {
 		runtime := &fakeAgentRuntime{}
 		provider := &runtimeProvider{
 			config: &appconfig.Config{RuntimeDriver: driverpkg.RuntimeDriverBoxlite},
-			runtimes: map[string]BoxRuntime{
+			runtimes: map[string]SandboxRuntime{
 				driverpkg.RuntimeDriverDocker:  runtime,
 				driverpkg.RuntimeDriverBoxlite: runtime,
 			},
@@ -74,7 +74,7 @@ func TestAdapterHelperCoverage(t *testing.T) {
 		if got, err := provider.ForDriver("docker-engine"); err != nil || got != runtime {
 			t.Fatalf("ForDriver docker-engine = %T/%v", got, err)
 		}
-		if got, err := provider.ForSession(&domain.Session{Summary: domain.SessionSummary{Driver: ""}}); err != nil || got != runtime {
+		if got, err := provider.ForSession(&domain.Sandbox{Summary: domain.SandboxSummary{Driver: ""}}); err != nil || got != runtime {
 			t.Fatalf("ForSession default driver = %T/%v", got, err)
 		}
 		if _, err := provider.ForDriver("bad-driver"); err == nil {
@@ -98,7 +98,7 @@ func TestAdapterHelperCoverage(t *testing.T) {
 			},
 		}
 		adapter := driverRuntimeAdapter{runtime: driverRuntime}
-		session := &domain.Session{Summary: domain.SessionSummary{ID: "session-1", WorkspacePath: "/tmp/workspace"}}
+		session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-1", WorkspacePath: "/tmp/workspace"}}
 		result, err := adapter.Exec(context.Background(), session, domain.VMState{BoxID: "sandbox-1"}, domain.ExecSpec{Command: "echo"})
 		if err != nil || result.Stdout != "out" || driverRuntime.execSpec.Command != "echo" {
 			t.Fatalf("Exec result=%#v spec=%#v err=%v", result, driverRuntime.execSpec, err)
@@ -127,20 +127,20 @@ type fakeDriverAdapterRuntime struct {
 	stats      driverpkg.SandboxStats
 }
 
-func (r *fakeDriverAdapterRuntime) EnsureSession(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ProxyState) (driverpkg.SessionVMInfo, error) {
-	return driverpkg.SessionVMInfo{}, nil
+func (r *fakeDriverAdapterRuntime) EnsureSandbox(context.Context, *driverpkg.Sandbox, driverpkg.VMState, driverpkg.ProxyState) (driverpkg.SandboxVMInfo, error) {
+	return driverpkg.SandboxVMInfo{}, nil
 }
 
-func (r *fakeDriverAdapterRuntime) StopSession(context.Context, *driverpkg.Session, driverpkg.VMState) (bool, error) {
+func (r *fakeDriverAdapterRuntime) StopSandbox(context.Context, *driverpkg.Sandbox, driverpkg.VMState) (bool, error) {
 	return false, nil
 }
 
-func (r *fakeDriverAdapterRuntime) Exec(_ context.Context, _ *driverpkg.Session, _ driverpkg.VMState, spec driverpkg.ExecSpec) (driverpkg.ExecResult, error) {
+func (r *fakeDriverAdapterRuntime) Exec(_ context.Context, _ *driverpkg.Sandbox, _ driverpkg.VMState, spec driverpkg.ExecSpec) (driverpkg.ExecResult, error) {
 	r.execSpec = spec
 	return r.execResult, nil
 }
 
-func (r *fakeDriverAdapterRuntime) ExecStream(_ context.Context, _ *driverpkg.Session, _ driverpkg.VMState, spec driverpkg.ExecSpec, stream driverpkg.ExecStreamWriter) (driverpkg.ExecResult, error) {
+func (r *fakeDriverAdapterRuntime) ExecStream(_ context.Context, _ *driverpkg.Sandbox, _ driverpkg.VMState, spec driverpkg.ExecSpec, stream driverpkg.ExecStreamWriter) (driverpkg.ExecResult, error) {
 	r.execSpec = spec
 	if stream != nil {
 		stream(driverpkg.ExecChunk{Text: "err", Stream: driverpkg.StdioStderr})
@@ -148,25 +148,25 @@ func (r *fakeDriverAdapterRuntime) ExecStream(_ context.Context, _ *driverpkg.Se
 	return r.execResult, nil
 }
 
-func (r *fakeDriverAdapterRuntime) Stats(context.Context, *driverpkg.Session, driverpkg.VMState) (driverpkg.SandboxStats, error) {
+func (r *fakeDriverAdapterRuntime) Stats(context.Context, *driverpkg.Sandbox, driverpkg.VMState) (driverpkg.SandboxStats, error) {
 	return r.stats, nil
 }
 
 type fakeDriverNoStatsRuntime struct{}
 
-func (fakeDriverNoStatsRuntime) EnsureSession(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ProxyState) (driverpkg.SessionVMInfo, error) {
-	return driverpkg.SessionVMInfo{}, nil
+func (fakeDriverNoStatsRuntime) EnsureSandbox(context.Context, *driverpkg.Sandbox, driverpkg.VMState, driverpkg.ProxyState) (driverpkg.SandboxVMInfo, error) {
+	return driverpkg.SandboxVMInfo{}, nil
 }
 
-func (fakeDriverNoStatsRuntime) StopSession(context.Context, *driverpkg.Session, driverpkg.VMState) (bool, error) {
+func (fakeDriverNoStatsRuntime) StopSandbox(context.Context, *driverpkg.Sandbox, driverpkg.VMState) (bool, error) {
 	return false, nil
 }
 
-func (fakeDriverNoStatsRuntime) Exec(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ExecSpec) (driverpkg.ExecResult, error) {
+func (fakeDriverNoStatsRuntime) Exec(context.Context, *driverpkg.Sandbox, driverpkg.VMState, driverpkg.ExecSpec) (driverpkg.ExecResult, error) {
 	return driverpkg.ExecResult{}, nil
 }
 
-func (fakeDriverNoStatsRuntime) ExecStream(context.Context, *driverpkg.Session, driverpkg.VMState, driverpkg.ExecSpec, driverpkg.ExecStreamWriter) (driverpkg.ExecResult, error) {
+func (fakeDriverNoStatsRuntime) ExecStream(context.Context, *driverpkg.Sandbox, driverpkg.VMState, driverpkg.ExecSpec, driverpkg.ExecStreamWriter) (driverpkg.ExecResult, error) {
 	return driverpkg.ExecResult{}, nil
 }
 
@@ -174,41 +174,50 @@ func float64PtrForAdapter(value float64) *float64 {
 	return &value
 }
 
-func TestCapabilitySessionResolverCoverage(t *testing.T) {
+func TestCapabilitySandboxResolverCoverage(t *testing.T) {
 	ctx := context.Background()
-	running := &domain.Session{
-		Summary: domain.SessionSummary{
-			ID:       "session-running",
+	running := &domain.Sandbox{
+		Summary: domain.SandboxSummary{
+			ID:       "sandbox-running",
 			VMStatus: domain.VMStatusRunning,
-			Tags: []domain.SessionTag{
+			Tags: []domain.SandboxTag{
 				{Name: capabilities.CapsetTagName, Value: "dev"},
 				{Name: capabilities.CapsetTagName, Value: " dev "},
 			},
 		},
-		EnvItems: []domain.SessionEnvVar{{Name: capabilities.SessionTokenEnvName, Value: "token-2", Secret: true}},
+		EnvItems: []domain.SandboxEnvVar{{Name: capabilities.SandboxTokenEnvName, Value: "token-2", Secret: true}},
 	}
-	stopped := &domain.Session{
-		Summary:  domain.SessionSummary{ID: "session-stopped", VMStatus: domain.VMStatusStopped, Tags: []domain.SessionTag{{Name: capabilities.CapsetTagName, Value: "dev"}}},
-		EnvItems: []domain.SessionEnvVar{{Name: capabilities.SessionTokenEnvName, Value: "token-stopped", Secret: true}},
+	stopped := &domain.Sandbox{
+		Summary:  domain.SandboxSummary{ID: "sandbox-stopped", VMStatus: domain.VMStatusStopped, Tags: []domain.SandboxTag{{Name: capabilities.CapsetTagName, Value: "dev"}}},
+		EnvItems: []domain.SandboxEnvVar{{Name: capabilities.SandboxTokenEnvName, Value: "token-stopped", Secret: true}},
 	}
-	noCapset := &domain.Session{
-		Summary:  domain.SessionSummary{ID: "session-no-capset", VMStatus: domain.VMStatusRunning},
-		EnvItems: []domain.SessionEnvVar{{Name: capabilities.SessionTokenEnvName, Value: "token-no-capset", Secret: true}},
+	noCapset := &domain.Sandbox{
+		Summary:  domain.SandboxSummary{ID: "sandbox-no-capset", VMStatus: domain.VMStatusRunning},
+		EnvItems: []domain.SandboxEnvVar{{Name: capabilities.SandboxTokenEnvName, Value: "token-no-capset", Secret: true}},
 	}
-	store := &fakeCapabilitySessionStore{pages: []domain.SessionListResult{
-		{Sessions: []*domain.Session{{Summary: domain.SessionSummary{ID: "session-other", VMStatus: domain.VMStatusRunning}}}, HasMore: true, NextOffset: 200},
-		{Sessions: []*domain.Session{nil, running, stopped, noCapset}},
+	store := &fakeCapabilitySandboxStore{pages: []domain.SandboxListResult{
+		{Sandboxes: []*domain.Sandbox{{Summary: domain.SandboxSummary{ID: "sandbox-other", VMStatus: domain.VMStatusRunning}}}, HasMore: true, NextOffset: 200},
+		{Sandboxes: []*domain.Sandbox{nil, running, stopped, noCapset}},
 	}}
-	resolver := NewCapabilitySessionResolver(store)
-	binding, err := resolver.ResolveCapabilitySession(ctx, " token-2 ")
+	resolver := NewCapabilitySandboxResolver(store)
+	binding, err := resolver.ResolveCapabilitySandbox(ctx, " token-2 ")
 	if err != nil {
-		t.Fatalf("ResolveCapabilitySession returned error: %v", err)
+		t.Fatalf("ResolveCapabilitySandbox returned error: %v", err)
 	}
-	if binding.SessionID != "session-running" || len(binding.CapsetIDs) != 1 || binding.CapsetIDs[0] != "dev" {
+	if binding.SandboxID != "sandbox-running" || len(binding.CapsetIDs) != 1 || binding.CapsetIDs[0] != "dev" {
 		t.Fatalf("binding = %#v", binding)
 	}
 	if len(store.offsets) != 2 || store.offsets[0] != 0 || store.offsets[1] != 200 {
 		t.Fatalf("offsets = %#v", store.offsets)
+	}
+	resolver.RevokeSandbox("sandbox-running")
+	if _, err := resolver.ResolveCapabilitySandbox(ctx, "token-2"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("revoked token error = %v", err)
+	}
+	resolver.IndexSandbox(running)
+	binding, err = resolver.ResolveCapabilitySandbox(ctx, "token-2")
+	if err != nil || binding.SandboxID != "sandbox-running" {
+		t.Fatalf("indexed binding = %#v err=%v", binding, err)
 	}
 
 	for _, tc := range []struct {
@@ -217,41 +226,42 @@ func TestCapabilitySessionResolverCoverage(t *testing.T) {
 		part  string
 	}{
 		{name: "empty token", token: " ", part: "required"},
-		{name: "stopped session", token: "token-stopped", part: "not active"},
-		{name: "no capset", token: "token-no-capset", part: "no capability capset"},
+		{name: "stopped sandbox", token: "token-stopped", part: "not found"},
+		{name: "no capset", token: "token-no-capset", part: "not found"},
 		{name: "not found", token: "missing", part: "not found"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := resolver.ResolveCapabilitySession(ctx, tc.token)
+			_, err := resolver.ResolveCapabilitySandbox(ctx, tc.token)
 			if err == nil || !strings.Contains(err.Error(), tc.part) {
-				t.Fatalf("ResolveCapabilitySession error = %v, want %q", err, tc.part)
+				t.Fatalf("ResolveCapabilitySandbox error = %v, want %q", err, tc.part)
 			}
 		})
 	}
 
-	if _, err := (*CapabilitySessionResolver)(nil).ResolveCapabilitySession(ctx, "token"); err == nil || !strings.Contains(err.Error(), "store") {
+	if _, err := (*CapabilitySandboxResolver)(nil).ResolveCapabilitySandbox(ctx, "token"); err == nil || !strings.Contains(err.Error(), "store") {
 		t.Fatalf("nil resolver error = %v", err)
 	}
-	store.err = errors.New("list failed")
-	if _, err := resolver.ResolveCapabilitySession(ctx, "token-2"); !errors.Is(err, store.err) {
-		t.Fatalf("store error = %v, want %v", err, store.err)
+	listErr := errors.New("list failed")
+	failing := NewCapabilitySandboxResolver(&fakeCapabilitySandboxStore{err: listErr})
+	if _, err := failing.ResolveCapabilitySandbox(ctx, "token-2"); !errors.Is(err, listErr) {
+		t.Fatalf("store error = %v, want %v", err, listErr)
 	}
 }
 
-type fakeCapabilitySessionStore struct {
-	pages   []domain.SessionListResult
+type fakeCapabilitySandboxStore struct {
+	pages   []domain.SandboxListResult
 	offsets []int
 	err     error
 }
 
-func (s *fakeCapabilitySessionStore) ListSessions(_ context.Context, opts domain.SessionListOptions) (domain.SessionListResult, error) {
+func (s *fakeCapabilitySandboxStore) ListSandboxes(_ context.Context, opts domain.SandboxListOptions) (domain.SandboxListResult, error) {
 	s.offsets = append(s.offsets, opts.Offset)
 	if s.err != nil {
-		return domain.SessionListResult{}, s.err
+		return domain.SandboxListResult{}, s.err
 	}
 	index := opts.Offset / 200
 	if index >= len(s.pages) {
-		return domain.SessionListResult{}, nil
+		return domain.SandboxListResult{}, nil
 	}
 	return s.pages[index], nil
 }

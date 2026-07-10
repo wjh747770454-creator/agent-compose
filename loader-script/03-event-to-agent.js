@@ -24,15 +24,16 @@ function handleEvent(event) {
 
   const reply = scheduler.agent(buildEventPrompt(envelope), {
     agent: "codex",
-    sessionPolicy: "sticky",
+    sandboxPolicy: "sticky",
   });
 
   const result = {
     ok: reply.success,
     topic: envelope.topic,
-    sessionId: reply.sessionId,
+    sandboxId: reply.sandboxId,
     cellId: reply.cellId,
     agent: reply.agent,
+    agentThreadId: reply.agentThreadId,
     text: reply.finalText ?? reply.text ?? reply.output ?? "",
     stopReason: reply.stopReason,
   };

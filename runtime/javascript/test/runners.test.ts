@@ -32,7 +32,7 @@ describe("CodexRunner", () => {
       const runner = new CodexRunner(runnerOptions(root));
       const result = {
         provider: "codex" as const,
-        sessionId: "",
+        threadId: "",
         stopReason: "completed",
         finalText: "",
         transcript: "",
@@ -85,7 +85,7 @@ describe("CodexRunner", () => {
         stdio.restore();
       }
 
-      expect(result.sessionId).toBe("thread-1");
+      expect(result.threadId).toBe("thread-1");
       expect(result.finalText).toBe("hello!");
       expect(stdio.stderr).toContain("hello");
       expect(stdio.stderr).toContain("$ pwd");
@@ -109,7 +109,7 @@ describe("CodexRunner", () => {
       const runner = new CodexRunner(runnerOptions(root));
       const result = {
         provider: "codex" as const,
-        sessionId: "",
+        threadId: "",
         stopReason: "completed",
         finalText: "",
         transcript: "",
@@ -140,7 +140,7 @@ describe("CodexRunner", () => {
       const runner = new CodexRunner(runnerOptions(root));
       const result = {
         provider: "codex" as const,
-        sessionId: "",
+        threadId: "",
         stopReason: "completed",
         finalText: "",
         transcript: "",
@@ -163,7 +163,7 @@ describe("CodexRunner", () => {
       const runner = new CodexRunner(runnerOptions(root));
       const result = {
         provider: "codex" as const,
-        sessionId: "",
+        threadId: "",
         stopReason: "completed",
         finalText: "",
         transcript: "",
@@ -241,7 +241,7 @@ describe("ClaudeRunner", () => {
 
       const queryOptions = runner.queryOptions({
         provider: "claude",
-        sessionId: "existing-session",
+        threadId: "existing-session",
       });
 
       expect(queryOptions.additionalDirectories).toEqual([
@@ -353,7 +353,7 @@ describe("OpenCodeRunner", () => {
         "--model",
         "anthropic/claude-sonnet-4-5",
       ]);
-      expect(runner.buildArgs("review", { provider: "opencode", sessionId: "ses_1" })).toContain("ses_1");
+      expect(runner.buildArgs("review", { provider: "opencode", threadId: "ses_1" })).toContain("ses_1");
     });
   });
 
@@ -382,7 +382,7 @@ describe("OpenCodeRunner", () => {
       const runner = new OpenCodeRunner(runnerOptions(root, "", "opencode"));
       const result = {
         provider: "opencode" as const,
-        sessionId: "",
+        threadId: "",
         stopReason: "completed",
         finalText: "",
         transcript: "",
@@ -399,7 +399,7 @@ describe("OpenCodeRunner", () => {
         stdio.restore();
       }
 
-      expect(result.sessionId).toBe("session-1");
+      expect(result.threadId).toBe("session-1");
       expect(result.finalText).toBe("done");
       expect(stdio.stderr).toContain("hello");
       expect(stdio.stderr).toContain(" from part");
@@ -413,7 +413,7 @@ describe("OpenCodeRunner", () => {
       const runner = new OpenCodeRunner(runnerOptions(root, "", "opencode"));
       expect(() => runner.handleEvent({ type: "error", error: { text: "bad" } }, {
         provider: "opencode",
-        sessionId: "",
+        threadId: "",
         stopReason: "completed",
         finalText: "",
         transcript: "",

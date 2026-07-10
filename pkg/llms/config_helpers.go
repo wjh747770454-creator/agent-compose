@@ -44,7 +44,7 @@ func ScanModel(scan func(dest ...any) error) (Model, error) {
 func ScanFacadeToken(scan func(dest ...any) error) (FacadeToken, error) {
 	var item FacadeToken
 	var issuedAt, expiresAt, revokedAt int64
-	if err := scan(&item.SessionID, &item.TokenHash, &item.TokenFingerprint, &item.Model, &item.ProviderID, &item.WireAPI, &item.Source, &item.RunID, &issuedAt, &expiresAt, &revokedAt); err != nil {
+	if err := scan(&item.SandboxID, &item.TokenHash, &item.TokenFingerprint, &item.Model, &item.ProviderID, &item.WireAPI, &item.Source, &item.RunID, &issuedAt, &expiresAt, &revokedAt); err != nil {
 		return FacadeToken{}, err
 	}
 	item.IssuedAt = parseStoredTime(issuedAt)

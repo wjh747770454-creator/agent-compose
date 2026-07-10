@@ -20,12 +20,12 @@ const boxliteVolumeBridgeSessionPath = "volumes"
 // at the requested target paths.
 //
 // Upstream issue: https://github.com/boxlite-ai/boxlite/issues/935
-func prepareBoxliteVolumeBridge(session *Session) error {
+func prepareBoxliteVolumeBridge(session *Sandbox) error {
 	entries := boxliteVolumeBridgeEntries(session)
 	if len(entries) == 0 {
 		return nil
 	}
-	root := filepath.Join(hostSessionDir(session), boxliteVolumeBridgeSessionPath)
+	root := filepath.Join(hostSandboxDir(session), boxliteVolumeBridgeSessionPath)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("create boxlite volume bridge dir: %w", err)
 	}
@@ -59,11 +59,11 @@ type boxliteVolumeBridgeEntry struct {
 	readOnly       bool
 }
 
-func boxliteVolumeBridgeEntries(session *Session) []boxliteVolumeBridgeEntry {
+func boxliteVolumeBridgeEntries(session *Sandbox) []boxliteVolumeBridgeEntry {
 	if session == nil || len(session.VolumeMounts) == 0 {
 		return nil
 	}
-	sessionDir := hostSessionDir(session)
+	sessionDir := hostSandboxDir(session)
 	if strings.TrimSpace(sessionDir) == "" {
 		return nil
 	}
@@ -76,7 +76,7 @@ func boxliteVolumeBridgeEntries(session *Session) []boxliteVolumeBridgeEntry {
 		}
 		id := boxliteVolumeBridgeID(mount)
 		hostBridgePath := filepath.Join(sessionDir, boxliteVolumeBridgeSessionPath, id)
-		guestSource := filepath.Clean(filepath.Join(directoryOnlyGuestSessionPath, boxliteVolumeBridgeSessionPath, id))
+		guestSource := filepath.Clean(filepath.Join(directoryOnlyGuestSandboxPath, boxliteVolumeBridgeSessionPath, id))
 		entries = append(entries, boxliteVolumeBridgeEntry{
 			id:             id,
 			hostPath:       hostPath,
@@ -89,7 +89,7 @@ func boxliteVolumeBridgeEntries(session *Session) []boxliteVolumeBridgeEntry {
 	return entries
 }
 
-func boxliteVolumeGuestSymlinkCommands(session *Session) []string {
+func boxliteVolumeGuestSymlinkCommands(session *Sandbox) []string {
 	entries := boxliteVolumeBridgeEntries(session)
 	if len(entries) == 0 {
 		return nil
@@ -101,7 +101,7 @@ func boxliteVolumeGuestSymlinkCommands(session *Session) []string {
 	return commands
 }
 
-func boxliteVolumeBridgeID(mount SessionVolumeMount) string {
+func boxliteVolumeBridgeID(mount SandboxVolumeMount) string {
 	id := strings.TrimSpace(mount.ID)
 	if isSafeBoxliteVolumeBridgeID(id) {
 		return id
