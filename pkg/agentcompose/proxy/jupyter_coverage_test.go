@@ -68,6 +68,16 @@ func TestJupyterProxyRouteCoverage(t *testing.T) {
 	}
 }
 
+func TestNewJupyterProxyTransportDisablesProxyFromEnvironment(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+
+	transport := newJupyterProxyTransport()
+	if transport.Proxy != nil {
+		t.Fatalf("jupyter proxy transport should not use proxy environment")
+	}
+}
+
 type fakeJupyterStore struct {
 	state domain.ProxyState
 	err   error

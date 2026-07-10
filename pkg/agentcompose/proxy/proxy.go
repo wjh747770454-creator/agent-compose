@@ -30,6 +30,7 @@ type JupyterOptions struct {
 
 func RegisterJupyterRoutes(app *echo.Echo, opts JupyterOptions) {
 	base := strings.TrimRight(opts.BasePath, "/")
+	transport := newJupyterProxyTransport()
 	app.GET(base+"/:sessionID", func(c echo.Context) error {
 		proxyState, err := opts.EnsureReady(c.Request().Context(), c.Param("sessionID"))
 		if err != nil {
@@ -63,6 +64,7 @@ func RegisterJupyterRoutes(app *echo.Echo, opts JupyterOptions) {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		proxy := &httputil.ReverseProxy{
+			Transport: transport,
 			Rewrite: func(req *httputil.ProxyRequest) {
 				req.SetURL(target)
 				req.SetXForwarded()
@@ -79,6 +81,12 @@ func RegisterJupyterRoutes(app *echo.Echo, opts JupyterOptions) {
 		proxy.ServeHTTP(c.Response(), c.Request())
 		return nil
 	})
+}
+
+func newJupyterProxyTransport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return transport
 }
 
 func JupyterTargetReachable(proxyState domain.ProxyState, timeout time.Duration) bool {
