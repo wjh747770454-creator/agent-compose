@@ -672,7 +672,7 @@ func pathHasEntries(path string) (bool, error) {
 		return false, err
 	}
 	if !info.IsDir() {
-		return true, nil
+		return false, nil
 	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
