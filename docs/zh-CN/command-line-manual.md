@@ -369,9 +369,9 @@ agent-compose rm --force sandbox_789
 在运行中的 sandbox 内执行命令，语义类似 `docker compose exec`。
 
 ```bash
-agent-compose exec <sandbox>
-agent-compose exec <sandbox> <command> [args...]
+agent-compose exec <sandbox> -- <command> [args...]
 agent-compose exec <sandbox> --command "..."
+agent-compose exec <sandbox> --prompt "..."
 ```
 
 选项：
@@ -379,6 +379,7 @@ agent-compose exec <sandbox> --command "..."
 | 参数 | 说明 |
 | --- | --- |
 | `--command "..."` | 以 flag 形式传入 shell 命令，等价于在 sandbox 中执行 `bash -lc "..."`。 |
+| `--prompt "..."` | 在已有 sandbox 中执行一次 agent prompt，输出回复后退出；增加 `-i`（以及可选的 `-t`）进入多轮 attach 会话。 |
 | `--cwd <path>` | 指定 sandbox 内工作目录。 |
 | `--agent <agent>` | 兼容旧目标选择参数，会输出 deprecated warning；新命令应使用 `exec <sandbox>`。 |
 | `--run <run-id>` | 兼容旧目标选择参数，会输出 deprecated warning；新命令应使用 `exec <sandbox>`。 |
@@ -386,10 +387,10 @@ agent-compose exec <sandbox> --command "..."
 示例：
 
 ```bash
-agent-compose exec sandbox_123
-agent-compose exec sandbox_123 pwd
-agent-compose exec sandbox_123 bash -lc "task test"
+agent-compose exec sandbox_123 -- pwd
+agent-compose exec sandbox_123 -- bash -lc "task test"
 agent-compose exec sandbox_123 --command "git status --short"
+agent-compose exec sandbox_123 --prompt "总结当前 workspace"
 agent-compose exec sandbox_123 --cwd /workspace --command "pwd"
 ```
 

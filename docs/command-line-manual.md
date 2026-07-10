@@ -360,14 +360,15 @@ agent-compose rm --force sandbox_789
 Execute a command in a running sandbox, similar to `docker compose exec`.
 
 ```bash
-agent-compose exec <sandbox>
-agent-compose exec <sandbox> <command> [args...]
+agent-compose exec <sandbox> -- <command> [args...]
 agent-compose exec <sandbox> --command "..."
+agent-compose exec <sandbox> --prompt "..."
 ```
 
 | Option | Description |
 | --- | --- |
 | `--command "..."` | Pass a shell command as a flag. It is executed as `bash -lc "..."` in the sandbox. |
+| `--prompt "..."` | Run one agent prompt in the existing sandbox and exit after the response. Add `-i` (and optionally `-t`) for a multi-turn attached session. |
 | `--cwd <path>` | Set the working directory inside the sandbox. |
 | `--agent <agent>` | Deprecated target selection option; use `exec <sandbox>` instead. |
 | `--run <run-id>` | Deprecated target selection option; use `exec <sandbox>` instead. |
@@ -375,10 +376,10 @@ agent-compose exec <sandbox> --command "..."
 Examples:
 
 ```bash
-agent-compose exec sandbox_123
-agent-compose exec sandbox_123 pwd
-agent-compose exec sandbox_123 bash -lc "task test"
+agent-compose exec sandbox_123 -- pwd
+agent-compose exec sandbox_123 -- bash -lc "task test"
 agent-compose exec sandbox_123 --command "git status --short"
+agent-compose exec sandbox_123 --prompt "summarize the workspace"
 agent-compose exec sandbox_123 --cwd /workspace --command "pwd"
 ```
 

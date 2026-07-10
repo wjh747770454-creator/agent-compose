@@ -4838,8 +4838,47 @@ agents:
 	if ambiguousCode != exitCodeUsage {
 		t.Fatalf("exec --command ambiguous exit code = %d, want %d", ambiguousCode, exitCodeUsage)
 	}
-	if ambiguousOut != "" || !strings.Contains(ambiguousErr, "exec command must be specified with --command") {
+	if ambiguousOut != "" || !strings.Contains(ambiguousErr, "positional command cannot be combined with --command") {
 		t.Fatalf("exec --command ambiguous stdout/stderr = %q / %q", ambiguousOut, ambiguousErr)
+	}
+}
+
+func TestComposeExecCommandFromPositionalArgs(t *testing.T) {
+	command, err := composeExecCommandFromArgs(composeExecOptions{}, []string{"ps", "axu", "--sort=-pid"})
+	if err != nil {
+		t.Fatalf("composeExecCommandFromArgs returned error: %v", err)
+	}
+	if command.GetCommand() != "ps" || !reflect.DeepEqual(command.GetArgs(), []string{"axu", "--sort=-pid"}) {
+		t.Fatalf("positional command = %#v", command)
+	}
+}
+
+func TestRunComposeExecPromptOnceCommand(t *testing.T) {
+	stream := newFakeExecAttachStream([]*agentcomposev2.ExecAttachResponse{
+		{Frame: &agentcomposev2.ExecAttachResponse_AgentEvent{AgentEvent: &agentcomposev2.AttachAgentEvent{Text: "prompt reply\n"}}},
+		{Frame: &agentcomposev2.ExecAttachResponse_Result{Result: &agentcomposev2.AttachResult{Success: true, Run: &agentcomposev2.RunSummary{RunId: "run-prompt", SandboxId: "sandbox-prompt"}}}},
+	})
+	client := &fakeExecAttachClient{stream: stream}
+	var stdout bytes.Buffer
+	cmd := &cobra.Command{Use: "exec"}
+	cmd.SetContext(context.Background())
+	cmd.SetOut(&stdout)
+	cmd.SetErr(io.Discard)
+	err := runComposeExecPromptOnceCommand(cmd, "project", client, &agentcomposev2.ExecRequest{
+		Target: &agentcomposev2.ExecRequest_SandboxId{SandboxId: "sandbox-prompt"},
+	}, composeExecOptions{Prompt: "hello"}, false)
+	if err != nil {
+		t.Fatalf("prompt once returned error: %v", err)
+	}
+	if stdout.String() != "prompt reply\n" {
+		t.Fatalf("prompt once stdout = %q", stdout.String())
+	}
+	sent := stream.sentFrames()
+	if len(sent) != 1 || sent[0].GetStart().GetPrompt() != "hello" || sent[0].GetStart().GetAttachStdin() {
+		t.Fatalf("prompt once start = %#v", sent)
+	}
+	if !stream.closedRequest() {
+		t.Fatal("prompt once request was not closed")
 	}
 }
 

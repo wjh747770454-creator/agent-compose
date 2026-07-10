@@ -36,6 +36,7 @@ import (
 	"golang.org/x/net/http2/h2c" //nolint:staticcheck // h2c is required for unencrypted HTTP/2 compatibility with Connect bidi streams.
 	"golang.org/x/text/width"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 
@@ -702,7 +703,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 
 	execOptions := composeExecOptions{}
 	execCmd := &cobra.Command{
-		Use:   "exec <sandbox> [command] [args...]",
+		Use:   "exec <sandbox> (--command <shell-command> | --prompt <prompt> | -- <command> [args...])",
 		Short: "Execute a command in a running sandbox",
 		Args:  composeExecArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -2811,9 +2812,6 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 	if cli.JSON && (options.Interactive || options.TTY) {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --json cannot be used with -i/--interactive or -t/--tty")}
 	}
-	if strings.TrimSpace(options.Prompt) != "" && !options.Interactive {
-		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --prompt requires -i/--interactive")}
-	}
 	_, normalized, projectID, err := resolveComposeProject(cli)
 	if err != nil {
 		return err
@@ -2835,6 +2833,13 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 			return runComposeExecPromptAttachCommand(cmd, normalized.Name, connectExecAttachClient{client: attachClient}, req, options)
 		}
 		return runComposeExecAttachCommand(cmd, normalized.Name, connectExecAttachClient{client: attachClient}, req, options)
+	}
+	if strings.TrimSpace(options.Prompt) != "" {
+		attachClient, err := newCLIExecAttachServiceClient(cli)
+		if err != nil {
+			return err
+		}
+		return runComposeExecPromptOnceCommand(cmd, normalized.Name, connectExecAttachClient{client: attachClient}, req, options, cli.JSON)
 	}
 	stream, err := clients.exec.ExecStream(cmd.Context(), connect.NewRequest(req))
 	if err != nil {
@@ -2878,6 +2883,69 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 	}
 	if !result.GetSuccess() {
 		return commandExitError{Code: execResultExitCode(result), Err: fmt.Errorf("exec %s in sandbox %s failed: %s", result.GetExecId(), result.GetSandboxId(), firstNonEmptyString(result.GetError(), result.GetStderr(), result.GetOutput(), "command failed"))}
+	}
+	return nil
+}
+
+func runComposeExecPromptOnceCommand(cmd *cobra.Command, projectName string, client execAttachClient, req *agentcomposev2.ExecRequest, options composeExecOptions, jsonOutput bool) error {
+	stream := client.ExecAttach(cmd.Context())
+	if err := stream.Send(&agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_Start{Start: &agentcomposev2.ExecAttachStart{
+		Request: req, Mode: agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT,
+		Prompt: strings.TrimSpace(options.Prompt), AttachStdin: false, Tty: false,
+	}}}); err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("exec project %s prompt start: %w", projectName, err))
+	}
+	if err := stream.CloseRequest(); err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("exec project %s prompt close request: %w", projectName, err))
+	}
+	var result *agentcomposev2.AttachResult
+	output := newTerminalStreamOutput(cmd.OutOrStdout(), cmd.ErrOrStderr())
+	for {
+		event, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return commandExitErrorForConnect(fmt.Errorf("exec project %s prompt: %w", projectName, err))
+		}
+		switch frame := event.GetFrame().(type) {
+		case *agentcomposev2.ExecAttachResponse_Output:
+			if !jsonOutput {
+				if err := writeExecAttachOutput(output, frame.Output); err != nil {
+					return err
+				}
+			}
+		case *agentcomposev2.ExecAttachResponse_AgentEvent:
+			if !jsonOutput && frame.AgentEvent.GetText() != "" {
+				if _, err := io.WriteString(cmd.OutOrStdout(), frame.AgentEvent.GetText()); err != nil {
+					return err
+				}
+			}
+		case *agentcomposev2.ExecAttachResponse_Result:
+			result = frame.Result
+		case *agentcomposev2.ExecAttachResponse_Error:
+			return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("exec project %s prompt failed: %s", projectName, firstNonEmptyString(frame.Error.GetMessage(), frame.Error.GetCode(), "attach failed"))}
+		}
+	}
+	if !jsonOutput {
+		if err := output.Finish(); err != nil {
+			return err
+		}
+	}
+	if result == nil {
+		return fmt.Errorf("exec project %s prompt completed without result", projectName)
+	}
+	if jsonOutput {
+		data, err := protojson.MarshalOptions{Indent: "  ", UseProtoNames: true}.Marshal(result)
+		if err != nil {
+			return err
+		}
+		if err := writeCommandOutput(cmd.OutOrStdout(), append(data, '\n')); err != nil {
+			return err
+		}
+	}
+	if !result.GetSuccess() {
+		return commandExitError{Code: attachResultExitCode(result), Err: fmt.Errorf("exec prompt in project %s failed: %s", projectName, firstNonEmptyString(result.GetError(), result.GetOutput(), "prompt failed"))}
 	}
 	return nil
 }
@@ -3513,8 +3581,12 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 	if commandText != "" && promptText != "" {
 		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires only one of --command or --prompt")}
 	}
-	if commandText == "" && promptText == "" {
-		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires --command or --prompt")}
+	positionalCommand := len(args) > 1
+	if commandText == "" && promptText == "" && !positionalCommand {
+		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires --command, --prompt, or a command after --")}
+	}
+	if positionalCommand && (commandText != "" || promptText != "") {
+		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec positional command cannot be combined with --command or --prompt")}
 	}
 	legacyTargetFlags := []string{}
 	if cmd.Flags().Changed("run") {
@@ -3553,14 +3625,11 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 	if sandbox == "" {
 		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires non-empty sandbox")}
 	}
-	if len(args) > 1 {
-		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec command must be specified with --command")}
-	}
 	sandbox, err := resolveComposeSandboxRefWithProject(cmd.Context(), clients, projectID, sandbox)
 	if err != nil {
 		return nil, err
 	}
-	command, err := composeExecCommandFromArgs(options, nil)
+	command, err := composeExecCommandFromArgs(options, args[1:])
 	if err != nil {
 		return nil, err
 	}
@@ -3582,7 +3651,10 @@ func composeExecCommandFromArgs(options composeExecOptions, args []string) (*age
 	if strings.TrimSpace(options.Prompt) != "" {
 		return nil, nil
 	}
-	return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires --command or --prompt")}
+	if len(args) > 0 {
+		return &agentcomposev2.ExecCommand{Command: args[0], Args: append([]string(nil), args[1:]...)}, nil
+	}
+	return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires --command, --prompt, or a command after --")}
 }
 
 func runComposeImageListCommand(cmd *cobra.Command, cli cliOptions, options composeImageListOptions) error {
