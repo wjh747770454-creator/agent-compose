@@ -512,12 +512,19 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 		normalizeInteractivePromptProvider(" Gemini ") != "gemini" {
 		t.Fatalf("normalizeInteractivePromptProvider returned unexpected values")
 	}
-	if err := validateInteractivePromptProvider(project, "reviewer"); commandExitCode(err) != exitCodeUnsupported {
+	if err := validateInteractivePromptProvider(project, "reviewer", false); commandExitCode(err) != exitCodeUnsupported {
 		t.Fatalf("validateInteractivePromptProvider err=%v code=%d", err, commandExitCode(err))
 	}
 	project.Agents[0].Provider = "claude-code"
-	if err := validateInteractivePromptProvider(project, "reviewer"); err != nil {
-		t.Fatalf("validateInteractivePromptProvider claude-code returned error: %v", err)
+	if err := validateInteractivePromptProvider(project, "reviewer", false); err != nil {
+		t.Fatalf("validateInteractivePromptProvider claude-code legacy returned error: %v", err)
+	}
+	if err := validateInteractivePromptProvider(project, "reviewer", true); commandExitCode(err) != exitCodeUnsupported {
+		t.Fatalf("validateInteractivePromptProvider claude-code attach err=%v code=%d", err, commandExitCode(err))
+	}
+	project.Agents[0].Provider = "codex"
+	if err := validateInteractivePromptProvider(project, "reviewer", true); err != nil {
+		t.Fatalf("validateInteractivePromptProvider codex returned error: %v", err)
 	}
 
 	failed := &agentcomposev2.RunSummary{RunId: "run-failed", Status: agentcomposev2.RunStatus_RUN_STATUS_FAILED, ExitCode: 9, Error: "boom"}
@@ -585,17 +592,15 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 		t.Fatalf("composeExecArgs with legacy target returned error: %v", err)
 	}
 
-	defaultCommand, err := composeExecCommandFromArgs(composeExecOptions{}, nil)
-	if err != nil || defaultCommand.GetCommand() != "sh" {
-		t.Fatalf("default exec command=%#v err=%v", defaultCommand, err)
+	if _, err := composeExecCommandFromArgs(composeExecOptions{}, nil); commandExitCode(err) != exitCodeUsage {
+		t.Fatalf("missing exec command err=%v code=%d", err, commandExitCode(err))
 	}
 	if _, err := composeExecCommandFromArgs(composeExecOptions{Command: "echo ok"}, []string{"pwd"}); commandExitCode(err) != exitCodeUsage {
 		t.Fatalf("exec command conflict err=%v code=%d", err, commandExitCode(err))
 	}
-	normalizedExecProject := &compose.NormalizedProjectSpec{Name: "Project"}
 	execSandboxID := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	req, err := normalizeComposeExecRequest(&cobra.Command{Use: "exec"}, cliServiceClients{}, normalizedExecProject, "project-1", composeExecOptions{Cwd: " /repo "}, []string{" " + execSandboxID + " ", "bash", "-lc", "pwd"})
-	if err != nil || req.GetSandboxId() != execSandboxID || req.GetCwd() != "/repo" || req.GetCommand().GetCommand() != "bash" {
+	req, err := normalizeComposeExecRequest(&cobra.Command{Use: "exec"}, cliServiceClients{}, "project-1", composeExecOptions{Command: "pwd", Cwd: " /repo "}, []string{" " + execSandboxID + " "})
+	if err != nil || req.GetSandboxId() != execSandboxID || req.GetCwd() != "/repo" || req.GetCommand().GetCommand() != "bash" || req.GetCommand().GetArgs()[1] != "pwd" {
 		t.Fatalf("normalizeComposeExecRequest req=%#v err=%v", req, err)
 	}
 	for _, tc := range []struct {
@@ -605,29 +610,18 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "multiple legacy targets",
-			setup: func(cmd *cobra.Command) composeExecOptions {
-				cmd.Flags().String("agent", "", "")
-				cmd.Flags().String("run-id", "", "")
-				_ = cmd.Flags().Set("agent", "reviewer")
-				_ = cmd.Flags().Set("run-id", "run-1")
-				return composeExecOptions{AgentName: "reviewer", RunID: "run-1"}
-			},
-			wantErr: "target can only be specified once",
-		},
-		{
 			name: "empty run flag",
 			setup: func(cmd *cobra.Command) composeExecOptions {
 				cmd.Flags().String("run-id", "", "")
 				_ = cmd.Flags().Set("run-id", " ")
-				return composeExecOptions{RunID: " "}
+				return composeExecOptions{RunID: " ", Command: "pwd"}
 			},
 			wantErr: "requires a value",
 		},
 		{
 			name: "empty sandbox positional",
 			setup: func(cmd *cobra.Command) composeExecOptions {
-				return composeExecOptions{}
+				return composeExecOptions{Command: "pwd"}
 			},
 			args:    []string{" "},
 			wantErr: "requires non-empty sandbox",
@@ -635,7 +629,7 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 	} {
 		cmd := &cobra.Command{Use: "exec"}
 		options := tc.setup(cmd)
-		if _, err := normalizeComposeExecRequest(cmd, cliServiceClients{}, normalizedExecProject, "project-1", options, tc.args); commandExitCode(err) != exitCodeUsage || !strings.Contains(err.Error(), tc.wantErr) {
+		if _, err := normalizeComposeExecRequest(cmd, cliServiceClients{}, "project-1", options, tc.args); commandExitCode(err) != exitCodeUsage || !strings.Contains(err.Error(), tc.wantErr) {
 			t.Fatalf("%s err=%v code=%d", tc.name, err, commandExitCode(err))
 		}
 	}

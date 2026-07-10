@@ -22,27 +22,20 @@ export interface PromptCommandOptions {
   outputSchemaFile?: string;
 }
 
-export async function runPromptCommand(commandOptions: PromptCommandOptions): Promise<AgentResult> {
+export async function buildPromptRuntimeOptions(commandOptions: Omit<PromptCommandOptions, "messageFile">) {
   const provider = normalizeProvider(commandOptions.provider);
-  const messageFile = commandOptions.messageFile;
   const stateRoot = path.resolve(commandOptions.stateRoot || path.join(SANDBOX_ROOT, "state"));
   const workspace = path.resolve(
     commandOptions.workspace || process.env.WORKSPACE || process.env.AGENT_COMPOSE_WORKSPACE || path.join(SANDBOX_ROOT, "workspace"),
   );
   const home = path.resolve(commandOptions.home || process.env.HOME || path.join(SANDBOX_ROOT, "home"));
-
-  if (!messageFile) {
-    throw new Error("--message-file is required");
-  }
-
-  const promptText = await readText(path.resolve(messageFile));
   const outputSchema = commandOptions.outputSchemaFile
     ? parseOutputSchema(await readText(path.resolve(commandOptions.outputSchemaFile)))
     : undefined;
   const systemPrompt = await readSystemPromptFile(agentSystemPromptPath(stateRoot));
   const mpi = await readMpiContext(stateRoot);
   const mcpConfig = await readMCPConfig(stateRoot);
-  const options = {
+  return {
     provider,
     model: commandOptions.model,
     stateRoot,
@@ -53,6 +46,18 @@ export async function runPromptCommand(commandOptions: PromptCommandOptions): Pr
     mcpConfig: mcpConfig.mcps,
     outputSchema,
   };
+}
+
+export async function runPromptCommand(commandOptions: PromptCommandOptions): Promise<AgentResult> {
+  const options = await buildPromptRuntimeOptions(commandOptions);
+  const messageFile = commandOptions.messageFile;
+
+  if (!messageFile) {
+    throw new Error("--message-file is required");
+  }
+
+  const promptText = await readText(path.resolve(messageFile));
+  const provider = options.provider;
   if (provider === "codex") {
     return await new CodexRunner(options).runPrompt(promptText);
   }

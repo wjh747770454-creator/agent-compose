@@ -884,6 +884,10 @@ func (fakeRunDelegate) RunAgentStream(context.Context, *connect.Request[agentcom
 	return nil
 }
 
+func (fakeRunDelegate) RunAttach(context.Context, *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error {
+	return nil
+}
+
 type fakeDashboardSessionStore struct{}
 
 func (fakeDashboardSessionStore) ListSandboxes(context.Context, domain.SandboxListOptions) (domain.SandboxListResult, error) {

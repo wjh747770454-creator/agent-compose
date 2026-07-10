@@ -377,34 +377,34 @@ func notifyBoxliteExecExit(exitCode int, handle uintptr) {
 	}
 }
 
-func (r *cgoSandboxRuntime) EnsureSandbox(ctx context.Context, session *Sandbox, vmState VMState, proxyState ProxyState) (SandboxVMInfo, error) {
+func (r *cgoSandboxRuntime) EnsureSandbox(ctx context.Context, sandbox *Sandbox, vmState VMState, proxyState ProxyState) (SandboxVMInfo, error) {
 	r.ensureMu.Lock()
 	defer r.ensureMu.Unlock()
 
 	startedAt := time.Now()
-	slog.Info("agent-compose boxlite ensure sandbox begin", "sandbox_id", session.Summary.ID, "host_port", proxyState.HostPort)
-	box, created, err := r.getOrCreateBox(ctx, session, vmState, proxyState)
+	slog.Info("agent-compose boxlite ensure sandbox begin", "sandbox_id", sandbox.Summary.ID, "host_port", proxyState.HostPort)
+	box, created, err := r.getOrCreateBox(ctx, sandbox, vmState, proxyState)
 	if err != nil {
 		return SandboxVMInfo{}, err
 	}
 	defer box.free()
-	slog.Info("agent-compose boxlite ensure sandbox box ready", "sandbox_id", session.Summary.ID, "created", created, "elapsed_ms", time.Since(startedAt).Milliseconds())
+	slog.Info("agent-compose boxlite ensure sandbox box ready", "sandbox_id", sandbox.Summary.ID, "created", created, "elapsed_ms", time.Since(startedAt).Milliseconds())
 
 	if created {
-		slog.Info("agent-compose boxlite starting box", "sandbox_id", session.Summary.ID)
+		slog.Info("agent-compose boxlite starting box", "sandbox_id", sandbox.Summary.ID)
 		if err := r.startBox(ctx, box); err != nil {
 			return SandboxVMInfo{}, err
 		}
-		slog.Info("agent-compose boxlite box started", "sandbox_id", session.Summary.ID, "elapsed_ms", time.Since(startedAt).Milliseconds())
+		slog.Info("agent-compose boxlite box started", "sandbox_id", sandbox.Summary.ID, "elapsed_ms", time.Since(startedAt).Milliseconds())
 	}
 
-	if err := r.ensureDirectoryOnlyGuestSandboxBootstrap(ctx, box, session); err != nil {
+	if err := r.ensureDirectoryOnlyGuestSandboxBootstrap(ctx, box, sandbox); err != nil {
 		return SandboxVMInfo{}, err
 	}
-	slog.Info("agent-compose boxlite guest bootstrap ready", "sandbox_id", session.Summary.ID, "created", created, "elapsed_ms", time.Since(startedAt).Milliseconds())
+	slog.Info("agent-compose boxlite guest bootstrap ready", "sandbox_id", sandbox.Summary.ID, "created", created, "elapsed_ms", time.Since(startedAt).Milliseconds())
 
 	if jupyterEnabled(proxyState) {
-		slog.Info("agent-compose boxlite checking jupyter", "sandbox_id", session.Summary.ID, "host_port", proxyState.HostPort)
+		slog.Info("agent-compose boxlite checking jupyter", "sandbox_id", sandbox.Summary.ID, "host_port", proxyState.HostPort)
 		if err := waitForJupyterProxy(ctx, proxyState); err != nil {
 			if err := waitForJupyterProxy(ctx, proxyState); err != nil {
 				logText, _ := r.readJupyterLog(ctx, box)
@@ -414,24 +414,24 @@ func (r *cgoSandboxRuntime) EnsureSandbox(ctx context.Context, session *Sandbox,
 				return SandboxVMInfo{}, err
 			}
 		}
-		slog.Info("agent-compose boxlite jupyter ready", "sandbox_id", session.Summary.ID, "elapsed_ms", time.Since(startedAt).Milliseconds())
+		slog.Info("agent-compose boxlite jupyter ready", "sandbox_id", sandbox.Summary.ID, "elapsed_ms", time.Since(startedAt).Milliseconds())
 	}
 
 	boxID, err := r.boxID(box)
 	if err != nil {
 		return SandboxVMInfo{}, err
 	}
-	slog.Info("agent-compose boxlite ensure sandbox complete", "sandbox_id", session.Summary.ID, "box_id", boxID, "elapsed_ms", time.Since(startedAt).Milliseconds())
+	slog.Info("agent-compose boxlite ensure sandbox complete", "sandbox_id", sandbox.Summary.ID, "box_id", boxID, "elapsed_ms", time.Since(startedAt).Milliseconds())
 	return SandboxVMInfo{
 		BoxID:      boxID,
 		JupyterURL: jupyterDirectURL(proxyState),
 	}, nil
 }
 
-func (r *cgoSandboxRuntime) StopSandbox(ctx context.Context, session *Sandbox, vmState VMState) (bool, error) {
+func (r *cgoSandboxRuntime) StopSandbox(ctx context.Context, sandbox *Sandbox, vmState VMState) (bool, error) {
 	if strings.TrimSpace(vmState.BoxID) == "" {
-		if session != nil {
-			if err := CleanupBoxliteVolumeBridgeMounts(hostSandboxDir(session)); err != nil {
+		if sandbox != nil {
+			if err := CleanupBoxliteVolumeBridgeMounts(hostSandboxDir(sandbox)); err != nil {
 				return true, err
 			}
 		}
@@ -440,8 +440,8 @@ func (r *cgoSandboxRuntime) StopSandbox(ctx context.Context, session *Sandbox, v
 	box, err := r.getBox(ctx, vmState.BoxID)
 	if err != nil {
 		if isBoxNotFound(err) {
-			if session != nil {
-				if cleanupErr := CleanupBoxliteVolumeBridgeMounts(hostSandboxDir(session)); cleanupErr != nil {
+			if sandbox != nil {
+				if cleanupErr := CleanupBoxliteVolumeBridgeMounts(hostSandboxDir(sandbox)); cleanupErr != nil {
 					return true, cleanupErr
 				}
 			}
@@ -456,28 +456,36 @@ func (r *cgoSandboxRuntime) StopSandbox(ctx context.Context, session *Sandbox, v
 	if err := r.removeBox(ctx, vmState.BoxID, true); err != nil && !isBoxNotFound(err) {
 		return false, err
 	}
-	if session != nil {
-		if err := CleanupBoxliteVolumeBridgeMounts(hostSandboxDir(session)); err != nil {
+	if sandbox != nil {
+		if err := CleanupBoxliteVolumeBridgeMounts(hostSandboxDir(sandbox)); err != nil {
 			return false, err
 		}
 	}
 	return true, nil
 }
 
-func (r *cgoSandboxRuntime) Exec(ctx context.Context, session *Sandbox, vmState VMState, spec ExecSpec) (ExecResult, error) {
-	return r.execWithStream(ctx, session, vmState, spec, nil)
+func (r *cgoSandboxRuntime) Exec(ctx context.Context, sandbox *Sandbox, vmState VMState, spec ExecSpec) (ExecResult, error) {
+	return r.execWithStream(ctx, sandbox, vmState, spec, nil)
 }
 
-func (r *cgoSandboxRuntime) ExecStream(ctx context.Context, session *Sandbox, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
-	return r.execWithStream(ctx, session, vmState, spec, stream)
+func (r *cgoSandboxRuntime) ExecStream(ctx context.Context, sandbox *Sandbox, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
+	return r.execWithStream(ctx, sandbox, vmState, spec, stream)
 }
 
-func (r *cgoSandboxRuntime) Stats(_ context.Context, session *Sandbox, vmState VMState) (SandboxStats, error) {
+func (r *cgoSandboxRuntime) InteractionCapabilities() RuntimeInteractionCapabilities {
+	return RuntimeInteractionCapabilities{}
+}
+
+func (r *cgoSandboxRuntime) OpenInteraction(ctx context.Context, sandbox *Sandbox, vmState VMState, spec RuntimeStartSpec) (RuntimeInteraction, error) {
+	return UnsupportedRuntimeInteraction(RuntimeDriverBoxlite, r.InteractionCapabilities(), spec)
+}
+
+func (r *cgoSandboxRuntime) Stats(_ context.Context, sandbox *Sandbox, vmState VMState) (SandboxStats, error) {
 	sandboxID := ""
 	driverName := RuntimeDriverBoxlite
-	if session != nil {
-		sandboxID = session.Summary.ID
-		driverName = firstNonEmpty(session.Summary.Driver, driverName)
+	if sandbox != nil {
+		sandboxID = sandbox.Summary.ID
+		driverName = firstNonEmpty(sandbox.Summary.Driver, driverName)
 	}
 	return unknownSandboxStats(
 		sandboxID,
@@ -486,7 +494,7 @@ func (r *cgoSandboxRuntime) Stats(_ context.Context, session *Sandbox, vmState V
 	), nil
 }
 
-func (r *cgoSandboxRuntime) execWithStream(ctx context.Context, session *Sandbox, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
+func (r *cgoSandboxRuntime) execWithStream(ctx context.Context, sandbox *Sandbox, vmState VMState, spec ExecSpec, stream ExecStreamWriter) (ExecResult, error) {
 	if strings.TrimSpace(vmState.BoxID) == "" {
 		return ExecResult{}, fmt.Errorf("sandbox box is not initialized")
 	}
@@ -507,7 +515,7 @@ func (r *cgoSandboxRuntime) execWithStream(ctx context.Context, session *Sandbox
 	}
 	return executeUserCommandAfterBootstrap(
 		func() error {
-			return r.ensureDirectoryOnlyGuestSandboxBootstrap(ctx, box, session)
+			return r.ensureDirectoryOnlyGuestSandboxBootstrap(ctx, box, sandbox)
 		},
 		func() (ExecResult, error) {
 			return r.executeBox(ctx, box, spec, stream)
@@ -515,16 +523,16 @@ func (r *cgoSandboxRuntime) execWithStream(ctx context.Context, session *Sandbox
 	)
 }
 
-func (r *cgoSandboxRuntime) ensureDirectoryOnlyGuestSandboxBootstrap(ctx context.Context, box *cgoBoxHandle, session *Sandbox) error {
+func (r *cgoSandboxRuntime) ensureDirectoryOnlyGuestSandboxBootstrap(ctx context.Context, box *cgoBoxHandle, sandbox *Sandbox) error {
 	boxID := ""
 	if id, err := r.boxID(box); err == nil {
 		boxID = id
 	}
 	sandboxID := ""
-	if session != nil {
-		sandboxID = session.Summary.ID
+	if sandbox != nil {
+		sandboxID = sandbox.Summary.ID
 	}
-	result, err := r.executeBox(ctx, box, directoryOnlyGuestSandboxBootstrapExecSpecForSandbox(r.config, session), nil)
+	result, err := r.executeBox(ctx, box, directoryOnlyGuestSandboxBootstrapExecSpecForSandbox(r.config, sandbox), nil)
 	if err != nil {
 		return formatDirectoryOnlyGuestSandboxBootstrapError(RuntimeDriverBoxlite, sandboxID, boxID, result, err)
 	}
@@ -690,7 +698,7 @@ func untarInto(dst string, src io.Reader) error {
 	}
 }
 
-func (r *cgoSandboxRuntime) getOrCreateBox(ctx context.Context, session *Sandbox, vmState VMState, proxyState ProxyState) (*cgoBoxHandle, bool, error) {
+func (r *cgoSandboxRuntime) getOrCreateBox(ctx context.Context, sandbox *Sandbox, vmState VMState, proxyState ProxyState) (*cgoBoxHandle, bool, error) {
 	if existingID := strings.TrimSpace(vmState.BoxID); existingID != "" {
 		box, err := r.getBox(ctx, existingID)
 		if err == nil {
@@ -720,7 +728,7 @@ func (r *cgoSandboxRuntime) getOrCreateBox(ctx context.Context, session *Sandbox
 		}
 	}
 
-	box, err := r.createBox(ctx, session, vmState, proxyState)
+	box, err := r.createBox(ctx, sandbox, vmState, proxyState)
 	if err != nil {
 		return nil, false, err
 	}
@@ -945,18 +953,18 @@ func waitForExecCompletion(ctx context.Context, awaiter *boxliteExecAwaiter, exi
 	}
 }
 
-func (r *cgoSandboxRuntime) buildBoxOptions(ctx context.Context, session *Sandbox, vmState VMState, proxyState ProxyState) (*C.CBoxliteOptions, error) {
+func (r *cgoSandboxRuntime) buildBoxOptions(ctx context.Context, sandbox *Sandbox, vmState VMState, proxyState ProxyState) (*C.CBoxliteOptions, error) {
 	appconfig.ApplyDefaultGuestPaths(r.config)
-	manifest, err := loadDirectoryRuntimeMountManifest(session, RuntimeDriverBoxlite)
+	manifest, err := loadDirectoryRuntimeMountManifest(sandbox, RuntimeDriverBoxlite)
 	if err != nil {
 		return nil, err
 	}
-	imageRef := resolveSandboxGuestImage(vmState.Image, session.Summary.GuestImage, r.config.DefaultImage)
+	imageRef := resolveSandboxGuestImage(vmState.Image, sandbox.Summary.GuestImage, r.config.DefaultImage)
 	imagePullTimeout := r.config.ImagePullTimeout
 	if imagePullTimeout <= 0 {
 		imagePullTimeout = defaultImagePullTimeout
 	}
-	rootfsPath, err := r.resolveRootfsPath(ctx, imageRef, session.Summary.PullPolicy, imagePullTimeout)
+	rootfsPath, err := r.resolveRootfsPath(ctx, imageRef, sandbox.Summary.PullPolicy, imagePullTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -1024,13 +1032,13 @@ func (r *cgoSandboxRuntime) buildBoxOptions(ctx context.Context, session *Sandbo
 	defer freeCommand()
 	C.boxlite_options_set_cmd(options, command, C.int(commandLen))
 
-	baseEnv := sandboxEnvMap(session.EnvItems, session.RuntimeEnvItems)
+	baseEnv := sandboxEnvMap(sandbox.EnvItems, sandbox.RuntimeEnvItems)
 	if baseEnv == nil {
 		baseEnv = map[string]string{}
 	}
 	baseEnv["GOPATH"] = "/usr/local/go"
 	baseEnv["PATH"] = "/root/.local/bin:/usr/local/go/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-	baseEnv["SANDBOX_ID"] = session.Summary.ID
+	baseEnv["SANDBOX_ID"] = sandbox.Summary.ID
 	baseEnv["WORKSPACE"] = r.config.GuestWorkspacePath
 	baseEnv["STATE_ROOT"] = r.config.GuestStateRoot
 	baseEnv["RUNTIME_ROOT"] = r.config.GuestRuntimeRoot
@@ -1053,12 +1061,12 @@ func (r *cgoSandboxRuntime) buildBoxOptions(ctx context.Context, session *Sandbo
 	return options, nil
 }
 
-func (r *cgoSandboxRuntime) createBox(ctx context.Context, session *Sandbox, vmState VMState, proxyState ProxyState) (*cgoBoxHandle, error) {
+func (r *cgoSandboxRuntime) createBox(ctx context.Context, sandbox *Sandbox, vmState VMState, proxyState ProxyState) (*cgoBoxHandle, error) {
 	runtimeHandle, err := r.runtimeHandle()
 	if err != nil {
 		return nil, err
 	}
-	options, err := r.buildBoxOptions(ctx, session, vmState, proxyState)
+	options, err := r.buildBoxOptions(ctx, sandbox, vmState, proxyState)
 	if err != nil {
 		return nil, err
 	}

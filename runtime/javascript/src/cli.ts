@@ -8,6 +8,7 @@ import { runExecCommand } from "./command.js";
 import { COMMAND_RESULT_PREFIX, RESULT_PREFIX } from "./constants.js";
 import { formatError } from "./errors.js";
 import { runPromptCommand } from "./prompt.js";
+import { runStreamCommand } from "./stream.js";
 
 export function createProgram(options: { exitOverride?: boolean } = {}): Command {
   const program = new Command();
@@ -54,6 +55,13 @@ export function createProgram(options: { exitOverride?: boolean } = {}): Command
     }) => {
       const result = await runExecCommand(options);
       process.stdout.write(`${COMMAND_RESULT_PREFIX}${JSON.stringify(result)}\n`);
+    });
+
+  program
+    .command("stream")
+    .description("run the runtime NDJSON stream protocol on stdin/stdout")
+    .action(async () => {
+      await runStreamCommand();
     });
 
   return program;

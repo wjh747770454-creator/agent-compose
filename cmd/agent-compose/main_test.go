@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -32,6 +34,9 @@ import (
 	"agent-compose/proto/health/v1/healthv1connect"
 	"github.com/joho/godotenv"
 	"github.com/samber/do/v2"
+	"github.com/spf13/cobra"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c" //nolint:staticcheck // h2c is required to assert unencrypted HTTP/2 behavior in attach client tests.
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -837,6 +842,164 @@ func TestStatusCommandUnavailableWritesStderrAndExitCode(t *testing.T) {
 	}
 }
 
+func TestDaemonHTTPClientUsesH2COnlyForAttachRPCs(t *testing.T) {
+	seen := make(chan string, 2)
+	server := httptest.NewServer(h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { //nolint:staticcheck // h2c is required to assert unencrypted HTTP/2 behavior in attach client tests.
+		seen <- r.URL.Path + " " + r.Proto
+		w.WriteHeader(http.StatusOK)
+	}), &http2.Server{}))
+	defer server.Close()
+
+	client := newDaemonHTTPClient(cliClientConfig{BaseURL: server.URL})
+	for _, path := range []string{"/api/version", agentcomposev2connect.RunServiceRunAttachProcedure} {
+		req, err := http.NewRequest(http.MethodPost, server.URL+path, nil)
+		if err != nil {
+			t.Fatalf("NewRequest(%q) error = %v", path, err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("client.Do(%q) error = %v", path, err)
+		}
+		_ = resp.Body.Close()
+	}
+
+	if got, want := <-seen, "/api/version HTTP/1.1"; got != want {
+		t.Fatalf("ordinary request protocol = %q, want %q", got, want)
+	}
+	if got, want := <-seen, agentcomposev2connect.RunServiceRunAttachProcedure+" HTTP/2.0"; got != want {
+		t.Fatalf("attach request protocol = %q, want %q", got, want)
+	}
+}
+
+func TestDaemonHTTPClientRunAttachBidiUsesH2C(t *testing.T) {
+	seen := make(chan string, 1)
+	mux := http.NewServeMux()
+	path, handler := agentcomposev2connect.NewRunServiceHandler(runServiceStub{
+		runAttach: func(_ context.Context, stream *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error {
+			req, err := stream.Receive()
+			if err != nil {
+				return err
+			}
+			if req.GetStart() == nil {
+				return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("start frame is required"))
+			}
+			return stream.Send(&agentcomposev2.RunAttachResponse{
+				Frame: &agentcomposev2.RunAttachResponse_Result{Result: &agentcomposev2.AttachResult{Success: true}},
+			})
+		},
+	})
+	mux.Handle(path, handler)
+	server := httptest.NewServer(h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { //nolint:staticcheck // h2c is required to assert unencrypted HTTP/2 behavior in attach client tests.
+		if r.URL.Path == agentcomposev2connect.RunServiceRunAttachProcedure {
+			seen <- r.Proto
+		}
+		mux.ServeHTTP(w, r)
+	}), &http2.Server{}))
+	defer server.Close()
+
+	client := agentcomposev2connect.NewRunServiceClient(newDaemonHTTPClient(cliClientConfig{BaseURL: server.URL}), server.URL)
+	stream := client.RunAttach(context.Background())
+	if err := stream.Send(&agentcomposev2.RunAttachRequest{
+		Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+			Request: &agentcomposev2.RunAgentRequest{ProjectId: "project-1", AgentName: "dialog", Command: "bash"},
+			Mode:    agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_COMMAND,
+		}},
+	}); err != nil {
+		t.Fatalf("RunAttach Send() error = %v", err)
+	}
+	if err := stream.CloseRequest(); err != nil {
+		t.Fatalf("RunAttach CloseRequest() error = %v", err)
+	}
+	resp, err := stream.Receive()
+	if err != nil {
+		t.Fatalf("RunAttach Receive() error = %v", err)
+	}
+	if !resp.GetResult().GetSuccess() {
+		t.Fatalf("RunAttach result = %#v, want success", resp)
+	}
+	if got, want := <-seen, "HTTP/2.0"; got != want {
+		t.Fatalf("RunAttach protocol = %q, want %q", got, want)
+	}
+}
+
+func TestDaemonAttachHTTPClientHasNoRequestTimeout(t *testing.T) {
+	regular := newDaemonHTTPClient(cliClientConfig{BaseURL: "http://127.0.0.1:7410"})
+	if regular.Timeout != 10*time.Minute {
+		t.Fatalf("regular daemon client timeout = %v, want 10m", regular.Timeout)
+	}
+	attach := newDaemonAttachHTTPClient(cliClientConfig{BaseURL: "http://127.0.0.1:7410"})
+	if attach.Timeout != 0 {
+		t.Fatalf("attach daemon client timeout = %v, want none", attach.Timeout)
+	}
+}
+
+func TestDaemonTCPServerRunAttachBidiUsesH2C(t *testing.T) {
+	seen := make(chan string, 1)
+	mux := http.NewServeMux()
+	path, handler := agentcomposev2connect.NewRunServiceHandler(runServiceStub{
+		runAttach: func(_ context.Context, stream *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error {
+			req, err := stream.Receive()
+			if err != nil {
+				return err
+			}
+			if req.GetStart() == nil {
+				return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("start frame is required"))
+			}
+			return stream.Send(&agentcomposev2.RunAttachResponse{
+				Frame: &agentcomposev2.RunAttachResponse_Result{Result: &agentcomposev2.AttachResult{Success: true}},
+			})
+		},
+	})
+	mux.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Proto
+		handler.ServeHTTP(w, r)
+	}))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp: %v", err)
+	}
+	servers := &daemonServers{}
+	servers.add("HTTP_LISTEN", listener.Addr().String(), listener, mux, nil)
+	errCh := servers.serve(slog.Default())
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := servers.shutdown(shutdownCtx); err != nil {
+			t.Fatalf("shutdown daemon server: %v", err)
+		}
+		for range servers.items {
+			if err := <-errCh; err != nil {
+				t.Fatalf("daemon server returned error: %v", err)
+			}
+		}
+	})
+
+	baseURL := "http://" + listener.Addr().String()
+	client := agentcomposev2connect.NewRunServiceClient(newDaemonHTTPClient(cliClientConfig{BaseURL: baseURL}), baseURL)
+	stream := client.RunAttach(context.Background())
+	if err := stream.Send(&agentcomposev2.RunAttachRequest{
+		Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+			Request: &agentcomposev2.RunAgentRequest{ProjectId: "project-1", AgentName: "dialog", Command: "bash"},
+			Mode:    agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_COMMAND,
+		}},
+	}); err != nil {
+		t.Fatalf("RunAttach Send() error = %v", err)
+	}
+	if err := stream.CloseRequest(); err != nil {
+		t.Fatalf("RunAttach CloseRequest() error = %v", err)
+	}
+	resp, err := stream.Receive()
+	if err != nil {
+		t.Fatalf("RunAttach Receive() error = %v", err)
+	}
+	if !resp.GetResult().GetSuccess() {
+		t.Fatalf("RunAttach result = %#v, want success", resp)
+	}
+	if got, want := <-seen, "HTTP/2.0"; got != want {
+		t.Fatalf("RunAttach protocol = %q, want %q", got, want)
+	}
+}
+
 func TestCommandExitErrorForConnectClassifiesRPCFailures(t *testing.T) {
 	tests := []struct {
 		name string
@@ -857,6 +1020,18 @@ func TestCommandExitErrorForConnectClassifiesRPCFailures(t *testing.T) {
 				t.Fatalf("exit code = %d, want %d; err=%v", got, tc.code, err)
 			}
 		})
+	}
+}
+
+func TestCommandExitErrorForConnectExplainsHTTP2AttachMismatch(t *testing.T) {
+	err := commandExitErrorForConnect(fmt.Errorf("run project demo attach: unavailable: http2: failed reading the frame payload: http2: frame too large, note that the frame header looked like an HTTP/1.1 header"))
+	if got := commandExitCode(err); got != exitCodeUnavailable {
+		t.Fatalf("exit code = %d, want %d; err=%v", got, exitCodeUnavailable, err)
+	}
+	for _, want := range []string{"attach RPCs require HTTP/2 h2c", "restart the agent-compose daemon", "HTTP/1 proxy"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err.Error(), want)
+		}
 	}
 }
 
@@ -1480,6 +1655,10 @@ agents:
 				},
 			})
 		},
+		runAttach: func(context.Context, *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error {
+			t.Fatalf("RunAttach should not be called for non-interactive run --prompt")
+			return nil
+		},
 		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
 			return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-success", "reviewer", "session-reuse", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "live output\n")}), nil
 		},
@@ -1636,6 +1815,7 @@ agents:
 `)
 	var sawCommand bool
 	var sawFollow bool
+	var followRequests []*agentcomposev2.FollowRunLogsRequest
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		run: runServiceStub{
 			startRun: func(ctx context.Context, req *connect.Request[agentcomposev2.StartRunRequest]) (*connect.Response[agentcomposev2.StartRunResponse], error) {
@@ -1657,11 +1837,29 @@ agents:
 			},
 			followRunLogs: func(ctx context.Context, req *connect.Request[agentcomposev2.FollowRunLogsRequest], stream *connect.ServerStream[agentcomposev2.RunLogChunk]) error {
 				sawFollow = true
-				if req.Msg.GetRunId() != "run-detached-logs" {
+				followRequests = append(followRequests, req.Msg)
+				if req.Msg.GetRunId() != "run-detached-logs" || !req.Msg.GetFollow() || req.Msg.GetTailLines() != 3 {
 					t.Fatalf("FollowRunLogs request = %#v", req.Msg)
 				}
+				if err := stream.Send(&agentcomposev2.RunLogChunk{
+					Data:      "history output\n",
+					Offset:    uint64(len("history output\n")),
+					CreatedAt: "2026-07-04T08:00:00Z",
+				}); err != nil {
+					return err
+				}
+				if err := stream.Send(&agentcomposev2.RunLogChunk{
+					Data:      "live output\n",
+					Offset:    uint64(len("history output\nlive output\n")),
+					CreatedAt: "2026-07-04T08:00:01Z",
+				}); err != nil {
+					return err
+				}
 				return stream.Send(&agentcomposev2.RunLogChunk{
-					Data: "detached output\n",
+					Offset:    uint64(len("history output\nlive output\n")),
+					IsFinal:   true,
+					RunStatus: agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+					CreatedAt: "2026-07-04T08:00:02Z",
 				})
 			},
 		},
@@ -1672,17 +1870,24 @@ agents:
 	if exitCode != 0 || stderr != "" {
 		t.Fatalf("run -d --command code/stderr = %d / %q", exitCode, stderr)
 	}
-	logOut, logErr, _, logCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", "run-detached-logs", "--follow")
+	logOut, logErr, _, logCode := executeCLICommand("logs", "--host", server.URL, "--file", composePath, "--run-id", "run-detached-logs", "--follow", "--tail", "3")
 	runPrefix := "reviewer-run-detached-log | "
 	wantLogOut := expectedLogSeparator(runPrefix, ">") +
 		"reviewer-run-detached-log | test prompt\n" +
 		expectedLogSeparator(runPrefix, "<") +
-		"reviewer-run-detached-log | detached output\n"
+		"reviewer-run-detached-log | history output\n" +
+		"reviewer-run-detached-log | live output\n"
 	if logCode != 0 || logErr != "" || logOut != wantLogOut {
 		t.Fatalf("logs --follow code/stdout/stderr = %d / %q / %q", logCode, logOut, logErr)
 	}
+	if strings.Count(logOut, "history output") != 1 || strings.Count(logOut, "live output") != 1 {
+		t.Fatalf("logs --follow output duplicated chunk(s): %q", logOut)
+	}
 	if !sawCommand || !sawFollow {
 		t.Fatalf("sawCommand=%v sawFollow=%v", sawCommand, sawFollow)
+	}
+	if len(followRequests) != 1 {
+		t.Fatalf("FollowRunLogs calls = %d, want 1", len(followRequests))
 	}
 }
 
@@ -1771,6 +1976,10 @@ agents:
 					},
 				})
 			},
+			runAttach: func(context.Context, *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error {
+				t.Fatalf("RunAttach should not be called for non-interactive run --command")
+				return nil
+			},
 			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
 				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-command", "reviewer", "sandbox-command", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "command stdout\n")}), nil
 			},
@@ -1854,6 +2063,91 @@ agents:
 	}
 	if strings.Join(sessions, "|") != "|sandbox-repl" {
 		t.Fatalf("sessions = %#v", sessions)
+	}
+}
+
+func TestIntegrationCLIRunPromptTTYUsesRunAttach(t *testing.T) {
+	stream := newFakeRunAttachStream([]*agentcomposev2.RunAttachResponse{
+		{Frame: &agentcomposev2.RunAttachResponse_AgentEvent{AgentEvent: &agentcomposev2.AttachAgentEvent{Text: "first output\n"}}},
+		{Frame: &agentcomposev2.RunAttachResponse_AgentTurnCompleted{AgentTurnCompleted: &agentcomposev2.AttachAgentTurnCompleted{RunId: "run-prompt-attach"}}},
+		{Frame: &agentcomposev2.RunAttachResponse_AgentEvent{AgentEvent: &agentcomposev2.AttachAgentEvent{Text: "second output\n"}}},
+		{Frame: &agentcomposev2.RunAttachResponse_AgentTurnCompleted{AgentTurnCompleted: &agentcomposev2.AttachAgentTurnCompleted{RunId: "run-prompt-attach"}}},
+		{Frame: &agentcomposev2.RunAttachResponse_Result{Result: &agentcomposev2.AttachResult{
+			Success: true,
+			Run:     &agentcomposev2.RunSummary{RunId: "run-prompt-attach", Status: agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED},
+		}}},
+	})
+	client := &fakeRunAttachClient{stream: stream}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := &cobra.Command{Use: "run"}
+	cmd.SetContext(context.Background())
+	cmd.SetIn(strings.NewReader("second prompt\n/exit\n"))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := runComposeRunPromptAttachCommand(cmd, "cli-run-prompt-attach", client, &agentcomposev2.RunAgentRequest{
+		ProjectId: "project-1",
+		AgentName: "reviewer",
+		Prompt:    "first prompt",
+	})
+	if err != nil {
+		t.Fatalf("run prompt attach returned error: %v", err)
+	}
+	if stdout.String() != "first output\nsecond output\n" || stderr.String() != "" {
+		t.Fatalf("run prompt attach stdout/stderr = %q / %q", stdout.String(), stderr.String())
+	}
+	sent := stream.sentFrames()
+	if len(sent) != 3 {
+		t.Fatalf("RunAttach sent %d frames, want start/human/eof: %#v", len(sent), sent)
+	}
+	if start := sent[0].GetStart(); start == nil || start.GetMode() != agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT || start.GetTty() || start.GetRequest().GetPrompt() != "first prompt" {
+		t.Fatalf("RunAttach prompt start = %#v", sent[0])
+	}
+	if sent[1].GetHumanMessage().GetText() != "second prompt" {
+		t.Fatalf("RunAttach human message = %#v", sent[1])
+	}
+	if sent[2].GetStdinEof() == nil || !stream.closedRequest() {
+		t.Fatalf("RunAttach eof/close eof=%#v closed=%v", sent[2], stream.closedRequest())
+	}
+}
+
+func TestPromptAttachInputPromptAddsLeadingNewlineWhenOutputIsOpen(t *testing.T) {
+	var out bytes.Buffer
+	prompt := promptAttachInputPrompt{AgentName: "reviewer", SandboxID: "sandbox-123456789abcdef"}
+	if err := writePromptAttachInputPrompt(&out, prompt, false); err != nil {
+		t.Fatalf("write prompt without newline returned error: %v", err)
+	}
+	if err := writePromptAttachInputPrompt(&out, prompt, true); err != nil {
+		t.Fatalf("write prompt with newline returned error: %v", err)
+	}
+	if got, want := out.String(), "reviewer@sandbox-1234:> \nreviewer@sandbox-1234:> "; got != want {
+		t.Fatalf("prompt output = %q, want %q", got, want)
+	}
+	if strings.Contains(out.String(), "outputreviewer@sandbox-1234:>") {
+		t.Fatalf("prompt was glued to preceding output: %q", out.String())
+	}
+}
+
+func TestPromptAttachInputPromptUpdatesFromAttachMetadata(t *testing.T) {
+	prompt := promptAttachInputPrompt{}
+	if got, want := prompt.String(), "agent@sandbox:> "; got != want {
+		t.Fatalf("empty prompt = %q, want %q", got, want)
+	}
+
+	prompt.UpdateFromStarted(&agentcomposev2.AttachStarted{
+		SandboxId: "sandbox-abcdef1234567890",
+		Run:       &agentcomposev2.RunSummary{AgentName: "reviewer", SandboxId: "ignored-session"},
+	})
+	if got, want := prompt.String(), "reviewer@sandbox-abcd:> "; got != want {
+		t.Fatalf("started prompt = %q, want %q", got, want)
+	}
+
+	prompt.UpdateFromRun(&agentcomposev2.RunSummary{
+		AgentName: "writer",
+		SandboxId: "sandbox-fedcba9876543210",
+	})
+	if got, want := prompt.String(), "writer@sandbox-fedc:> "; got != want {
+		t.Fatalf("run prompt = %q, want %q", got, want)
 	}
 }
 
@@ -2076,18 +2370,22 @@ agents:
 }
 
 func TestCLIRunInteractivePromptProviderUnsupported(t *testing.T) {
-	composePath := writeComposeFile(t, t.TempDir(), `
-name: cli-run-interactive-gemini
+	for _, provider := range []string{"claude", "gemini", "opencode"} {
+		t.Run(provider, func(t *testing.T) {
+			composePath := writeComposeFile(t, t.TempDir(), fmt.Sprintf(`
+name: cli-run-interactive-%s
 agents:
   reviewer:
-    provider: gemini
-`)
-	stdout, stderr, _, exitCode := executeCLICommandWithInput("hello\n", "run", "--file", composePath, "reviewer", "-i", "--prompt")
-	if exitCode != exitCodeUnsupported {
-		t.Fatalf("run -i --prompt gemini exit code = %d, want %d; stderr=%q", exitCode, exitCodeUnsupported, stderr)
-	}
-	if stdout != "" || !strings.Contains(stderr, "unsupported for provider gemini") || !strings.Contains(stderr, "codex, claude, opencode") {
-		t.Fatalf("run -i --prompt gemini stdout/stderr = %q / %q", stdout, stderr)
+    provider: %s
+`, provider, provider))
+			stdout, stderr, _, exitCode := executeCLICommandWithInput("hello\n", "run", "--file", composePath, "reviewer", "-i", "-t", "--prompt", "hello")
+			if exitCode != exitCodeUnsupported {
+				t.Fatalf("run --prompt -it %s exit code = %d, want %d; stderr=%q", provider, exitCode, exitCodeUnsupported, stderr)
+			}
+			if stdout != "" || !strings.Contains(stderr, "run --prompt -it is unsupported for provider "+provider) || !strings.Contains(stderr, "supported providers: codex") {
+				t.Fatalf("run --prompt -it %s stdout/stderr = %q / %q", provider, stdout, stderr)
+			}
+		})
 	}
 }
 
@@ -4370,7 +4668,6 @@ agents:
   reviewer:
     provider: codex
 `)
-	var sawSelector bool
 	var sawSandbox bool
 	var sawCommand bool
 	server := newComposeServiceStubServer(t, composeServiceStubs{
@@ -4386,12 +4683,6 @@ agents:
 					sawCommand = true
 					if req.Msg.GetCommand().GetCommand() != "bash" || len(req.Msg.GetCommand().GetArgs()) != 2 || req.Msg.GetCommand().GetArgs()[0] != "-lc" || req.Msg.GetCommand().GetArgs()[1] != "git status --short" {
 						t.Fatalf("ExecStream --command request = %#v", req.Msg)
-					}
-				}
-				if selector := req.Msg.GetSelector(); selector != nil {
-					sawSelector = true
-					if selector.GetAgentName() != "reviewer" || req.Msg.GetCommand().GetCommand() != "bash" || req.Msg.GetCommand().GetArgs()[0] != "-lc" {
-						t.Fatalf("ExecStream selector request = %#v", req.Msg)
 					}
 				}
 				if err := stream.Send(&agentcomposev2.ExecStreamResponse{
@@ -4431,11 +4722,15 @@ agents:
 					},
 				})
 			},
+			execAttach: func(context.Context, *connect.BidiStream[agentcomposev2.ExecAttachRequest, agentcomposev2.ExecAttachResponse]) error {
+				t.Fatalf("ExecAttach should not be called for non-interactive exec")
+				return nil
+			},
 		},
 	})
 	defer server.Close()
 
-	stdout, stderr, _, exitCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--cwd", "/workspace", "--", "sandbox-exec", "bash", "-lc", "pwd")
+	stdout, stderr, _, exitCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--cwd", "/workspace", "sandbox-exec", "--command", "pwd")
 	if exitCode != 0 {
 		t.Fatalf("exec exit code = %d, stderr=%q", exitCode, stderr)
 	}
@@ -4457,18 +4752,7 @@ agents:
 		t.Fatal("ExecStream --command target was not used")
 	}
 
-	legacyOut, legacyErr, _, legacyCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--agent", "reviewer", "--cwd", "/workspace", "--", "bash", "-lc", "pwd")
-	if legacyCode != 0 {
-		t.Fatalf("exec --agent exit code = %d, stderr=%q", legacyCode, legacyErr)
-	}
-	if legacyOut != "exec stdout\n" || !strings.Contains(legacyErr, "agent-compose exec --agent is deprecated") || !strings.Contains(legacyErr, "exec stderr\n") {
-		t.Fatalf("exec --agent stdout/stderr = %q / %q", legacyOut, legacyErr)
-	}
-	if !sawSelector {
-		t.Fatal("ExecStream selector was not used")
-	}
-
-	jsonOut, jsonErr, _, jsonCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--json", "session-exec", "bash")
+	jsonOut, jsonErr, _, jsonCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--json", "session-exec", "--command", "bash")
 	if jsonCode != 0 {
 		t.Fatalf("exec --json code/stderr = %d / %q", jsonCode, jsonErr)
 	}
@@ -4495,19 +4779,406 @@ agents:
 	if ambiguousCode != exitCodeUsage {
 		t.Fatalf("exec --command ambiguous exit code = %d, want %d", ambiguousCode, exitCodeUsage)
 	}
-	if ambiguousOut != "" || !strings.Contains(ambiguousErr, "either with --command or positional arguments") {
+	if ambiguousOut != "" || !strings.Contains(ambiguousErr, "exec command must be specified with --command") {
 		t.Fatalf("exec --command ambiguous stdout/stderr = %q / %q", ambiguousOut, ambiguousErr)
 	}
 }
 
 func TestCLIExecInteractiveReservedUnsupported(t *testing.T) {
-	stdout, stderr, _, exitCode := executeCLICommand("exec", "sandbox-1", "-i")
-	if exitCode != exitCodeUnsupported {
-		t.Fatalf("exec -i exit code = %d, want %d; stderr=%q", exitCode, exitCodeUnsupported, stderr)
+	stdout, stderr, _, exitCode := executeCLICommand("exec", "-t", "sandbox-1")
+	if exitCode != exitCodeUsage {
+		t.Fatalf("exec -t exit code = %d, want %d; stderr=%q", exitCode, exitCodeUsage, stderr)
 	}
-	if stdout != "" || !strings.Contains(stderr, "exec -i/--interactive is not supported") {
-		t.Fatalf("exec -i stdout/stderr = %q / %q", stdout, stderr)
+	if stdout != "" || !strings.Contains(stderr, "exec -t/--tty requires -i/--interactive") {
+		t.Fatalf("exec -t stdout/stderr = %q / %q", stdout, stderr)
 	}
+	stdout, stderr, _, exitCode = executeCLICommand("exec", "--json", "-i", "sandbox-1")
+	if exitCode != exitCodeUsage {
+		t.Fatalf("exec --json -i exit code = %d, want %d; stderr=%q", exitCode, exitCodeUsage, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "exec --json cannot be used with -i/--interactive or -t/--tty") {
+		t.Fatalf("exec --json -i stdout/stderr = %q / %q", stdout, stderr)
+	}
+}
+
+func TestCLIExecInteractiveUsesExecAttachClient(t *testing.T) {
+	stream := newFakeExecAttachStream([]*agentcomposev2.ExecAttachResponse{
+		{Frame: &agentcomposev2.ExecAttachResponse_Output{Output: &agentcomposev2.AttachOutput{
+			Data:   []byte("attach stdout\n"),
+			Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT,
+		}}},
+		{Frame: &agentcomposev2.ExecAttachResponse_Output{Output: &agentcomposev2.AttachOutput{
+			Data:   []byte("attach stderr\n"),
+			Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDERR,
+		}}},
+		{Frame: &agentcomposev2.ExecAttachResponse_Result{Result: &agentcomposev2.AttachResult{
+			Success:  true,
+			ExitCode: 0,
+			ExecResult: &agentcomposev2.ExecResult{
+				ExecId:    "exec-attach",
+				SandboxId: "sandbox-attach",
+				ExitCode:  0,
+				Success:   true,
+			},
+		}}},
+	})
+	client := &fakeExecAttachClient{stream: stream}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := &cobra.Command{Use: "exec"}
+	cmd.SetContext(context.Background())
+	cmd.SetIn(strings.NewReader("hello attach\n"))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := runComposeExecAttachCommand(cmd, "cli-exec-attach", client, &agentcomposev2.ExecRequest{
+		Target:  &agentcomposev2.ExecRequest_SandboxId{SandboxId: "sandbox-attach"},
+		Command: &agentcomposev2.ExecCommand{Command: "cat"},
+	}, composeExecOptions{Interactive: true})
+	if err != nil {
+		t.Fatalf("exec attach returned error: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("ExecAttach calls = %d, want 1", client.calls)
+	}
+	if stdout.String() != "attach stdout\n" || stderr.String() != "attach stderr\n" {
+		t.Fatalf("exec attach stdout/stderr = %q / %q", stdout.String(), stderr.String())
+	}
+	sent := stream.sentFrames()
+	if len(sent) != 3 {
+		t.Fatalf("ExecAttach sent %d frames, want start/stdin/eof: %#v", len(sent), sent)
+	}
+	if start := sent[0].GetStart(); start == nil || !start.GetAttachStdin() || start.GetTty() || start.GetRequest().GetSandboxId() != "sandbox-attach" {
+		t.Fatalf("ExecAttach start = %#v", sent[0])
+	}
+	if sent[0].GetStart().GetMode() != agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_COMMAND {
+		t.Fatalf("ExecAttach command mode = %s", sent[0].GetStart().GetMode())
+	}
+	if string(sent[1].GetStdin().GetData()) != "hello attach\n" {
+		t.Fatalf("ExecAttach stdin = %#v", sent[1])
+	}
+	if sent[2].GetStdinEof() == nil || !stream.closedRequest() {
+		t.Fatalf("ExecAttach eof/close eof=%#v closed=%v", sent[2], stream.closedRequest())
+	}
+}
+
+func TestCLIExecPromptAttachUsesExecAttachClient(t *testing.T) {
+	stream := newFakeExecAttachStream([]*agentcomposev2.ExecAttachResponse{
+		{Frame: &agentcomposev2.ExecAttachResponse_AgentEvent{AgentEvent: &agentcomposev2.AttachAgentEvent{Text: "hello agent"}}},
+		{Frame: &agentcomposev2.ExecAttachResponse_AgentTurnCompleted{AgentTurnCompleted: &agentcomposev2.AttachAgentTurnCompleted{RunId: "run-1"}}},
+		{Frame: &agentcomposev2.ExecAttachResponse_AgentTurnCompleted{AgentTurnCompleted: &agentcomposev2.AttachAgentTurnCompleted{RunId: "run-2"}}},
+		{Frame: &agentcomposev2.ExecAttachResponse_Result{Result: &agentcomposev2.AttachResult{
+			Success: true,
+			Run:     &agentcomposev2.RunSummary{RunId: "run-1", SandboxId: "sandbox-attach"},
+		}}},
+	})
+	client := &fakeExecAttachClient{stream: stream}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := &cobra.Command{Use: "exec"}
+	cmd.SetContext(context.Background())
+	cmd.SetIn(strings.NewReader("next message\n/exit\n"))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := runComposeExecPromptAttachCommand(cmd, "cli-exec-prompt", client, &agentcomposev2.ExecRequest{
+		Target: &agentcomposev2.ExecRequest_SandboxId{SandboxId: "sandbox-attach"},
+	}, composeExecOptions{Interactive: true, Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("exec prompt attach returned error: %v", err)
+	}
+	if stdout.String() != "hello agent" || stderr.String() != "" {
+		t.Fatalf("exec prompt stdout/stderr = %q / %q", stdout.String(), stderr.String())
+	}
+	sent := stream.sentFrames()
+	if len(sent) != 3 {
+		t.Fatalf("ExecPromptAttach sent %d frames, want start/human/eof: %#v", len(sent), sent)
+	}
+	start := sent[0].GetStart()
+	if start == nil || start.GetMode() != agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT || start.GetPrompt() != "hi" || start.GetRequest().GetSandboxId() != "sandbox-attach" {
+		t.Fatalf("ExecPromptAttach start = %#v", sent[0])
+	}
+	if got := sent[1].GetHumanMessage().GetText(); got != "next message" {
+		t.Fatalf("ExecPromptAttach human message = %q", got)
+	}
+	if sent[2].GetStdinEof() == nil || !stream.closedRequest() {
+		t.Fatalf("ExecPromptAttach eof/close eof=%#v closed=%v", sent[2], stream.closedRequest())
+	}
+}
+
+func TestCLIExecInteractiveUnsupportedUsesUnsupportedExitCode(t *testing.T) {
+	client := &fakeExecAttachClient{stream: &fakeExecAttachStream{
+		closedCh: make(chan struct{}),
+		recvErr:  connect.NewError(connect.CodeUnimplemented, fmt.Errorf("exec attach unsupported")),
+	}}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := &cobra.Command{Use: "exec"}
+	cmd.SetContext(context.Background())
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := runComposeExecAttachCommand(cmd, "cli-exec-attach", client, &agentcomposev2.ExecRequest{
+		Target:  &agentcomposev2.ExecRequest_SandboxId{SandboxId: "sandbox-attach"},
+		Command: &agentcomposev2.ExecCommand{Command: "sh"},
+	}, composeExecOptions{Interactive: true})
+	if commandExitCode(err) != exitCodeUnsupported {
+		t.Fatalf("exec attach unsupported err=%v code=%d, want %d", err, commandExitCode(err), exitCodeUnsupported)
+	}
+	if client.calls != 1 {
+		t.Fatalf("ExecAttach calls = %d, want 1", client.calls)
+	}
+}
+
+func TestCLIRunInteractiveCommandUsesRunAttachClient(t *testing.T) {
+	stream := newFakeRunAttachStream([]*agentcomposev2.RunAttachResponse{
+		{Frame: &agentcomposev2.RunAttachResponse_Output{Output: &agentcomposev2.AttachOutput{
+			Data:   []byte("attach stdout\n"),
+			Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDOUT,
+		}}},
+		{Frame: &agentcomposev2.RunAttachResponse_Output{Output: &agentcomposev2.AttachOutput{
+			Data:   []byte("attach stderr\n"),
+			Stream: agentcomposev2.StdioStream_STDIO_STREAM_STDERR,
+		}}},
+		{Frame: &agentcomposev2.RunAttachResponse_Result{Result: &agentcomposev2.AttachResult{
+			Success:  true,
+			ExitCode: 0,
+			Run:      &agentcomposev2.RunSummary{RunId: "run-attach", SandboxId: "sandbox-attach"},
+		}}},
+	})
+	client := &fakeRunAttachClient{stream: stream}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := &cobra.Command{Use: "run"}
+	cmd.SetContext(context.Background())
+	cmd.SetIn(strings.NewReader("hello attach\n"))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := runComposeRunAttachCommand(cmd, "cli-run-attach", client, &agentcomposev2.RunAgentRequest{
+		ProjectId: "project-1",
+		AgentName: "reviewer",
+		Command:   "cat",
+		SandboxId: "sandbox-attach",
+	}, composeRunOptions{Interactive: true})
+	if err != nil {
+		t.Fatalf("run attach returned error: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("RunAttach calls = %d, want 1", client.calls)
+	}
+	if stdout.String() != "attach stdout\n" || stderr.String() != "attach stderr\n" {
+		t.Fatalf("run attach stdout/stderr = %q / %q", stdout.String(), stderr.String())
+	}
+	sent := stream.sentFrames()
+	if len(sent) != 3 {
+		t.Fatalf("RunAttach sent %d frames, want start/stdin/eof: %#v", len(sent), sent)
+	}
+	if start := sent[0].GetStart(); start == nil || start.GetMode() != agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_COMMAND || !start.GetAttachStdin() || start.GetTty() || start.GetRequest().GetCommand() != "cat" {
+		t.Fatalf("RunAttach start = %#v", sent[0])
+	}
+	if string(sent[1].GetStdin().GetData()) != "hello attach\n" {
+		t.Fatalf("RunAttach stdin = %#v", sent[1])
+	}
+	if sent[2].GetStdinEof() == nil || !stream.closedRequest() {
+		t.Fatalf("RunAttach eof/close eof=%#v closed=%v", sent[2], stream.closedRequest())
+	}
+}
+
+func TestCLIExecTTYRequiresLocalTerminal(t *testing.T) {
+	client := &fakeExecAttachClient{stream: newFakeExecAttachStream(nil)}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := &cobra.Command{Use: "exec"}
+	cmd.SetContext(context.Background())
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := runComposeExecAttachCommand(cmd, "cli-exec-attach", client, &agentcomposev2.ExecRequest{
+		Target:  &agentcomposev2.ExecRequest_SandboxId{SandboxId: "sandbox-attach"},
+		Command: &agentcomposev2.ExecCommand{Command: "sh"},
+	}, composeExecOptions{Interactive: true, TTY: true})
+	if commandExitCode(err) != exitCodeUsage || !strings.Contains(err.Error(), "exec -t/--tty requires terminal stdin") {
+		t.Fatalf("exec -it non-terminal err=%v code=%d", err, commandExitCode(err))
+	}
+	if client.calls != 0 {
+		t.Fatalf("ExecAttach calls = %d, want 0", client.calls)
+	}
+}
+
+func TestCLIRunTTYRequiresInteractive(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-tty
+agents:
+  reviewer:
+    provider: codex
+`)
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--file", composePath, "reviewer", "--command", "echo hi", "-t")
+	if exitCode != exitCodeUsage {
+		t.Fatalf("run -t exit code = %d, want %d; stderr=%q", exitCode, exitCodeUsage, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "requires -i/--interactive") {
+		t.Fatalf("run -t stdout/stderr = %q / %q", stdout, stderr)
+	}
+}
+
+func TestExecAttachResultProjectionWithoutExecResult(t *testing.T) {
+	result := execResultFromAttachResult(&agentcomposev2.AttachResult{
+		ExitCode: 7,
+		Success:  false,
+		Output:   "combined",
+		Error:    "failed",
+	})
+	if result.GetExitCode() != 7 || result.GetSuccess() || result.GetOutput() != "combined" || result.GetError() != "failed" {
+		t.Fatalf("projected exec result = %#v", result)
+	}
+}
+
+type fakeRunAttachClient struct {
+	stream *fakeRunAttachStream
+	calls  int
+}
+
+func (c *fakeRunAttachClient) RunAttach(context.Context) runAttachStream {
+	c.calls++
+	return c.stream
+}
+
+type fakeRunAttachStream struct {
+	mu        sync.Mutex
+	sent      []*agentcomposev2.RunAttachRequest
+	responses []*agentcomposev2.RunAttachResponse
+	recvIndex int
+	closed    bool
+	closedCh  chan struct{}
+}
+
+func newFakeRunAttachStream(responses []*agentcomposev2.RunAttachResponse) *fakeRunAttachStream {
+	return &fakeRunAttachStream{
+		responses: responses,
+		closedCh:  make(chan struct{}),
+	}
+}
+
+func (s *fakeRunAttachStream) Send(req *agentcomposev2.RunAttachRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sent = append(s.sent, req)
+	return nil
+}
+
+func (s *fakeRunAttachStream) Receive() (*agentcomposev2.RunAttachResponse, error) {
+	for {
+		s.mu.Lock()
+		if s.recvIndex < len(s.responses) {
+			resp := s.responses[s.recvIndex]
+			s.recvIndex++
+			s.mu.Unlock()
+			return resp, nil
+		}
+		closed := s.closed
+		s.mu.Unlock()
+		if closed {
+			return nil, io.EOF
+		}
+		<-s.closedCh
+	}
+}
+
+func (s *fakeRunAttachStream) CloseRequest() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed {
+		s.closed = true
+		close(s.closedCh)
+	}
+	return nil
+}
+
+func (s *fakeRunAttachStream) sentFrames() []*agentcomposev2.RunAttachRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*agentcomposev2.RunAttachRequest(nil), s.sent...)
+}
+
+func (s *fakeRunAttachStream) closedRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
+type fakeExecAttachClient struct {
+	stream *fakeExecAttachStream
+	calls  int
+}
+
+func (c *fakeExecAttachClient) ExecAttach(context.Context) execAttachStream {
+	c.calls++
+	return c.stream
+}
+
+type fakeExecAttachStream struct {
+	mu        sync.Mutex
+	sent      []*agentcomposev2.ExecAttachRequest
+	responses []*agentcomposev2.ExecAttachResponse
+	recvErr   error
+	recvIndex int
+	closed    bool
+	closedCh  chan struct{}
+}
+
+func newFakeExecAttachStream(responses []*agentcomposev2.ExecAttachResponse) *fakeExecAttachStream {
+	return &fakeExecAttachStream{
+		responses: responses,
+		closedCh:  make(chan struct{}),
+	}
+}
+
+func (s *fakeExecAttachStream) Send(req *agentcomposev2.ExecAttachRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sent = append(s.sent, req)
+	return nil
+}
+
+func (s *fakeExecAttachStream) Receive() (*agentcomposev2.ExecAttachResponse, error) {
+	if s.recvErr != nil {
+		return nil, s.recvErr
+	}
+	for {
+		s.mu.Lock()
+		if s.recvIndex < len(s.responses) {
+			resp := s.responses[s.recvIndex]
+			s.recvIndex++
+			s.mu.Unlock()
+			return resp, nil
+		}
+		closed := s.closed
+		s.mu.Unlock()
+		if closed {
+			return nil, io.EOF
+		}
+		<-s.closedCh
+	}
+}
+
+func (s *fakeExecAttachStream) CloseRequest() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed {
+		s.closed = true
+		close(s.closedCh)
+	}
+	return nil
+}
+
+func (s *fakeExecAttachStream) sentFrames() []*agentcomposev2.ExecAttachRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*agentcomposev2.ExecAttachRequest(nil), s.sent...)
+}
+
+func (s *fakeExecAttachStream) closedRequest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
 }
 
 func TestWriteTranscriptOrChunkRoutesTranscriptAndChunks(t *testing.T) {
@@ -4531,7 +5202,7 @@ agents:
   reviewer:
     provider: codex
 `)
-	stdout, stderr, _, exitCode := executeCLICommand("exec", "--file", composePath, " ")
+	stdout, stderr, _, exitCode := executeCLICommand("exec", "--file", composePath, " ", "--command", "pwd")
 	if exitCode != exitCodeUsage {
 		t.Fatalf("exec empty sandbox exit code = %d, want %d", exitCode, exitCodeUsage)
 	}
@@ -4543,28 +5214,13 @@ agents:
 	}
 }
 
-func TestIntegrationCLIExecAmbiguousSandboxIsUsageError(t *testing.T) {
-	composePath := writeComposeFile(t, t.TempDir(), `
-name: cli-exec-ambiguous
-agents:
-  reviewer:
-    provider: codex
-`)
-	server := newComposeServiceStubServer(t, composeServiceStubs{
-		exec: execServiceStub{
-			execStream: func(ctx context.Context, req *connect.Request[agentcomposev2.ExecRequest], stream *connect.ServerStream[agentcomposev2.ExecStreamResponse]) error {
-				return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("multiple running sandboxes found for project cli-exec-ambiguous agent reviewer"))
-			},
-		},
-	})
-	defer server.Close()
-
-	stdout, stderr, _, exitCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--agent", "reviewer", "bash")
+func TestCLIExecAgentFlagIsRemoved(t *testing.T) {
+	stdout, stderr, _, exitCode := executeCLICommand("exec", "--agent", "reviewer", "bash")
 	if exitCode != exitCodeUsage {
-		t.Fatalf("exec ambiguous exit code = %d, want %d; stderr=%q", exitCode, exitCodeUsage, stderr)
+		t.Fatalf("exec --agent exit code = %d, want %d; stderr=%q", exitCode, exitCodeUsage, stderr)
 	}
-	if stdout != "" || !strings.Contains(stderr, "multiple running sandboxes") {
-		t.Fatalf("exec ambiguous stdout/stderr = %q / %q", stdout, stderr)
+	if stdout != "" || !strings.Contains(stderr, "unknown flag: --agent") {
+		t.Fatalf("exec --agent stdout/stderr = %q / %q", stdout, stderr)
 	}
 }
 
@@ -7178,19 +7834,15 @@ agents:
 		})
 		defer server.Close()
 
-		stdout, stderr, _, exitCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "no-result", "true")
+		stdout, stderr, _, exitCode := executeCLICommand("exec", "--host", server.URL, "--file", composePath, "no-result", "--command", "true")
 		if exitCode != exitCodeGeneral || stdout != "" || !strings.Contains(stderr, "stream completed without result") {
 			t.Fatalf("exec no result code/stdout/stderr = %d/%q/%q", exitCode, stdout, stderr)
 		}
-		stdout, stderr, _, exitCode = executeCLICommand("exec", "--host", server.URL, "--file", composePath, "failed", "false")
+		stdout, stderr, _, exitCode = executeCLICommand("exec", "--host", server.URL, "--file", composePath, "failed", "--command", "false")
 		if exitCode != 42 || stdout != "" || !strings.Contains(stderr, "exec-failed") || !strings.Contains(stderr, "boom") {
 			t.Fatalf("exec failed code/stdout/stderr = %d/%q/%q", exitCode, stdout, stderr)
 		}
-		stdout, stderr, _, exitCode = executeCLICommand("exec", "--host", server.URL, "--file", composePath, "default-shell")
-		if exitCode != 0 || stdout != "" || stderr != "" {
-			t.Fatalf("exec default shell code/stdout/stderr = %d/%q/%q", exitCode, stdout, stderr)
-		}
-		stdout, stderr, _, exitCode = executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--run-id", "run-stream-error", "true")
+		stdout, stderr, _, exitCode = executeCLICommand("exec", "--host", server.URL, "--file", composePath, "--run-id", "run-stream-error", "--command", "true")
 		if exitCode != exitCodeUnavailable || stdout != "" || !strings.Contains(stderr, "exec stream down") {
 			t.Fatalf("exec stream error code/stdout/stderr = %d/%q/%q", exitCode, stdout, stderr)
 		}
@@ -7198,9 +7850,8 @@ agents:
 			args []string
 			want string
 		}{
-			{args: []string{"exec", "--file", composePath, "--run-id", "run-1", "--agent", "reviewer", "true"}, want: "target can only be specified once"},
-			{args: []string{"exec", "--file", composePath, "--run-id", "", "true"}, want: "requires a value"},
-			{args: []string{"exec", "--file", composePath, "--agent", "", "true"}, want: "requires a value"},
+			{args: []string{"exec", "--file", composePath, "--run-id", "", "--command", "true"}, want: "requires a value"},
+			{args: []string{"exec", "--file", composePath, "--agent", "", "true"}, want: "unknown flag: --agent"},
 		} {
 			stdout, stderr, _, exitCode := executeCLICommand(tc.args...)
 			if exitCode != exitCodeUsage || stdout != "" || !strings.Contains(stderr, tc.want) {
@@ -7996,6 +8647,7 @@ func testStatsMetric(value float64, unit string) *agentcomposev2.MetricValue {
 type runServiceStub struct {
 	startRun       func(context.Context, *connect.Request[agentcomposev2.StartRunRequest]) (*connect.Response[agentcomposev2.StartRunResponse], error)
 	runAgentStream func(context.Context, *connect.Request[agentcomposev2.RunAgentRequest], *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error
+	runAttach      func(context.Context, *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error
 	getRun         func(context.Context, *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error)
 	listRuns       func(context.Context, *connect.Request[agentcomposev2.ListRunsRequest]) (*connect.Response[agentcomposev2.ListRunsResponse], error)
 	followRunLogs  func(context.Context, *connect.Request[agentcomposev2.FollowRunLogsRequest], *connect.ServerStream[agentcomposev2.RunLogChunk]) error
@@ -8015,6 +8667,13 @@ func (s runServiceStub) RunAgentStream(ctx context.Context, req *connect.Request
 		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("RunAgentStream stub is not configured"))
 	}
 	return s.runAgentStream(ctx, req, stream)
+}
+
+func (s runServiceStub) RunAttach(ctx context.Context, stream *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error {
+	if s.runAttach == nil {
+		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("RunAttach stub is not configured"))
+	}
+	return s.runAttach(ctx, stream)
 }
 
 func (s runServiceStub) GetRun(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -8043,7 +8702,7 @@ func newRunServiceStubServer(t *testing.T, stub runServiceStub) *httptest.Server
 	mux := http.NewServeMux()
 	path, handler := agentcomposev2connect.NewRunServiceHandler(stub)
 	mux.Handle(path, handler)
-	return httptest.NewServer(mux)
+	return httptest.NewServer(h2c.NewHandler(mux, &http2.Server{})) //nolint:staticcheck // h2c is required to assert unencrypted HTTP/2 behavior in attach client tests.
 }
 
 type composeServiceStubs struct {
@@ -8090,6 +8749,7 @@ func (s projectServiceStub) RemoveProject(ctx context.Context, req *connect.Requ
 type execServiceStub struct {
 	exec       func(context.Context, *connect.Request[agentcomposev2.ExecRequest]) (*connect.Response[agentcomposev2.ExecResponse], error)
 	execStream func(context.Context, *connect.Request[agentcomposev2.ExecRequest], *connect.ServerStream[agentcomposev2.ExecStreamResponse]) error
+	execAttach func(context.Context, *connect.BidiStream[agentcomposev2.ExecAttachRequest, agentcomposev2.ExecAttachResponse]) error
 
 	agentcomposev2connect.UnimplementedExecServiceHandler
 }
@@ -8106,6 +8766,13 @@ func (s execServiceStub) ExecStream(ctx context.Context, req *connect.Request[ag
 		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("ExecStream stub is not configured"))
 	}
 	return s.execStream(ctx, req, stream)
+}
+
+func (s execServiceStub) ExecAttach(ctx context.Context, stream *connect.BidiStream[agentcomposev2.ExecAttachRequest, agentcomposev2.ExecAttachResponse]) error {
+	if s.execAttach == nil {
+		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("ExecAttach stub is not configured"))
+	}
+	return s.execAttach(ctx, stream)
 }
 
 type imageServiceStub struct {
@@ -8317,7 +8984,7 @@ func newComposeServiceStubServer(t *testing.T, stubs composeServiceStubs) *httpt
 		path, handler := agentcomposev2connect.NewRunServiceHandler(stubs.run)
 		mux.Handle(path, handler)
 	}
-	if stubs.exec.exec != nil || stubs.exec.execStream != nil {
+	if stubs.exec.exec != nil || stubs.exec.execStream != nil || stubs.exec.execAttach != nil {
 		path, handler := agentcomposev2connect.NewExecServiceHandler(stubs.exec)
 		mux.Handle(path, handler)
 	}

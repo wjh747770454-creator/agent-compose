@@ -55,6 +55,19 @@ interface RunProcessResult {
   exitCode: number;
 }
 
+export interface RunRuntimeCommandOptions {
+  request: RuntimeCommandRequest;
+  artifactDir?: string;
+  stateRoot?: string;
+  workspace?: string;
+  home?: string;
+  stdout?: NodeJS.WritableStream;
+  stderr?: NodeJS.WritableStream;
+  onStdout?: (chunk: Buffer) => void;
+  onStderr?: (chunk: Buffer) => void;
+  onOutput?: (chunk: Buffer, stream: "stdout" | "stderr") => void;
+}
+
 export async function runExecCommand(options: {
   requestFile: string;
   stateRoot?: string;
@@ -64,9 +77,22 @@ export async function runExecCommand(options: {
   const requestPath = path.resolve(options.requestFile);
   const request = await readCommandRequest(requestPath);
   const artifactDir = path.resolve(request.artifactDir ?? path.dirname(requestPath));
+  return runRuntimeCommand({
+    request,
+    artifactDir,
+    stateRoot: options.stateRoot,
+    workspace: options.workspace,
+    home: options.home,
+    stdout: process.stdout,
+    stderr: process.stderr,
+  });
+}
+
+export async function runRuntimeCommand(options: RunRuntimeCommandOptions): Promise<RuntimeCommandResult> {
+  const artifactDir = path.resolve(options.artifactDir ?? options.request.artifactDir ?? process.cwd());
   await fsp.mkdir(artifactDir, { recursive: true });
 
-  const normalizedRequest = normalizeCommandRequest(request, {
+  const normalizedRequest = normalizeCommandRequest(options.request, {
     artifactDir,
     stateRoot: options.stateRoot,
     workspace: options.workspace,
@@ -82,7 +108,13 @@ export async function runExecCommand(options: {
     result: path.join(artifactDir, "command-result.json"),
   };
 
-  const processResult = await runProcess(normalizedRequest, artifacts);
+  const processResult = await runProcess(normalizedRequest, artifacts, {
+    stdout: options.stdout,
+    stderr: options.stderr,
+    onStdout: options.onStdout,
+    onStderr: options.onStderr,
+    onOutput: options.onOutput,
+  });
   const result: RuntimeCommandResult = {
     stdout: processResult.stdout.text,
     stderr: processResult.stderr.text,
@@ -147,6 +179,7 @@ export function normalizeCommandRequest(
 async function runProcess(
   request: ReturnType<typeof normalizeCommandRequest>,
   artifacts: Pick<RuntimeCommandArtifacts, "stdout" | "stderr" | "output">,
+  options: Pick<RunRuntimeCommandOptions, "stdout" | "stderr" | "onStdout" | "onStderr" | "onOutput"> = {},
 ): Promise<RunProcessResult> {
   await Promise.all([
     fsp.mkdir(path.dirname(artifacts.stdout), { recursive: true }),
@@ -186,16 +219,20 @@ async function runProcess(
   }
 
   child.stdout.on("data", (chunk: Buffer) => {
-    process.stdout.write(chunk);
+    options.stdout?.write(chunk);
     stdoutFile.write(chunk);
     outputFile.write(chunk);
+    options.onStdout?.(chunk);
+    options.onOutput?.(chunk, "stdout");
     appendCapture(stdoutCapture, chunk);
     appendCapture(outputCapture, chunk);
   });
   child.stderr.on("data", (chunk: Buffer) => {
-    process.stderr.write(chunk);
+    options.stderr?.write(chunk);
     stderrFile.write(chunk);
     outputFile.write(chunk);
+    options.onStderr?.(chunk);
+    options.onOutput?.(chunk, "stderr");
     appendCapture(stderrCapture, chunk);
     appendCapture(outputCapture, chunk);
   });
@@ -206,7 +243,7 @@ async function runProcess(
       throw new Error(`command timed out after ${request.timeoutMs}ms`);
     }
     if (exitCode !== 0) {
-      process.stderr.write(`command exited with code ${exitCode}\n`);
+      options.stderr?.write(`command exited with code ${exitCode}\n`);
     }
     return {
       stdout: finalizeCapture(stdoutCapture),

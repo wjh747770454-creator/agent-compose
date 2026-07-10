@@ -5,17 +5,20 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 
 	appconfig "agent-compose/pkg/config"
+	driverpkg "agent-compose/pkg/driver"
 	"agent-compose/pkg/execution"
 	"agent-compose/pkg/imagecache"
 	"agent-compose/pkg/images"
@@ -557,6 +560,201 @@ func TestExecHandlerSelectorErrors(t *testing.T) {
 	}
 }
 
+func TestExecAttachRequiresStartFrame(t *testing.T) {
+	handler := newExecAttachTestHandler(t, &apiExecRuntime{})
+	err := handler.execAttach(context.Background(), sliceExecAttachReceiver(), func(*agentcomposev2.ExecAttachResponse) error {
+		t.Fatal("unexpected send")
+		return nil
+	})
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), "start frame") {
+		t.Fatalf("empty stream error = %v", err)
+	}
+
+	err = handler.execAttach(context.Background(), sliceExecAttachReceiver(&agentcomposev2.ExecAttachRequest{
+		Frame: &agentcomposev2.ExecAttachRequest_Stdin{Stdin: &agentcomposev2.AttachStdin{Data: []byte("x")}},
+	}), func(*agentcomposev2.ExecAttachResponse) error {
+		t.Fatal("unexpected send")
+		return nil
+	})
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), "first exec attach frame") {
+		t.Fatalf("non-start first frame error = %v", err)
+	}
+}
+
+func TestExecAttachRuntimeUnsupportedIsUnimplemented(t *testing.T) {
+	handler := newExecAttachTestHandler(t, &apiExecRuntime{})
+	var sent []*agentcomposev2.ExecAttachResponse
+	err := handler.execAttach(context.Background(), sliceExecAttachReceiver(execAttachStartRequest()), func(resp *agentcomposev2.ExecAttachResponse) error {
+		sent = append(sent, resp)
+		return nil
+	})
+	if connect.CodeOf(err) != connect.CodeUnimplemented || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("unsupported runtime error = %v", err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("unexpected responses = %#v", sent)
+	}
+}
+
+func TestExecAttachProjectsStdoutAndResult(t *testing.T) {
+	runtime := &apiAttachRuntime{interaction: &apiAttachInteraction{outputs: []driverpkg.RuntimeOutputFrame{
+		{Type: driverpkg.RuntimeOutputStarted},
+		{Type: driverpkg.RuntimeOutputStdout, Data: []byte("out\n")},
+		{Type: driverpkg.RuntimeOutputStderr, Data: []byte("err\n")},
+		{Type: driverpkg.RuntimeOutputResult, Result: &driverpkg.RuntimeResult{ExitCode: 7, Success: false, Error: "boom"}},
+	}}}
+	handler := newExecAttachTestHandler(t, runtime)
+	var sent []*agentcomposev2.ExecAttachResponse
+	err := handler.execAttach(context.Background(), sliceExecAttachReceiver(execAttachStartRequest()), func(resp *agentcomposev2.ExecAttachResponse) error {
+		sent = append(sent, resp)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ExecAttach returned error: %v", err)
+	}
+	if len(sent) != 4 {
+		t.Fatalf("responses = %#v", sent)
+	}
+	if started := sent[0].GetStarted(); started.GetExecId() == "" || started.GetSandboxId() != "session-attach" {
+		t.Fatalf("started = %#v", started)
+	}
+	if output := sent[1].GetOutput(); string(output.GetData()) != "out\n" || output.GetStream() != agentcomposev2.StdioStream_STDIO_STREAM_STDOUT || output.GetTty() {
+		t.Fatalf("stdout output = %#v", output)
+	}
+	if output := sent[2].GetOutput(); string(output.GetData()) != "err\n" || output.GetStream() != agentcomposev2.StdioStream_STDIO_STREAM_STDERR {
+		t.Fatalf("stderr output = %#v", output)
+	}
+	result := sent[3].GetResult()
+	if result.GetExitCode() != 7 || result.GetSuccess() || result.GetError() != "boom" {
+		t.Fatalf("result = %#v", result)
+	}
+	if execResult := result.GetExecResult(); execResult.GetStdout() != "out\n" || execResult.GetStderr() != "err\n" || execResult.GetOutput() != "out\nerr\n" || execResult.GetError() != "boom" {
+		t.Fatalf("exec result = %#v", execResult)
+	}
+	if runtime.spec.Command == nil || runtime.spec.Command.Command != "printf" || runtime.spec.Cwd != "/workspace" || runtime.spec.TimeoutMs != 1234 {
+		t.Fatalf("runtime spec = %#v", runtime.spec)
+	}
+}
+
+func TestExecAttachRunnerProjectsInteractionFramesWithoutRPC(t *testing.T) {
+	state := execAttachProjectionTestState()
+	runner := execAttachRunner{
+		state:   state,
+		receive: sliceExecAttachReceiver(),
+	}
+	interaction := &apiAttachInteraction{outputs: []driverpkg.RuntimeOutputFrame{
+		{Type: driverpkg.RuntimeOutputStarted},
+		{Type: driverpkg.RuntimeOutputStdout, Data: []byte("alpha\n")},
+		{Type: driverpkg.RuntimeOutputStderr, Data: []byte("beta\n")},
+		{Type: driverpkg.RuntimeOutputResult, Result: &driverpkg.RuntimeResult{ExitCode: 0, Success: true}},
+	}}
+	var sent []*agentcomposev2.ExecAttachResponse
+	runner.send = func(resp *agentcomposev2.ExecAttachResponse) error {
+		sent = append(sent, resp)
+		return nil
+	}
+
+	if err := runner.runInteraction(interaction); err != nil {
+		t.Fatalf("runInteraction returned error: %v", err)
+	}
+	if len(sent) != 4 {
+		t.Fatalf("responses = %#v", sent)
+	}
+	if started := sent[0].GetStarted(); started.GetOperationId() != "exec-projection" || started.GetSandboxId() != "session-projection" {
+		t.Fatalf("started = %#v", started)
+	}
+	if output := sent[1].GetOutput(); output.GetStream() != agentcomposev2.StdioStream_STDIO_STREAM_STDOUT || string(output.GetData()) != "alpha\n" {
+		t.Fatalf("stdout = %#v", output)
+	}
+	if output := sent[2].GetOutput(); output.GetStream() != agentcomposev2.StdioStream_STDIO_STREAM_STDERR || string(output.GetData()) != "beta\n" {
+		t.Fatalf("stderr = %#v", output)
+	}
+	if result := sent[3].GetResult().GetExecResult(); result.GetStdout() != "alpha\n" || result.GetStderr() != "beta\n" || result.GetOutput() != "alpha\nbeta\n" {
+		t.Fatalf("exec result = %#v", result)
+	}
+}
+
+func TestExecAttachPromptDelegatesToRunAttach(t *testing.T) {
+	session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-attach", VMStatus: domain.VMStatusRunning}}
+	store := &apiExecWorkflowSandboxStore{
+		sandboxes: map[string]*domain.Sandbox{"session-attach": session},
+		vm:        domain.VMState{Driver: "docker"},
+	}
+	projects := &apiExecWorkflowProjectStore{runs: []domain.ProjectRunRecord{{
+		RunID: "run-latest", ProjectID: "project-1", AgentName: "worker", SandboxID: "session-attach",
+	}}}
+	delegate := &apiExecPromptRunAttachDelegate{}
+	handler := NewExecHandler(&appconfig.Config{}, store, projects, func(*domain.Sandbox) (ExecRuntime, error) {
+		return &apiExecRuntime{}, nil
+	}, delegate)
+	var sent []*agentcomposev2.ExecAttachResponse
+	err := handler.execAttach(context.Background(), sliceExecAttachReceiver(
+		&agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_Start{Start: &agentcomposev2.ExecAttachStart{
+			Request: &agentcomposev2.ExecRequest{Target: &agentcomposev2.ExecRequest_SandboxId{SandboxId: "session-attach"}},
+			Mode:    agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT,
+			Prompt:  "hi",
+		}}},
+		&agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_HumanMessage{HumanMessage: &agentcomposev2.AttachHumanMessage{Text: "next"}}},
+	), func(resp *agentcomposev2.ExecAttachResponse) error {
+		sent = append(sent, resp)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ExecAttach prompt returned error: %v", err)
+	}
+	if delegate.start.GetRequest().GetProjectId() != "project-1" || delegate.start.GetRequest().GetAgentName() != "worker" || delegate.start.GetRequest().GetPrompt() != "hi" || delegate.start.GetRequest().GetSandboxId() != "session-attach" {
+		t.Fatalf("delegated run start = %#v", delegate.start)
+	}
+	if delegate.human.GetText() != "next" {
+		t.Fatalf("delegated human message = %#v", delegate.human)
+	}
+	if len(sent) != 2 || sent[0].GetAgentEvent().GetText() != "agent says hi" || !sent[1].GetResult().GetSuccess() {
+		t.Fatalf("exec prompt responses = %#v", sent)
+	}
+}
+
+func TestExecAttachInputFrameMapping(t *testing.T) {
+	cases := []struct {
+		name string
+		req  *agentcomposev2.ExecAttachRequest
+		want driverpkg.RuntimeInputFrame
+	}{
+		{
+			name: "stdin",
+			req:  &agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_Stdin{Stdin: &agentcomposev2.AttachStdin{Data: []byte("hi")}}},
+			want: driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputStdin, Data: []byte("hi")},
+		},
+		{
+			name: "stdin eof",
+			req:  &agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_StdinEof{StdinEof: &agentcomposev2.AttachStdinEOF{}}},
+			want: driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputStdinEOF},
+		},
+		{
+			name: "resize",
+			req:  &agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_Resize{Resize: &agentcomposev2.AttachResize{TerminalSize: &agentcomposev2.AttachTerminalSize{Rows: 24, Cols: 80}}}},
+			want: driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputResize, Rows: 24, Cols: 80},
+		},
+		{
+			name: "signal",
+			req:  &agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_Signal{Signal: &agentcomposev2.AttachSignal{Signal: " interrupt "}}},
+			want: driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputSignal, Signal: driverpkg.RuntimeSignalInterrupt},
+		},
+		{
+			name: "cancel",
+			req:  &agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_Cancel{Cancel: &agentcomposev2.AttachCancel{Reason: "stop"}}},
+			want: driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputCancel, Message: "stop"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := runtimeInputFrameFromExecAttach(tc.req)
+			if !ok || string(got.Data) != string(tc.want.Data) || got.Type != tc.want.Type || got.Rows != tc.want.Rows || got.Cols != tc.want.Cols || got.Signal != tc.want.Signal || got.Message != tc.want.Message {
+				t.Fatalf("frame = %#v ok=%v, want %#v", got, ok, tc.want)
+			}
+		})
+	}
+}
+
 func TestProjectAndRunHandlersStoreBackedWorkflows(t *testing.T) {
 	ctx := context.Background()
 	store := &apiProjectRunStore{
@@ -678,6 +876,114 @@ func TestFollowRunLogsRejectsProjectMismatch(t *testing.T) {
 	}
 	if code := connect.CodeOf(stream.Err()); code != connect.CodeNotFound {
 		t.Fatalf("FollowRunLogs code = %s, want %s (err=%v)", code, connect.CodeNotFound, stream.Err())
+	}
+}
+
+func TestFollowRunLogsHubBacklogDedupeAndTerminalSupplement(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "output.txt")
+	if err := os.WriteFile(logPath, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write log fixture: %v", err)
+	}
+	store := &apiProjectRunStore{runs: map[string]domain.ProjectRunRecord{
+		"run-1": {RunID: "run-1", ProjectID: "project-1", AgentName: "worker", Status: domain.ProjectRunStatusRunning, LogsPath: logPath},
+	}}
+	hub := runs.NewRunLogHub()
+	client, closeServer := newRunHandlerTestClient(t, NewRunHandlerWithRunLogHub(nil, store, hub))
+	defer closeServer()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := client.FollowRunLogs(ctx, connect.NewRequest(&agentcomposev2.FollowRunLogsRequest{ProjectId: "project-1", RunId: "run-1", Follow: true}))
+	if err != nil {
+		t.Fatalf("FollowRunLogs setup error: %v", err)
+	}
+	first := receiveRunLogChunk(t, stream, time.Second)
+	if first.GetData() != "old\n" || first.GetOffset() != 4 || first.GetIsFinal() {
+		t.Fatalf("first chunk = %#v", first)
+	}
+
+	hub.Publish(runs.RunLogEvent{RunID: "run-1", Data: "old\n", Offset: 4, CreatedAt: time.Now().UTC()})
+	newOffset := appendRunLogFixture(t, logPath, "new\n")
+	started := time.Now()
+	hub.Publish(runs.RunLogEvent{RunID: "run-1", Data: "new\n", Offset: newOffset, CreatedAt: time.Now().UTC()})
+	second := receiveRunLogChunk(t, stream, time.Second)
+	if second.GetData() != "new\n" || second.GetOffset() != newOffset || second.GetIsFinal() {
+		t.Fatalf("second chunk = %#v", second)
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("hub-delivered chunk took %s, want below polling interval", elapsed)
+	}
+
+	fallbackOffset := appendRunLogFixture(t, logPath, "missed\n")
+	fallback := receiveRunLogChunk(t, stream, time.Second)
+	if fallback.GetData() != "missed\n" || fallback.GetOffset() != fallbackOffset {
+		t.Fatalf("polling fallback chunk = %#v", fallback)
+	}
+
+	finalOffset := appendRunLogFixture(t, logPath, "done\n")
+	run, err := store.GetProjectRun(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("GetProjectRun returned error: %v", err)
+	}
+	run.Status = domain.ProjectRunStatusSucceeded
+	if _, err := store.UpdateProjectRun(context.Background(), run); err != nil {
+		t.Fatalf("UpdateProjectRun returned error: %v", err)
+	}
+	terminalData := receiveRunLogChunk(t, stream, time.Second)
+	if terminalData.GetData() != "done\n" || terminalData.GetOffset() != finalOffset {
+		t.Fatalf("terminal supplement chunk = %#v", terminalData)
+	}
+	final := receiveRunLogChunk(t, stream, time.Second)
+	if !final.GetIsFinal() || final.GetOffset() != finalOffset || final.GetRunStatus() != agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED {
+		t.Fatalf("final chunk = %#v", final)
+	}
+}
+
+func appendRunLogFixture(t *testing.T, path, text string) uint64 {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open log fixture: %v", err)
+	}
+	defer func() { _ = file.Close() }()
+	offset, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		t.Fatalf("seek log fixture: %v", err)
+	}
+	n, err := file.WriteString(text)
+	if err != nil {
+		t.Fatalf("append log fixture: %v", err)
+	}
+	return uint64(offset) + uint64(n)
+}
+
+func receiveRunLogChunk(t *testing.T, stream *connect.ServerStreamForClient[agentcomposev2.RunLogChunk], timeout time.Duration) *agentcomposev2.RunLogChunk {
+	t.Helper()
+	type result struct {
+		chunk *agentcomposev2.RunLogChunk
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		if stream.Receive() {
+			done <- result{chunk: stream.Msg()}
+			return
+		}
+		done <- result{err: stream.Err()}
+	}()
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("FollowRunLogs stream error: %v", result.err)
+		}
+		if result.chunk == nil {
+			t.Fatalf("FollowRunLogs stream ended")
+		}
+		return result.chunk
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for run log chunk")
+		return nil
 	}
 }
 
@@ -878,9 +1184,81 @@ func (s *apiExecWorkflowProjectStore) ListProjectSandboxRuns(_ context.Context, 
 		if filter.AgentName != "" && run.AgentName != filter.AgentName {
 			continue
 		}
+		if filter.SandboxID != "" && run.SandboxID != filter.SandboxID {
+			continue
+		}
 		runs = append(runs, run)
 	}
 	return runs, nil
+}
+
+func newExecAttachTestHandler(t *testing.T, runtime ExecRuntime) *ExecHandler {
+	t.Helper()
+	session := &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-attach", VMStatus: domain.VMStatusRunning}}
+	store := &apiExecSandboxStore{sandbox: session, vm: domain.VMState{Driver: "docker"}}
+	return NewExecHandler(&appconfig.Config{}, store, apiExecProjectStore{}, func(*domain.Sandbox) (ExecRuntime, error) {
+		return runtime, nil
+	})
+}
+
+func execAttachStartRequest() *agentcomposev2.ExecAttachRequest {
+	return &agentcomposev2.ExecAttachRequest{Frame: &agentcomposev2.ExecAttachRequest_Start{Start: &agentcomposev2.ExecAttachStart{
+		Request: &agentcomposev2.ExecRequest{
+			Target:    &agentcomposev2.ExecRequest_SandboxId{SandboxId: "session-attach"},
+			Command:   &agentcomposev2.ExecCommand{Command: "printf", Args: []string{"hi"}},
+			Cwd:       "/workspace",
+			TimeoutMs: 1234,
+		},
+	}}}
+}
+
+func execAttachProjectionTestState() *execAttachState {
+	return &execAttachState{
+		execID: "exec-projection",
+		runID:  "run-projection",
+		cwd:    "/workspace",
+		request: &agentcomposev2.ExecRequest{
+			Target:  &agentcomposev2.ExecRequest_SandboxId{SandboxId: "session-projection"},
+			Command: &agentcomposev2.ExecCommand{Command: "printf"},
+			Cwd:     "/workspace",
+		},
+		sandbox: &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-projection", VMStatus: domain.VMStatusRunning}},
+		tty:     true,
+	}
+}
+
+func sliceExecAttachReceiver(items ...*agentcomposev2.ExecAttachRequest) execAttachReceiver {
+	index := 0
+	return func() (*agentcomposev2.ExecAttachRequest, error) {
+		if index >= len(items) {
+			return nil, io.EOF
+		}
+		item := items[index]
+		index++
+		return item, nil
+	}
+}
+
+type apiExecPromptRunAttachDelegate struct {
+	start *agentcomposev2.RunAttachStart
+	human *agentcomposev2.AttachHumanMessage
+}
+
+func (d *apiExecPromptRunAttachDelegate) RunProjectCommandAttach(_ context.Context, receive runs.RunAttachReceiver, send runs.RunAttachSender) error {
+	first, err := receive()
+	if err != nil {
+		return err
+	}
+	d.start = first.GetStart()
+	second, err := receive()
+	if err != nil {
+		return err
+	}
+	d.human = second.GetHumanMessage()
+	if err := send(&agentcomposev2.RunAttachResponse{Frame: &agentcomposev2.RunAttachResponse_AgentEvent{AgentEvent: &agentcomposev2.AttachAgentEvent{Text: "agent says hi"}}}); err != nil {
+		return err
+	}
+	return send(&agentcomposev2.RunAttachResponse{Frame: &agentcomposev2.RunAttachResponse_Result{Result: &agentcomposev2.AttachResult{Success: true}}})
 }
 
 type apiExecRuntime struct {
@@ -894,6 +1272,43 @@ func (r *apiExecRuntime) ExecStream(_ context.Context, _ *domain.Sandbox, _ doma
 	payload := apiRuntimeCommandPayload(domain.RuntimeCommandResult{Stdout: "hi\n", Output: "hi\n", ExitCode: 0, Success: true})
 	writer(domain.ExecChunk{Text: payload})
 	return domain.ExecResult{Stdout: payload, Output: "$ echo hi\nhi\n" + payload, ExitCode: 0, Success: true}, nil
+}
+
+type apiAttachRuntime struct {
+	apiExecRuntime
+	spec        driverpkg.RuntimeStartSpec
+	interaction driverpkg.RuntimeInteraction
+}
+
+func (r *apiAttachRuntime) OpenInteraction(_ context.Context, _ *domain.Sandbox, _ domain.VMState, spec driverpkg.RuntimeStartSpec) (driverpkg.RuntimeInteraction, error) {
+	r.spec = spec
+	return r.interaction, nil
+}
+
+type apiAttachInteraction struct {
+	outputs []driverpkg.RuntimeOutputFrame
+	index   int
+}
+
+func (i *apiAttachInteraction) Send(driverpkg.RuntimeInputFrame) error {
+	return nil
+}
+
+func (i *apiAttachInteraction) CloseSend() error {
+	return nil
+}
+
+func (i *apiAttachInteraction) Recv() (driverpkg.RuntimeOutputFrame, error) {
+	if i.index >= len(i.outputs) {
+		return driverpkg.RuntimeOutputFrame{}, io.EOF
+	}
+	frame := i.outputs[i.index]
+	i.index++
+	return frame, nil
+}
+
+func (i *apiAttachInteraction) Wait() (driverpkg.RuntimeResult, error) {
+	return driverpkg.RuntimeResult{}, nil
 }
 
 func apiRuntimeCommandPayload(result domain.RuntimeCommandResult) string {
@@ -934,6 +1349,7 @@ func (r *apiStatsRuntime) Stats(_ context.Context, session *domain.Sandbox, vmSt
 }
 
 type apiProjectRunStore struct {
+	mu         sync.Mutex
 	projects   []domain.ProjectRecord
 	agents     []domain.ProjectAgentRecord
 	schedulers []domain.ProjectSchedulerRecord
@@ -978,11 +1394,15 @@ func (s *apiProjectRunStore) GetManagedAgentDefinition(context.Context, string) 
 }
 
 func (s *apiProjectRunStore) CreateProjectRun(_ context.Context, run domain.ProjectRunRecord) (domain.ProjectRunRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.runs[run.RunID] = run
 	return run, nil
 }
 
 func (s *apiProjectRunStore) GetProjectRun(_ context.Context, runID string) (domain.ProjectRunRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	run, ok := s.runs[runID]
 	if !ok {
 		return domain.ProjectRunRecord{}, sql.ErrNoRows
@@ -991,11 +1411,15 @@ func (s *apiProjectRunStore) GetProjectRun(_ context.Context, runID string) (dom
 }
 
 func (s *apiProjectRunStore) UpdateProjectRun(_ context.Context, run domain.ProjectRunRecord) (domain.ProjectRunRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.runs[run.RunID] = run
 	return run, nil
 }
 
 func (s *apiProjectRunStore) ListProjectRunsByOptions(_ context.Context, _ domain.ProjectRunListOptions) ([]domain.ProjectRunRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	items := make([]domain.ProjectRunRecord, 0, len(s.runs))
 	for _, run := range s.runs {
 		items = append(items, run)

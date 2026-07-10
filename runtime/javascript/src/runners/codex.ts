@@ -3,7 +3,7 @@ import { stringEnv } from "../env.js";
 import { uniqueDirectories } from "../paths.js";
 import { readStoredThread, writeStoredThread } from "../session-state.js";
 import { extractText, jsonString } from "../text.js";
-import { appendDelta, TranscriptWriter } from "../transcript.js";
+import { appendDelta, TranscriptWriter, type TextWriter } from "../transcript.js";
 import type { AgentResult, RunnerOptions } from "../types.js";
 
 interface CodexItemState {
@@ -14,6 +14,10 @@ interface CodexItemState {
   mcpResultEmitted?: boolean;
   mcpErrorEmitted?: boolean;
   webSearchEmitted?: boolean;
+}
+
+interface TranscriptRecorder extends TextWriter {
+  transcript(): string;
 }
 
 function webSearchQuery(item: Record<string, unknown>): string {
@@ -31,10 +35,16 @@ function webSearchQuery(item: Record<string, unknown>): string {
 }
 
 export class CodexRunner {
-  private readonly writer = new TranscriptWriter();
   private readonly itemState = new Map<string, string | CodexItemState>();
 
-  constructor(private readonly options: RunnerOptions) {}
+  constructor(
+    private readonly options: RunnerOptions,
+    private readonly writer: TranscriptRecorder = new TranscriptWriter(),
+  ) {}
+
+  transcript(): string {
+    return this.writer.transcript();
+  }
 
   threadOptions(): Record<string, unknown> {
     return {

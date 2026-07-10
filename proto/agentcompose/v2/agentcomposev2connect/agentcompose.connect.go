@@ -70,6 +70,8 @@ const (
 	// RunServiceRunAgentStreamProcedure is the fully-qualified name of the RunService's RunAgentStream
 	// RPC.
 	RunServiceRunAgentStreamProcedure = "/agentcompose.v2.RunService/RunAgentStream"
+	// RunServiceRunAttachProcedure is the fully-qualified name of the RunService's RunAttach RPC.
+	RunServiceRunAttachProcedure = "/agentcompose.v2.RunService/RunAttach"
 	// RunServiceGetRunProcedure is the fully-qualified name of the RunService's GetRun RPC.
 	RunServiceGetRunProcedure = "/agentcompose.v2.RunService/GetRun"
 	// RunServiceListRunsProcedure is the fully-qualified name of the RunService's ListRuns RPC.
@@ -83,6 +85,8 @@ const (
 	ExecServiceExecProcedure = "/agentcompose.v2.ExecService/Exec"
 	// ExecServiceExecStreamProcedure is the fully-qualified name of the ExecService's ExecStream RPC.
 	ExecServiceExecStreamProcedure = "/agentcompose.v2.ExecService/ExecStream"
+	// ExecServiceExecAttachProcedure is the fully-qualified name of the ExecService's ExecAttach RPC.
+	ExecServiceExecAttachProcedure = "/agentcompose.v2.ExecService/ExecAttach"
 	// ImageServiceListImagesProcedure is the fully-qualified name of the ImageService's ListImages RPC.
 	ImageServiceListImagesProcedure = "/agentcompose.v2.ImageService/ListImages"
 	// ImageServicePullImageProcedure is the fully-qualified name of the ImageService's PullImage RPC.
@@ -333,7 +337,11 @@ func (UnimplementedProjectServiceHandler) WatchProject(context.Context, *connect
 type RunServiceClient interface {
 	RunAgent(context.Context, *connect.Request[v2.RunAgentRequest]) (*connect.Response[v2.RunAgentResponse], error)
 	StartRun(context.Context, *connect.Request[v2.StartRunRequest]) (*connect.Response[v2.StartRunResponse], error)
+	// Stable server-stream projection of RunAgent for non-interactive stream views.
+	// Interactive clients that need stdin, resize, signal, or multi-turn prompt
+	// attachment should use RunAttach.
 	RunAgentStream(context.Context, *connect.Request[v2.RunAgentRequest]) (*connect.ServerStreamForClient[v2.RunAgentStreamResponse], error)
+	RunAttach(context.Context) *connect.BidiStreamForClient[v2.RunAttachRequest, v2.RunAttachResponse]
 	GetRun(context.Context, *connect.Request[v2.GetRunRequest]) (*connect.Response[v2.GetRunResponse], error)
 	ListRuns(context.Context, *connect.Request[v2.ListRunsRequest]) (*connect.Response[v2.ListRunsResponse], error)
 	FollowRunLogs(context.Context, *connect.Request[v2.FollowRunLogsRequest]) (*connect.ServerStreamForClient[v2.RunLogChunk], error)
@@ -369,6 +377,12 @@ func NewRunServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(runServiceMethods.ByName("RunAgentStream")),
 			connect.WithClientOptions(opts...),
 		),
+		runAttach: connect.NewClient[v2.RunAttachRequest, v2.RunAttachResponse](
+			httpClient,
+			baseURL+RunServiceRunAttachProcedure,
+			connect.WithSchema(runServiceMethods.ByName("RunAttach")),
+			connect.WithClientOptions(opts...),
+		),
 		getRun: connect.NewClient[v2.GetRunRequest, v2.GetRunResponse](
 			httpClient,
 			baseURL+RunServiceGetRunProcedure,
@@ -401,6 +415,7 @@ type runServiceClient struct {
 	runAgent       *connect.Client[v2.RunAgentRequest, v2.RunAgentResponse]
 	startRun       *connect.Client[v2.StartRunRequest, v2.StartRunResponse]
 	runAgentStream *connect.Client[v2.RunAgentRequest, v2.RunAgentStreamResponse]
+	runAttach      *connect.Client[v2.RunAttachRequest, v2.RunAttachResponse]
 	getRun         *connect.Client[v2.GetRunRequest, v2.GetRunResponse]
 	listRuns       *connect.Client[v2.ListRunsRequest, v2.ListRunsResponse]
 	followRunLogs  *connect.Client[v2.FollowRunLogsRequest, v2.RunLogChunk]
@@ -420,6 +435,11 @@ func (c *runServiceClient) StartRun(ctx context.Context, req *connect.Request[v2
 // RunAgentStream calls agentcompose.v2.RunService.RunAgentStream.
 func (c *runServiceClient) RunAgentStream(ctx context.Context, req *connect.Request[v2.RunAgentRequest]) (*connect.ServerStreamForClient[v2.RunAgentStreamResponse], error) {
 	return c.runAgentStream.CallServerStream(ctx, req)
+}
+
+// RunAttach calls agentcompose.v2.RunService.RunAttach.
+func (c *runServiceClient) RunAttach(ctx context.Context) *connect.BidiStreamForClient[v2.RunAttachRequest, v2.RunAttachResponse] {
+	return c.runAttach.CallBidiStream(ctx)
 }
 
 // GetRun calls agentcompose.v2.RunService.GetRun.
@@ -446,7 +466,11 @@ func (c *runServiceClient) StopRun(ctx context.Context, req *connect.Request[v2.
 type RunServiceHandler interface {
 	RunAgent(context.Context, *connect.Request[v2.RunAgentRequest]) (*connect.Response[v2.RunAgentResponse], error)
 	StartRun(context.Context, *connect.Request[v2.StartRunRequest]) (*connect.Response[v2.StartRunResponse], error)
+	// Stable server-stream projection of RunAgent for non-interactive stream views.
+	// Interactive clients that need stdin, resize, signal, or multi-turn prompt
+	// attachment should use RunAttach.
 	RunAgentStream(context.Context, *connect.Request[v2.RunAgentRequest], *connect.ServerStream[v2.RunAgentStreamResponse]) error
+	RunAttach(context.Context, *connect.BidiStream[v2.RunAttachRequest, v2.RunAttachResponse]) error
 	GetRun(context.Context, *connect.Request[v2.GetRunRequest]) (*connect.Response[v2.GetRunResponse], error)
 	ListRuns(context.Context, *connect.Request[v2.ListRunsRequest]) (*connect.Response[v2.ListRunsResponse], error)
 	FollowRunLogs(context.Context, *connect.Request[v2.FollowRunLogsRequest], *connect.ServerStream[v2.RunLogChunk]) error
@@ -476,6 +500,12 @@ func NewRunServiceHandler(svc RunServiceHandler, opts ...connect.HandlerOption) 
 		RunServiceRunAgentStreamProcedure,
 		svc.RunAgentStream,
 		connect.WithSchema(runServiceMethods.ByName("RunAgentStream")),
+		connect.WithHandlerOptions(opts...),
+	)
+	runServiceRunAttachHandler := connect.NewBidiStreamHandler(
+		RunServiceRunAttachProcedure,
+		svc.RunAttach,
+		connect.WithSchema(runServiceMethods.ByName("RunAttach")),
 		connect.WithHandlerOptions(opts...),
 	)
 	runServiceGetRunHandler := connect.NewUnaryHandler(
@@ -510,6 +540,8 @@ func NewRunServiceHandler(svc RunServiceHandler, opts ...connect.HandlerOption) 
 			runServiceStartRunHandler.ServeHTTP(w, r)
 		case RunServiceRunAgentStreamProcedure:
 			runServiceRunAgentStreamHandler.ServeHTTP(w, r)
+		case RunServiceRunAttachProcedure:
+			runServiceRunAttachHandler.ServeHTTP(w, r)
 		case RunServiceGetRunProcedure:
 			runServiceGetRunHandler.ServeHTTP(w, r)
 		case RunServiceListRunsProcedure:
@@ -539,6 +571,10 @@ func (UnimplementedRunServiceHandler) RunAgentStream(context.Context, *connect.R
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.RunService.RunAgentStream is not implemented"))
 }
 
+func (UnimplementedRunServiceHandler) RunAttach(context.Context, *connect.BidiStream[v2.RunAttachRequest, v2.RunAttachResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.RunService.RunAttach is not implemented"))
+}
+
 func (UnimplementedRunServiceHandler) GetRun(context.Context, *connect.Request[v2.GetRunRequest]) (*connect.Response[v2.GetRunResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.RunService.GetRun is not implemented"))
 }
@@ -558,7 +594,11 @@ func (UnimplementedRunServiceHandler) StopRun(context.Context, *connect.Request[
 // ExecServiceClient is a client for the agentcompose.v2.ExecService service.
 type ExecServiceClient interface {
 	Exec(context.Context, *connect.Request[v2.ExecRequest]) (*connect.Response[v2.ExecResponse], error)
+	// Stable server-stream projection of Exec for non-interactive stream views.
+	// Interactive clients that need stdin, resize, or signal attachment should use
+	// ExecAttach.
 	ExecStream(context.Context, *connect.Request[v2.ExecRequest]) (*connect.ServerStreamForClient[v2.ExecStreamResponse], error)
+	ExecAttach(context.Context) *connect.BidiStreamForClient[v2.ExecAttachRequest, v2.ExecAttachResponse]
 }
 
 // NewExecServiceClient constructs a client for the agentcompose.v2.ExecService service. By default,
@@ -584,6 +624,12 @@ func NewExecServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(execServiceMethods.ByName("ExecStream")),
 			connect.WithClientOptions(opts...),
 		),
+		execAttach: connect.NewClient[v2.ExecAttachRequest, v2.ExecAttachResponse](
+			httpClient,
+			baseURL+ExecServiceExecAttachProcedure,
+			connect.WithSchema(execServiceMethods.ByName("ExecAttach")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -591,6 +637,7 @@ func NewExecServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 type execServiceClient struct {
 	exec       *connect.Client[v2.ExecRequest, v2.ExecResponse]
 	execStream *connect.Client[v2.ExecRequest, v2.ExecStreamResponse]
+	execAttach *connect.Client[v2.ExecAttachRequest, v2.ExecAttachResponse]
 }
 
 // Exec calls agentcompose.v2.ExecService.Exec.
@@ -603,10 +650,19 @@ func (c *execServiceClient) ExecStream(ctx context.Context, req *connect.Request
 	return c.execStream.CallServerStream(ctx, req)
 }
 
+// ExecAttach calls agentcompose.v2.ExecService.ExecAttach.
+func (c *execServiceClient) ExecAttach(ctx context.Context) *connect.BidiStreamForClient[v2.ExecAttachRequest, v2.ExecAttachResponse] {
+	return c.execAttach.CallBidiStream(ctx)
+}
+
 // ExecServiceHandler is an implementation of the agentcompose.v2.ExecService service.
 type ExecServiceHandler interface {
 	Exec(context.Context, *connect.Request[v2.ExecRequest]) (*connect.Response[v2.ExecResponse], error)
+	// Stable server-stream projection of Exec for non-interactive stream views.
+	// Interactive clients that need stdin, resize, or signal attachment should use
+	// ExecAttach.
 	ExecStream(context.Context, *connect.Request[v2.ExecRequest], *connect.ServerStream[v2.ExecStreamResponse]) error
+	ExecAttach(context.Context, *connect.BidiStream[v2.ExecAttachRequest, v2.ExecAttachResponse]) error
 }
 
 // NewExecServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -628,12 +684,20 @@ func NewExecServiceHandler(svc ExecServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(execServiceMethods.ByName("ExecStream")),
 		connect.WithHandlerOptions(opts...),
 	)
+	execServiceExecAttachHandler := connect.NewBidiStreamHandler(
+		ExecServiceExecAttachProcedure,
+		svc.ExecAttach,
+		connect.WithSchema(execServiceMethods.ByName("ExecAttach")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/agentcompose.v2.ExecService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ExecServiceExecProcedure:
 			execServiceExecHandler.ServeHTTP(w, r)
 		case ExecServiceExecStreamProcedure:
 			execServiceExecStreamHandler.ServeHTTP(w, r)
+		case ExecServiceExecAttachProcedure:
+			execServiceExecAttachHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -649,6 +713,10 @@ func (UnimplementedExecServiceHandler) Exec(context.Context, *connect.Request[v2
 
 func (UnimplementedExecServiceHandler) ExecStream(context.Context, *connect.Request[v2.ExecRequest], *connect.ServerStream[v2.ExecStreamResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.ExecService.ExecStream is not implemented"))
+}
+
+func (UnimplementedExecServiceHandler) ExecAttach(context.Context, *connect.BidiStream[v2.ExecAttachRequest, v2.ExecAttachResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.ExecService.ExecAttach is not implemented"))
 }
 
 // ImageServiceClient is a client for the agentcompose.v2.ImageService service.

@@ -29,3 +29,11 @@ func (s *stubSandboxRuntime) Exec(context.Context, *Sandbox, VMState, ExecSpec) 
 func (s *stubSandboxRuntime) ExecStream(context.Context, *Sandbox, VMState, ExecSpec, ExecStreamWriter) (ExecResult, error) {
 	return ExecResult{}, fmt.Errorf("agent-compose was built without BoxLite cgo support; rebuild with -tags boxlitecgo after preparing libboxlite")
 }
+
+func (s *stubSandboxRuntime) InteractionCapabilities() RuntimeInteractionCapabilities {
+	return RuntimeInteractionCapabilities{}
+}
+
+func (s *stubSandboxRuntime) OpenInteraction(ctx context.Context, session *Sandbox, vmState VMState, spec RuntimeStartSpec) (RuntimeInteraction, error) {
+	return UnsupportedRuntimeInteraction(RuntimeDriverBoxlite, s.InteractionCapabilities(), spec)
+}

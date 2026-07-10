@@ -59,7 +59,7 @@ func TestE2ECLIHelpCoversUserWorkflowCommandSurface(t *testing.T) {
 		{
 			name: "exec",
 			args: []string{"exec", "--help"},
-			want: []string{"Execute a command in a running sandbox", "--agent", "--run-id", "--command", "--interactive", "--cwd"},
+			want: []string{"Execute a command in a running sandbox", "--run-id", "--command", "--prompt", "--interactive", "--tty", "--cwd"},
 		},
 		{
 			name: "images",

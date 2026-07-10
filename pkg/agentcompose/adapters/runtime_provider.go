@@ -108,6 +108,14 @@ func (r driverRuntimeAdapter) ExecStream(ctx context.Context, session *domain.Sa
 	return execution.FromDriverExecResult(result), err
 }
 
+func (r driverRuntimeAdapter) OpenInteraction(ctx context.Context, session *domain.Sandbox, vmState domain.VMState, spec driverpkg.RuntimeStartSpec) (driverpkg.RuntimeInteraction, error) {
+	interactor, ok := r.runtime.(driverpkg.RuntimeInteractor)
+	if !ok {
+		return driverpkg.UnsupportedRuntimeInteraction(vmState.Driver, driverpkg.RuntimeInteractionCapabilities{}, spec)
+	}
+	return interactor.OpenInteraction(ctx, execution.ToDriverSandbox(session), execution.ToDriverVMState(vmState), spec)
+}
+
 func domainStreamFromDriver(stream driverpkg.StdioStream) domain.StdioStream {
 	if driverpkg.NormalizeStdioStream(stream) == driverpkg.StdioStderr {
 		return domain.StdioStderr

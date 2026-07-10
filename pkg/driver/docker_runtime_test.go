@@ -3,7 +3,9 @@ package driver
 import (
 	appconfig "agent-compose/pkg/config"
 	"context"
+	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -30,10 +32,9 @@ func TestDockerRuntimeBindRuntimeMountSourceUsesHostSandboxRoot(t *testing.T) {
 	}
 }
 
-func TestDockerSandboxLookupIncludesLegacySessionLabel(t *testing.T) {
-	labels := dockerSandboxLookupLabelIDs()
-	if len(labels) != 2 || labels[0] != "agent-compose.sandbox_id" || labels[1] != "agent-compose.session_id" {
-		t.Fatalf("docker lookup labels = %#v", labels)
+func TestDockerSandboxLookupUsesSandboxLabel(t *testing.T) {
+	if dockerSandboxLabelID != "agent-compose.sandbox_id" {
+		t.Fatalf("docker sandbox label = %q", dockerSandboxLabelID)
 	}
 }
 
@@ -62,6 +63,141 @@ func TestDockerExecCollectorMapsStdioStreams(t *testing.T) {
 		if streamed[i] != want[i] {
 			t.Fatalf("streamed[%d] = %#v, want %#v", i, streamed[i], want[i])
 		}
+	}
+}
+
+func TestDockerRuntimeInteractionCapabilities(t *testing.T) {
+	runtime := &dockerRuntime{}
+	caps := runtime.InteractionCapabilities()
+	if !caps.NativeExec || !caps.Stdin || !caps.StdinEOF || !caps.TTY || !caps.Resize {
+		t.Fatalf("docker capabilities missing command attach support: %#v", caps)
+	}
+	if caps.Signal {
+		t.Fatalf("docker Signal capability = true, want false until native process signal support exists")
+	}
+	if caps.Artifacts {
+		t.Fatalf("docker Artifacts capability = true, want false for native attach")
+	}
+	if err := caps.ValidateStartSpec(RuntimeDriverDocker, RuntimeStartSpec{
+		Kind:        RuntimeOperationCommand,
+		AttachStdin: true,
+		TTY:         true,
+		Rows:        24,
+		Cols:        80,
+	}); err != nil {
+		t.Fatalf("ValidateStartSpec() error = %v", err)
+	}
+	err := caps.ValidateStartSpec(RuntimeDriverDocker, RuntimeStartSpec{
+		Kind:        RuntimeOperationCommand,
+		ArtifactDir: "/tmp/artifacts",
+	})
+	if !errors.Is(err, ErrRuntimeInteractionUnsupported) {
+		t.Fatalf("ValidateStartSpec() artifact error = %v, want unsupported", err)
+	}
+}
+
+func TestDockerCommandExecOptionsFromRuntimeStartSpec(t *testing.T) {
+	options, err := dockerCommandExecOptions(RuntimeStartSpec{
+		Kind:        RuntimeOperationCommand,
+		AttachStdin: true,
+		TTY:         true,
+		Rows:        40,
+		Cols:        120,
+		Cwd:         "/workspace",
+		Env:         map[string]string{"BASE": "1", "OVERRIDE": "outer"},
+		Command: &RuntimeCommandSpec{
+			Command: "bash",
+			Args:    []string{"-lc", "printf ok"},
+			Env:     map[string]string{"EXTRA": "2", "OVERRIDE": "inner"},
+			Cwd:     "/workspace/project",
+		},
+	}, "/default")
+	if err != nil {
+		t.Fatalf("dockerCommandExecOptions() error = %v", err)
+	}
+	if !options.AttachStdin || !options.AttachStdout || options.AttachStderr || !options.Tty {
+		t.Fatalf("exec attach flags = %+v", options)
+	}
+	if options.ConsoleSize == nil || *options.ConsoleSize != [2]uint{40, 120} {
+		t.Fatalf("ConsoleSize = %#v, want [40 120]", options.ConsoleSize)
+	}
+	if !reflect.DeepEqual(options.Cmd, []string{"bash", "-lc", "printf ok"}) {
+		t.Fatalf("Cmd = %#v", options.Cmd)
+	}
+	if !reflect.DeepEqual(options.Env, []string{"BASE=1", "EXTRA=2", "OVERRIDE=inner"}) {
+		t.Fatalf("Env = %#v", options.Env)
+	}
+	if options.WorkingDir != "/workspace/project" {
+		t.Fatalf("WorkingDir = %q", options.WorkingDir)
+	}
+}
+
+func TestDockerCommandExecOptionsNonTTYAttachesStderr(t *testing.T) {
+	options, err := dockerCommandExecOptions(RuntimeStartSpec{
+		Command: &RuntimeCommandSpec{Command: "cat"},
+	}, "/default")
+	if err != nil {
+		t.Fatalf("dockerCommandExecOptions() error = %v", err)
+	}
+	if options.AttachStdin || !options.AttachStdout || !options.AttachStderr || options.Tty {
+		t.Fatalf("non-TTY exec attach flags = %+v", options)
+	}
+	if options.WorkingDir != "/default" {
+		t.Fatalf("WorkingDir = %q, want /default", options.WorkingDir)
+	}
+	if options.ConsoleSize != nil {
+		t.Fatalf("ConsoleSize = %#v, want nil", options.ConsoleSize)
+	}
+}
+
+func TestDockerInteractionWriterProjectsFramesAndFiltersStderr(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	interaction := &dockerCommandInteraction{
+		ctx:    ctx,
+		output: make(chan RuntimeOutputFrame, 4),
+	}
+
+	stdoutWriter := &dockerInteractionWriter{interaction: interaction, stream: StdioStdout}
+	if _, err := stdoutWriter.Write([]byte("out\n")); err != nil {
+		t.Fatalf("stdout Write() error = %v", err)
+	}
+	frame := mustRecvDockerInteractionFrame(t, interaction)
+	if frame.Type != RuntimeOutputStdout || string(frame.Data) != "out\n" {
+		t.Fatalf("stdout frame = %#v", frame)
+	}
+
+	stderrWriter := &dockerInteractionWriter{
+		interaction: interaction,
+		stream:      StdioStderr,
+		filter:      newExecOutputFilter(),
+	}
+	if _, err := stderrWriter.Write([]byte("libcontainer::process::init::process seccomp not available, unable to set seccomp privileges!\n")); err != nil {
+		t.Fatalf("ignored stderr Write() error = %v", err)
+	}
+	if _, err := stderrWriter.Write([]byte("err")); err != nil {
+		t.Fatalf("stderr Write() error = %v", err)
+	}
+	stderrWriter.finish()
+	frame = mustRecvDockerInteractionFrame(t, interaction)
+	if frame.Type != RuntimeOutputStderr || string(frame.Data) != "err" {
+		t.Fatalf("stderr frame = %#v", frame)
+	}
+	select {
+	case frame := <-interaction.output:
+		t.Fatalf("unexpected extra frame = %#v", frame)
+	default:
+	}
+}
+
+func mustRecvDockerInteractionFrame(t *testing.T, interaction *dockerCommandInteraction) RuntimeOutputFrame {
+	t.Helper()
+	select {
+	case frame := <-interaction.output:
+		return frame
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for docker interaction frame")
+		return RuntimeOutputFrame{}
 	}
 }
 

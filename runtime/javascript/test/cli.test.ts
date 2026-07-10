@@ -6,6 +6,7 @@ import { createProgram, isMainModule, main } from "../src/cli.js";
 import { COMMAND_RESULT_PREFIX, RESULT_PREFIX } from "../src/constants.js";
 import * as commandModule from "../src/command.js";
 import * as promptModule from "../src/prompt.js";
+import * as streamModule from "../src/stream.js";
 import { captureStdio, withTempSession } from "./helpers.js";
 
 describe("commander CLI", () => {
@@ -180,6 +181,20 @@ describe("commander CLI", () => {
       exitCode: 9,
       success: false,
     });
+  });
+
+  it("runs the stream command without result markers", async () => {
+    const runStream = vi.spyOn(streamModule, "runStreamCommand").mockResolvedValue(undefined);
+    const stdio = captureStdio();
+    try {
+      await createProgram({ exitOverride: true }).parseAsync(["node", "cli", "stream"]);
+    } finally {
+      stdio.restore();
+    }
+
+    expect(runStream).toHaveBeenCalledWith();
+    expect(stdio.stdout).toBe("");
+    expect(stdio.stderr).toBe("");
   });
 
   it("main parses argv through the configured program", async () => {

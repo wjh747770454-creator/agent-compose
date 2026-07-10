@@ -48,12 +48,17 @@ func NewRunController(di do.Injector) (*runs.Controller, error) {
 		Bus:          do.MustInvoke[*loaders.Bus](di),
 		Dashboard:    dashboardHub,
 		CapTokens:    do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
+		RunLogs:      do.MustInvoke[*runs.RunLogHub](di),
 	}), nil
 }
 
 type runControllerDelegate struct {
 	controller *runs.Controller
 	supervisor *RunSupervisor
+}
+
+func (d runControllerDelegate) RunProjectCommandAttach(ctx context.Context, receive runs.RunAttachReceiver, send runs.RunAttachSender) error {
+	return runConnectError(d.controller.RunProjectCommandAttach(ctx, receive, send))
 }
 
 func (d runControllerDelegate) RunAgent(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest]) (*connect.Response[agentcomposev2.RunAgentResponse], error) {
@@ -86,29 +91,10 @@ func (d runControllerDelegate) RunAgentStream(ctx context.Context, req *connect.
 	runs.PrepareStreamingHeaders(stream.ResponseHeader())
 	sink := runs.StreamSink{
 		SendStarted: func(run domain.ProjectRunRecord, createdAt time.Time) error {
-			if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
-				EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_STARTED,
-				Run:       api.ProjectRunSummaryToProto(run),
-				RunId:     run.RunID,
-				CreatedAt: api.FormatProjectTime(createdAt),
-				Warnings:  append([]string(nil), run.Warnings...),
-			}); err != nil {
-				return fmt.Errorf("%w: %w", runs.ErrRunAgentStreamSend, err)
-			}
-			return nil
+			return sendRunAgentStreamStarted(stream, run, createdAt)
 		},
 		SendChunk: func(runID string, chunk domain.ExecChunk, createdAt time.Time) error {
-			if err := stream.Send(&agentcomposev2.RunAgentStreamResponse{
-				EventType:  agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
-				RunId:      runID,
-				Chunk:      chunk.Text,
-				Stream:     api.StdioStreamToProto(chunk.Stream),
-				CreatedAt:  api.FormatProjectTime(createdAt),
-				Transcript: api.TranscriptEventFromExecChunk(chunk, createdAt),
-			}); err != nil {
-				return fmt.Errorf("%w: %w", runs.ErrRunAgentStreamSend, err)
-			}
-			return nil
+			return sendRunAgentStreamChunk(stream, runID, chunk, createdAt)
 		},
 	}
 	run, execErr, err := d.controller.RunProjectAgent(ctx, runAgentRequestFromProto(req.Msg), &sink)
@@ -118,14 +104,67 @@ func (d runControllerDelegate) RunAgentStream(ctx context.Context, req *connect.
 	if errors.Is(execErr, runs.ErrRunAgentStreamSend) {
 		return connect.NewError(connect.CodeUnknown, execErr)
 	}
-	if sendErr := stream.Send(&agentcomposev2.RunAgentStreamResponse{
+	if sendErr := stream.Send(runAgentStreamCompletedProjection(run, time.Now().UTC())); sendErr != nil {
+		return connect.NewError(connect.CodeUnknown, sendErr)
+	}
+	return nil
+}
+
+func sendRunAgentStreamStarted(stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse], run domain.ProjectRunRecord, createdAt time.Time) error {
+	if err := stream.Send(runAgentStreamStartedProjection(run, createdAt)); err != nil {
+		return fmt.Errorf("%w: %w", runs.ErrRunAgentStreamSend, err)
+	}
+	return nil
+}
+
+func sendRunAgentStreamChunk(stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse], runID string, chunk domain.ExecChunk, createdAt time.Time) error {
+	if err := stream.Send(runAgentStreamChunkProjection(runID, chunk, createdAt)); err != nil {
+		return fmt.Errorf("%w: %w", runs.ErrRunAgentStreamSend, err)
+	}
+	return nil
+}
+
+func runAgentStreamStartedProjection(run domain.ProjectRunRecord, createdAt time.Time) *agentcomposev2.RunAgentStreamResponse {
+	return &agentcomposev2.RunAgentStreamResponse{
+		EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_STARTED,
+		Run:       api.ProjectRunSummaryToProto(run),
+		RunId:     run.RunID,
+		CreatedAt: api.FormatProjectTime(createdAt),
+		Warnings:  append([]string(nil), run.Warnings...),
+	}
+}
+
+func runAgentStreamChunkProjection(runID string, chunk domain.ExecChunk, createdAt time.Time) *agentcomposev2.RunAgentStreamResponse {
+	return &agentcomposev2.RunAgentStreamResponse{
+		EventType:  agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_OUTPUT,
+		RunId:      runID,
+		Chunk:      chunk.Text,
+		Stream:     api.StdioStreamToProto(chunk.Stream),
+		CreatedAt:  api.FormatProjectTime(createdAt),
+		Transcript: api.TranscriptEventFromExecChunk(chunk, createdAt),
+	}
+}
+
+func runAgentStreamCompletedProjection(run domain.ProjectRunRecord, createdAt time.Time) *agentcomposev2.RunAgentStreamResponse {
+	return &agentcomposev2.RunAgentStreamResponse{
 		EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
 		Run:       api.ProjectRunSummaryToProto(run),
 		RunId:     run.RunID,
-		CreatedAt: api.FormatProjectTime(time.Now().UTC()),
+		CreatedAt: api.FormatProjectTime(createdAt),
 		Warnings:  append([]string(nil), run.Warnings...),
-	}); sendErr != nil {
-		return connect.NewError(connect.CodeUnknown, sendErr)
+	}
+}
+
+func (d runControllerDelegate) RunAttach(ctx context.Context, stream *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error {
+	if d.controller == nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("run controller is required"))
+	}
+	if err := d.controller.RunProjectCommandAttach(ctx, stream.Receive, stream.Send); err != nil {
+		var connectErr *connect.Error
+		if errors.As(err, &connectErr) {
+			return connectErr
+		}
+		return runConnectError(err)
 	}
 	return nil
 }

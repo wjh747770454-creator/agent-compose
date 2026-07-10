@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,8 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/samber/do/v2"
 	"github.com/spf13/cobra"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c" //nolint:staticcheck // h2c is required for unencrypted HTTP/2 compatibility with Connect bidi streams.
 	"golang.org/x/text/width"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
@@ -242,7 +245,7 @@ func (a *DaemonApp) listen() (*daemonServers, error) {
 }
 
 func (s *daemonServers) add(name, value string, listener net.Listener, handler http.Handler, cleanup func() error) {
-	server := &http.Server{Handler: handler}
+	server := &http.Server{Handler: h2c.NewHandler(handler, &http2.Server{})} //nolint:staticcheck // h2c is required for unencrypted HTTP/2 compatibility with Connect bidi streams.
 	if listener.Addr().Network() == "unix" {
 		server.ConnContext = func(ctx context.Context, conn net.Conn) context.Context {
 			if isTrustedUnixSocketConn(conn) {
@@ -502,6 +505,7 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 	runCmd.Flags().BoolVar(&runOptions.JupyterExpose, "jupyter-expose", false, "Mark the Jupyter proxy endpoint for this run as user-accessible")
 	runCmd.Flags().BoolVarP(&runOptions.Detach, "detach", "d", false, "Start the run in the daemon and return immediately")
 	runCmd.Flags().BoolVarP(&runOptions.Interactive, "interactive", "i", false, "Reserved for future interactive runs")
+	runCmd.Flags().BoolVarP(&runOptions.TTY, "tty", "t", false, "Allocate a TTY for interactive command runs")
 	runCmd.Flags().Lookup("prompt").NoOptDefVal = optionalRunModeFlagNoValue
 	runCmd.Flags().Lookup("command").NoOptDefVal = optionalRunModeFlagNoValue
 	hideOptionalFlagNoValueInUsage(runCmd, "prompt", "command")
@@ -688,11 +692,11 @@ func newRootCommand(out, errOut io.Writer, runDaemon daemonRunner) *cobra.Comman
 		},
 	}
 	// Deprecated: use `agent-compose exec <sandbox>` instead.
-	execCmd.Flags().StringVar(&execOptions.AgentName, "agent", "", "Deprecated target selection by agent; use exec <sandbox>")
-	// Deprecated: use `agent-compose exec <sandbox>` instead.
 	execCmd.Flags().StringVar(&execOptions.RunID, "run-id", "", "Deprecated target selection by run; use exec <sandbox>")
 	execCmd.Flags().StringVar(&execOptions.Command, "command", "", "Shell command to execute in the sandbox")
-	execCmd.Flags().BoolVarP(&execOptions.Interactive, "interactive", "i", false, "Reserved for future interactive exec")
+	execCmd.Flags().StringVar(&execOptions.Prompt, "prompt", "", "Prompt the sandbox agent and attach to the response")
+	execCmd.Flags().BoolVarP(&execOptions.Interactive, "interactive", "i", false, "Attach stdin to the sandbox command")
+	execCmd.Flags().BoolVarP(&execOptions.TTY, "tty", "t", false, "Allocate a TTY for interactive exec")
 	execCmd.Flags().StringVar(&execOptions.Cwd, "cwd", "", "Guest working directory")
 
 	imageListOptions := composeImageListOptions{}
@@ -969,6 +973,7 @@ type composeRunOptions struct {
 	JupyterExpose bool
 	Detach        bool
 	Interactive   bool
+	TTY           bool
 }
 
 type composeSchedulerTriggerOptions struct {
@@ -997,11 +1002,12 @@ type composePSOptions struct {
 }
 
 type composeExecOptions struct {
-	AgentName   string
 	RunID       string
 	Command     string
+	Prompt      string
 	Cwd         string
 	Interactive bool
+	TTY         bool
 }
 
 type composeSandboxActionOutput struct {
@@ -1706,11 +1712,25 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 	if normalizedOptions.Detach && normalizedOptions.Interactive {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -d/--detach cannot be combined with -i/--interactive")}
 	}
+	if normalizedOptions.TTY && !normalizedOptions.Interactive {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -t/--tty requires -i/--interactive")}
+	}
 	if normalizedOptions.Interactive && cli.JSON {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive cannot be combined with --json")}
 	}
 	if normalizedOptions.Interactive && promptFlagChanged == commandFlagChanged {
 		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -i/--interactive requires exactly one of --prompt or --command")}
+	}
+	if normalizedOptions.Interactive && normalizedOptions.TTY && !commandFlagChanged && !promptFlagChanged {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -t/--tty requires --prompt or --command")}
+	}
+	if normalizedOptions.Interactive && normalizedOptions.TTY && strings.TrimSpace(commandText) == "" {
+		if commandFlagChanged {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --command -it requires a non-empty command")}
+		}
+		if strings.TrimSpace(prompt) == "" {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run --prompt -it requires a non-empty prompt")}
+		}
 	}
 	_, normalized, projectID, err := resolveComposeProject(cli)
 	if err != nil {
@@ -1721,7 +1741,7 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		return err
 	}
 	if normalizedOptions.Interactive && promptFlagChanged {
-		if err := validateInteractivePromptProvider(normalized, agentName); err != nil {
+		if err := validateInteractivePromptProvider(normalized, agentName, normalizedOptions.TTY); err != nil {
 			return err
 		}
 	}
@@ -1786,6 +1806,20 @@ func runComposeRunCommand(cmd *cobra.Command, cli cliOptions, options composeRun
 		return startDetachedRun(cmd, cli, normalized.Name, client, runReq)
 	}
 	if normalizedOptions.Interactive {
+		if normalizedOptions.TTY {
+			attachClient, err := newCLIRunAttachServiceClient(cli)
+			if err != nil {
+				return err
+			}
+			if promptFlagChanged {
+				runReq.Prompt = prompt
+				runReq.Command = ""
+				return runComposeRunPromptAttachCommand(cmd, normalized.Name, connectRunAttachClient{client: attachClient}, runReq)
+			}
+			runReq.Prompt = ""
+			runReq.Command = commandText
+			return runComposeRunAttachCommand(cmd, normalized.Name, connectRunAttachClient{client: attachClient}, runReq, normalizedOptions)
+		}
 		runReq.Prompt = ""
 		runReq.Command = ""
 		runReq.CleanupPolicy = agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING
@@ -2569,7 +2603,7 @@ func withHiddenOptionalFlagNoValue(cmd *cobra.Command, flagNames []string, fn fu
 	return fn()
 }
 
-func validateInteractivePromptProvider(project *compose.NormalizedProjectSpec, agentName string) error {
+func validateInteractivePromptProvider(project *compose.NormalizedProjectSpec, agentName string, attach bool) error {
 	provider := "codex"
 	for _, agent := range project.Agents {
 		if strings.TrimSpace(agent.Name) == strings.TrimSpace(agentName) {
@@ -2579,13 +2613,24 @@ func validateInteractivePromptProvider(project *compose.NormalizedProjectSpec, a
 			break
 		}
 	}
+	if !attach {
+		switch provider {
+		case "codex", "claude", "opencode":
+			return nil
+		default:
+			return commandExitError{
+				Code: exitCodeUnsupported,
+				Err:  fmt.Errorf("run -i --prompt is unsupported for provider %s; supported providers: codex, claude, opencode", provider),
+			}
+		}
+	}
 	switch provider {
-	case "codex", "claude", "opencode":
+	case "codex":
 		return nil
 	default:
 		return commandExitError{
 			Code: exitCodeUnsupported,
-			Err:  fmt.Errorf("run -i --prompt is unsupported for provider %s; supported providers: codex, claude, opencode", provider),
+			Err:  fmt.Errorf("run --prompt -it is unsupported for provider %s; supported providers: codex", provider),
 		}
 	}
 }
@@ -2681,7 +2726,7 @@ func shouldResolveComposeLogResourceRef(ref string) bool {
 }
 
 func composeExecArgs(cmd *cobra.Command, args []string) error {
-	if cmd.Flags().Changed("run-id") || cmd.Flags().Changed("agent") {
+	if cmd.Flags().Changed("run-id") {
 		return nil
 	}
 	return cobra.MinimumNArgs(1)(cmd, args)
@@ -2717,8 +2762,14 @@ func runComposePSCommand(cmd *cobra.Command, cli cliOptions, options composePSOp
 }
 
 func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeExecOptions, args []string) error {
-	if options.Interactive {
-		return commandExitError{Code: exitCodeUnsupported, Err: fmt.Errorf("exec -i/--interactive is not supported")}
+	if options.TTY && !options.Interactive {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec -t/--tty requires -i/--interactive")}
+	}
+	if cli.JSON && (options.Interactive || options.TTY) {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --json cannot be used with -i/--interactive or -t/--tty")}
+	}
+	if strings.TrimSpace(options.Prompt) != "" && !options.Interactive {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --prompt requires -i/--interactive")}
 	}
 	_, normalized, projectID, err := resolveComposeProject(cli)
 	if err != nil {
@@ -2728,9 +2779,19 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 	if err != nil {
 		return err
 	}
-	req, err := normalizeComposeExecRequest(cmd, clients, normalized, projectID, options, args)
+	req, err := normalizeComposeExecRequest(cmd, clients, projectID, options, args)
 	if err != nil {
 		return err
+	}
+	if options.Interactive {
+		attachClient, err := newCLIExecAttachServiceClient(cli)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(options.Prompt) != "" {
+			return runComposeExecPromptAttachCommand(cmd, normalized.Name, connectExecAttachClient{client: attachClient}, req, options)
+		}
+		return runComposeExecAttachCommand(cmd, normalized.Name, connectExecAttachClient{client: attachClient}, req, options)
 	}
 	stream, err := clients.exec.ExecStream(cmd.Context(), connect.NewRequest(req))
 	if err != nil {
@@ -2778,13 +2839,641 @@ func runComposeExecCommand(cmd *cobra.Command, cli cliOptions, options composeEx
 	return nil
 }
 
-func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, normalized *compose.NormalizedProjectSpec, projectID string, options composeExecOptions, args []string) (*agentcomposev2.ExecRequest, error) {
+type execAttachClient interface {
+	ExecAttach(context.Context) execAttachStream
+}
+
+type runAttachClient interface {
+	RunAttach(context.Context) runAttachStream
+}
+
+type runAttachStream interface {
+	Send(*agentcomposev2.RunAttachRequest) error
+	Receive() (*agentcomposev2.RunAttachResponse, error)
+	CloseRequest() error
+}
+
+type connectRunAttachClient struct {
+	client agentcomposev2connect.RunServiceClient
+}
+
+func (c connectRunAttachClient) RunAttach(ctx context.Context) runAttachStream {
+	return c.client.RunAttach(ctx)
+}
+
+func runComposeRunAttachCommand(cmd *cobra.Command, projectName string, client runAttachClient, req *agentcomposev2.RunAgentRequest, options composeRunOptions) (err error) {
+	stdin := cmd.InOrStdin()
+	stdout := cmd.OutOrStdout()
+	stderr := cmd.ErrOrStderr()
+	var stdinFD int
+	var stdoutFD int
+	var restoreTerminal func() error
+	var initialSize *agentcomposev2.AttachTerminalSize
+	if options.TTY {
+		var ok bool
+		stdinFD, ok = terminalFileDescriptor(stdin)
+		if !ok || !isTerminalFD(stdinFD) {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -t/--tty requires terminal stdin")}
+		}
+		stdoutFD, ok = terminalFileDescriptor(stdout)
+		if !ok || !isTerminalFD(stdoutFD) {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("run -t/--tty requires terminal stdout")}
+		}
+		restoreTerminal, err = makeTerminalRaw(stdinFD)
+		if err != nil {
+			return fmt.Errorf("enable raw terminal mode: %w", err)
+		}
+		defer func() {
+			if restoreErr := restoreTerminal(); err == nil && restoreErr != nil {
+				err = fmt.Errorf("restore terminal mode: %w", restoreErr)
+			}
+		}()
+		initialSize = terminalSizeForFD(stdoutFD)
+	}
+	stream := client.RunAttach(cmd.Context())
+	var sendMu sync.Mutex
+	send := func(frame *agentcomposev2.RunAttachRequest) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.Send(frame)
+	}
+	closeRequest := func() error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.CloseRequest()
+	}
+	if err := send(&agentcomposev2.RunAttachRequest{
+		Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+			Request:      req,
+			Mode:         agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_COMMAND,
+			AttachStdin:  true,
+			Tty:          options.TTY,
+			TerminalSize: initialSize,
+		}},
+	}); err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("run project %s attach start: %w", projectName, err))
+	}
+	resizeCtx, stopResize := context.WithCancel(cmd.Context())
+	defer stopResize()
+	if options.TTY {
+		stopResizePump := startRunAttachResizePump(resizeCtx, stdoutFD, send)
+		defer stopResizePump()
+	}
+	stdinErr := make(chan error, 1)
+	go func() {
+		stdinErr <- pumpRunAttachStdin(stdin, send, closeRequest)
+	}()
+	var result *agentcomposev2.AttachResult
+	output := newTerminalStreamOutput(stdout, stderr)
+	for {
+		event, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return commandExitErrorForConnect(fmt.Errorf("run project %s attach: %w", projectName, err))
+		}
+		switch frame := event.GetFrame().(type) {
+		case *agentcomposev2.RunAttachResponse_Output:
+			if err := writeExecAttachOutput(output, frame.Output); err != nil {
+				return err
+			}
+		case *agentcomposev2.RunAttachResponse_Result:
+			result = frame.Result
+		case *agentcomposev2.RunAttachResponse_Error:
+			return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("run project %s attach failed: %s", projectName, firstNonEmptyString(frame.Error.GetMessage(), frame.Error.GetCode(), "attach failed"))}
+		}
+	}
+	stopResize()
+	if !options.TTY {
+		if err := output.Finish(); err != nil {
+			return err
+		}
+	}
+	select {
+	case err := <-stdinErr:
+		if err != nil {
+			return fmt.Errorf("run attach stdin: %w", err)
+		}
+	default:
+	}
+	if result == nil {
+		return fmt.Errorf("run project %s: attach completed without result", projectName)
+	}
+	if !result.GetSuccess() {
+		runID := ""
+		if result.GetRun() != nil {
+			runID = result.GetRun().GetRunId()
+		}
+		return commandExitError{Code: attachResultExitCode(result), Err: fmt.Errorf("run %s in project %s failed: %s", firstNonEmptyString(runID, "attach"), projectName, firstNonEmptyString(result.GetError(), result.GetOutput(), "command failed"))}
+	}
+	return nil
+}
+
+func runComposeRunPromptAttachCommand(cmd *cobra.Command, projectName string, client runAttachClient, req *agentcomposev2.RunAgentRequest) error {
+	stdin := cmd.InOrStdin()
+	stdout := cmd.OutOrStdout()
+	stderr := cmd.ErrOrStderr()
+	stream := client.RunAttach(cmd.Context())
+	var sendMu sync.Mutex
+	send := func(frame *agentcomposev2.RunAttachRequest) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.Send(frame)
+	}
+	closeRequest := func() error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.CloseRequest()
+	}
+	if err := send(&agentcomposev2.RunAttachRequest{
+		Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+			Request:     req,
+			Mode:        agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT,
+			AttachStdin: true,
+			Tty:         false,
+		}},
+	}); err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("run project %s prompt attach start: %w", projectName, err))
+	}
+	scanner := bufio.NewScanner(stdin)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lastOutputEndedWithNewline := true
+	inputPrompt := promptAttachInputPrompt{
+		AgentName: req.GetAgentName(),
+		SandboxID: firstNonEmptyString(req.GetSandboxId(), req.GetSandboxId()),
+	}
+	var promptForInput func() error
+	promptForInput = func() error {
+		if fd, ok := terminalFileDescriptor(stdout); ok && isTerminalFD(fd) {
+			if err := writePromptAttachInputPrompt(stderr, inputPrompt, !lastOutputEndedWithNewline); err != nil {
+				return err
+			}
+		}
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return err
+			}
+			if err := send(&agentcomposev2.RunAttachRequest{
+				Frame: &agentcomposev2.RunAttachRequest_StdinEof{StdinEof: &agentcomposev2.AttachStdinEOF{}},
+			}); err != nil {
+				return err
+			}
+			return closeRequest()
+		}
+		text := strings.TrimSpace(scanner.Text())
+		if text == "" {
+			return promptForInput()
+		}
+		if text == "/exit" {
+			if err := send(&agentcomposev2.RunAttachRequest{
+				Frame: &agentcomposev2.RunAttachRequest_StdinEof{StdinEof: &agentcomposev2.AttachStdinEOF{}},
+			}); err != nil {
+				return err
+			}
+			return closeRequest()
+		}
+		lastOutputEndedWithNewline = true
+		return send(&agentcomposev2.RunAttachRequest{
+			Frame: &agentcomposev2.RunAttachRequest_HumanMessage{HumanMessage: &agentcomposev2.AttachHumanMessage{Text: text}},
+		})
+	}
+	var result *agentcomposev2.AttachResult
+	output := newTerminalStreamOutput(stdout, stderr)
+	for {
+		event, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return commandExitErrorForConnect(fmt.Errorf("run project %s prompt attach: %w", projectName, err))
+		}
+		switch frame := event.GetFrame().(type) {
+		case *agentcomposev2.RunAttachResponse_Started:
+			inputPrompt.UpdateFromStarted(frame.Started)
+		case *agentcomposev2.RunAttachResponse_Output:
+			if err := writeExecAttachOutput(output, frame.Output); err != nil {
+				return err
+			}
+			if data := frame.Output.GetData(); len(data) > 0 {
+				lastOutputEndedWithNewline = data[len(data)-1] == '\n'
+			}
+		case *agentcomposev2.RunAttachResponse_AgentEvent:
+			if text := frame.AgentEvent.GetText(); text != "" {
+				if _, err := io.WriteString(stdout, text); err != nil {
+					return err
+				}
+				lastOutputEndedWithNewline = strings.HasSuffix(text, "\n")
+			}
+		case *agentcomposev2.RunAttachResponse_AgentTurnCompleted:
+			if err := promptForInput(); err != nil {
+				return err
+			}
+		case *agentcomposev2.RunAttachResponse_Result:
+			result = frame.Result
+			inputPrompt.UpdateFromRun(result.GetRun())
+		case *agentcomposev2.RunAttachResponse_Error:
+			return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("run project %s prompt attach failed: %s", projectName, firstNonEmptyString(frame.Error.GetMessage(), frame.Error.GetCode(), "attach failed"))}
+		}
+	}
+	if err := output.Finish(); err != nil {
+		return err
+	}
+	if result == nil {
+		return fmt.Errorf("run project %s: prompt attach completed without result", projectName)
+	}
+	if !result.GetSuccess() {
+		runID := ""
+		if result.GetRun() != nil {
+			runID = result.GetRun().GetRunId()
+		}
+		return commandExitError{Code: attachResultExitCode(result), Err: fmt.Errorf("run %s in project %s failed: %s", firstNonEmptyString(runID, "attach"), projectName, firstNonEmptyString(result.GetError(), result.GetOutput(), "prompt failed"))}
+	}
+	return nil
+}
+
+func pumpRunAttachStdin(stdin io.Reader, send func(*agentcomposev2.RunAttachRequest) error, closeRequest func() error) (err error) {
+	defer func() {
+		err = errors.Join(err, closeRequest())
+	}()
+	buffer := make([]byte, 32*1024)
+	for {
+		n, readErr := stdin.Read(buffer)
+		if n > 0 {
+			chunk := append([]byte(nil), buffer[:n]...)
+			if err := send(&agentcomposev2.RunAttachRequest{
+				Frame: &agentcomposev2.RunAttachRequest_Stdin{Stdin: &agentcomposev2.AttachStdin{Data: chunk}},
+			}); err != nil {
+				return err
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return send(&agentcomposev2.RunAttachRequest{
+				Frame: &agentcomposev2.RunAttachRequest_StdinEof{StdinEof: &agentcomposev2.AttachStdinEOF{}},
+			})
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
+func attachResultExitCode(result *agentcomposev2.AttachResult) int {
+	if result == nil || result.GetExitCode() == 0 {
+		return exitCodeGeneral
+	}
+	return int(result.GetExitCode())
+}
+
+type execAttachStream interface {
+	Send(*agentcomposev2.ExecAttachRequest) error
+	Receive() (*agentcomposev2.ExecAttachResponse, error)
+	CloseRequest() error
+}
+
+type connectExecAttachClient struct {
+	client agentcomposev2connect.ExecServiceClient
+}
+
+func (c connectExecAttachClient) ExecAttach(ctx context.Context) execAttachStream {
+	return c.client.ExecAttach(ctx)
+}
+
+func runComposeExecAttachCommand(cmd *cobra.Command, projectName string, client execAttachClient, req *agentcomposev2.ExecRequest, options composeExecOptions) (err error) {
+	stdin := cmd.InOrStdin()
+	stdout := cmd.OutOrStdout()
+	stderr := cmd.ErrOrStderr()
+	var stdinFD int
+	var stdoutFD int
+	var restoreTerminal func() error
+	var initialSize *agentcomposev2.AttachTerminalSize
+	if options.TTY {
+		var ok bool
+		stdinFD, ok = terminalFileDescriptor(stdin)
+		if !ok || !isTerminalFD(stdinFD) {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec -t/--tty requires terminal stdin")}
+		}
+		stdoutFD, ok = terminalFileDescriptor(stdout)
+		if !ok || !isTerminalFD(stdoutFD) {
+			return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec -t/--tty requires terminal stdout")}
+		}
+		restoreTerminal, err = makeTerminalRaw(stdinFD)
+		if err != nil {
+			return fmt.Errorf("enable raw terminal mode: %w", err)
+		}
+		defer func() {
+			if restoreErr := restoreTerminal(); err == nil && restoreErr != nil {
+				err = fmt.Errorf("restore terminal mode: %w", restoreErr)
+			}
+		}()
+		initialSize = terminalSizeForFD(stdoutFD)
+	}
+	stream := client.ExecAttach(cmd.Context())
+	var sendMu sync.Mutex
+	send := func(frame *agentcomposev2.ExecAttachRequest) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.Send(frame)
+	}
+	closeRequest := func() error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.CloseRequest()
+	}
+	if err := send(&agentcomposev2.ExecAttachRequest{
+		Frame: &agentcomposev2.ExecAttachRequest_Start{Start: &agentcomposev2.ExecAttachStart{
+			Request:      req,
+			AttachStdin:  true,
+			Tty:          options.TTY,
+			TerminalSize: initialSize,
+			Mode:         agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_COMMAND,
+		}},
+	}); err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("exec project %s attach start: %w", projectName, err))
+	}
+	resizeCtx, stopResize := context.WithCancel(cmd.Context())
+	defer stopResize()
+	if options.TTY {
+		stopResizePump := startExecAttachResizePump(resizeCtx, stdoutFD, send)
+		defer stopResizePump()
+	}
+	stdinErr := make(chan error, 1)
+	go func() {
+		stdinErr <- pumpExecAttachStdin(stdin, send, closeRequest)
+	}()
+	var result *agentcomposev2.ExecResult
+	output := newTerminalStreamOutput(stdout, stderr)
+	for {
+		event, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return commandExitErrorForConnect(fmt.Errorf("exec project %s attach: %w", projectName, err))
+		}
+		switch frame := event.GetFrame().(type) {
+		case *agentcomposev2.ExecAttachResponse_Output:
+			if err := writeExecAttachOutput(output, frame.Output); err != nil {
+				return err
+			}
+		case *agentcomposev2.ExecAttachResponse_Result:
+			result = execResultFromAttachResult(frame.Result)
+		case *agentcomposev2.ExecAttachResponse_Error:
+			return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("exec project %s attach failed: %s", projectName, firstNonEmptyString(frame.Error.GetMessage(), frame.Error.GetCode(), "attach failed"))}
+		}
+	}
+	stopResize()
+	if !options.TTY {
+		if err := output.Finish(); err != nil {
+			return err
+		}
+	}
+	select {
+	case err := <-stdinErr:
+		if err != nil {
+			return fmt.Errorf("exec attach stdin: %w", err)
+		}
+	default:
+	}
+	if result == nil {
+		return fmt.Errorf("exec project %s: attach completed without result", projectName)
+	}
+	if !result.GetSuccess() {
+		return commandExitError{Code: execResultExitCode(result), Err: fmt.Errorf("exec %s in sandbox %s failed: %s", result.GetExecId(), result.GetSandboxId(), firstNonEmptyString(result.GetError(), result.GetStderr(), result.GetOutput(), "command failed"))}
+	}
+	return nil
+}
+
+func runComposeExecPromptAttachCommand(cmd *cobra.Command, projectName string, client execAttachClient, req *agentcomposev2.ExecRequest, options composeExecOptions) error {
+	stdin := cmd.InOrStdin()
+	stdout := cmd.OutOrStdout()
+	stderr := cmd.ErrOrStderr()
+	stream := client.ExecAttach(cmd.Context())
+	var sendMu sync.Mutex
+	send := func(frame *agentcomposev2.ExecAttachRequest) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.Send(frame)
+	}
+	closeRequest := func() error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.CloseRequest()
+	}
+	if err := send(&agentcomposev2.ExecAttachRequest{
+		Frame: &agentcomposev2.ExecAttachRequest_Start{Start: &agentcomposev2.ExecAttachStart{
+			Request:     req,
+			Mode:        agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT,
+			Prompt:      strings.TrimSpace(options.Prompt),
+			AttachStdin: true,
+			Tty:         false,
+		}},
+	}); err != nil {
+		return commandExitErrorForConnect(fmt.Errorf("exec project %s prompt attach start: %w", projectName, err))
+	}
+	scanner := bufio.NewScanner(stdin)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lastOutputEndedWithNewline := true
+	inputPrompt := promptAttachInputPrompt{
+		SandboxID: req.GetSandboxId(),
+	}
+	var promptForInput func() error
+	promptForInput = func() error {
+		if fd, ok := terminalFileDescriptor(stdout); ok && isTerminalFD(fd) {
+			if err := writePromptAttachInputPrompt(stderr, inputPrompt, !lastOutputEndedWithNewline); err != nil {
+				return err
+			}
+		}
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return err
+			}
+			if err := send(&agentcomposev2.ExecAttachRequest{
+				Frame: &agentcomposev2.ExecAttachRequest_StdinEof{StdinEof: &agentcomposev2.AttachStdinEOF{}},
+			}); err != nil {
+				return err
+			}
+			return closeRequest()
+		}
+		text := strings.TrimSpace(scanner.Text())
+		if text == "" {
+			return promptForInput()
+		}
+		if text == "/exit" {
+			if err := send(&agentcomposev2.ExecAttachRequest{
+				Frame: &agentcomposev2.ExecAttachRequest_StdinEof{StdinEof: &agentcomposev2.AttachStdinEOF{}},
+			}); err != nil {
+				return err
+			}
+			return closeRequest()
+		}
+		lastOutputEndedWithNewline = true
+		return send(&agentcomposev2.ExecAttachRequest{
+			Frame: &agentcomposev2.ExecAttachRequest_HumanMessage{HumanMessage: &agentcomposev2.AttachHumanMessage{Text: text}},
+		})
+	}
+	var result *agentcomposev2.AttachResult
+	output := newTerminalStreamOutput(stdout, stderr)
+	for {
+		event, err := stream.Receive()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return commandExitErrorForConnect(fmt.Errorf("exec project %s prompt attach: %w", projectName, err))
+		}
+		switch frame := event.GetFrame().(type) {
+		case *agentcomposev2.ExecAttachResponse_Started:
+			inputPrompt.UpdateFromStarted(frame.Started)
+		case *agentcomposev2.ExecAttachResponse_Output:
+			if err := writeExecAttachOutput(output, frame.Output); err != nil {
+				return err
+			}
+			if data := frame.Output.GetData(); len(data) > 0 {
+				lastOutputEndedWithNewline = data[len(data)-1] == '\n'
+			}
+		case *agentcomposev2.ExecAttachResponse_AgentEvent:
+			if text := frame.AgentEvent.GetText(); text != "" {
+				if _, err := io.WriteString(stdout, text); err != nil {
+					return err
+				}
+				lastOutputEndedWithNewline = strings.HasSuffix(text, "\n")
+			}
+		case *agentcomposev2.ExecAttachResponse_AgentTurnCompleted:
+			if err := promptForInput(); err != nil {
+				return err
+			}
+		case *agentcomposev2.ExecAttachResponse_Result:
+			result = frame.Result
+			inputPrompt.UpdateFromRun(result.GetRun())
+		case *agentcomposev2.ExecAttachResponse_Error:
+			return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("exec project %s prompt attach failed: %s", projectName, firstNonEmptyString(frame.Error.GetMessage(), frame.Error.GetCode(), "attach failed"))}
+		}
+	}
+	if err := output.Finish(); err != nil {
+		return err
+	}
+	if result == nil {
+		return fmt.Errorf("exec project %s: prompt attach completed without result", projectName)
+	}
+	if !result.GetSuccess() {
+		runID := ""
+		if result.GetRun() != nil {
+			runID = result.GetRun().GetRunId()
+		}
+		return commandExitError{Code: attachResultExitCode(result), Err: fmt.Errorf("run %s in project %s failed: %s", firstNonEmptyString(runID, "attach"), projectName, firstNonEmptyString(result.GetError(), result.GetOutput(), "prompt failed"))}
+	}
+	return nil
+}
+
+func pumpExecAttachStdin(stdin io.Reader, send func(*agentcomposev2.ExecAttachRequest) error, closeRequest func() error) (err error) {
+	defer func() {
+		err = errors.Join(err, closeRequest())
+	}()
+	buffer := make([]byte, 32*1024)
+	for {
+		n, readErr := stdin.Read(buffer)
+		if n > 0 {
+			chunk := append([]byte(nil), buffer[:n]...)
+			if err := send(&agentcomposev2.ExecAttachRequest{
+				Frame: &agentcomposev2.ExecAttachRequest_Stdin{Stdin: &agentcomposev2.AttachStdin{Data: chunk}},
+			}); err != nil {
+				return err
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return send(&agentcomposev2.ExecAttachRequest{
+				Frame: &agentcomposev2.ExecAttachRequest_StdinEof{StdinEof: &agentcomposev2.AttachStdinEOF{}},
+			})
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
+func writeExecAttachOutput(output *terminalStreamOutput, attachOutput *agentcomposev2.AttachOutput) error {
+	if attachOutput == nil {
+		return nil
+	}
+	return output.Write(attachOutput.GetTranscript(), string(attachOutput.GetData()), attachOutput.GetStream())
+}
+
+type promptAttachInputPrompt struct {
+	AgentName string
+	SandboxID string
+}
+
+func (p *promptAttachInputPrompt) UpdateFromStarted(started *agentcomposev2.AttachStarted) {
+	if started == nil {
+		return
+	}
+	p.UpdateFromRun(started.GetRun())
+	if sessionID := strings.TrimSpace(started.GetSandboxId()); sessionID != "" {
+		p.SandboxID = sessionID
+	}
+}
+
+func (p *promptAttachInputPrompt) UpdateFromRun(run *agentcomposev2.RunSummary) {
+	if run == nil {
+		return
+	}
+	if agentName := strings.TrimSpace(run.GetAgentName()); agentName != "" {
+		p.AgentName = agentName
+	}
+	if sandboxID := firstNonEmptyString(run.GetSandboxId(), run.GetSandboxId()); sandboxID != "" {
+		p.SandboxID = sandboxID
+	}
+}
+
+func (p promptAttachInputPrompt) String() string {
+	agentName := strings.TrimSpace(p.AgentName)
+	if agentName == "" {
+		agentName = "agent"
+	}
+	sandboxID := shortOpaqueID(p.SandboxID)
+	if sandboxID == "" {
+		sandboxID = "sandbox"
+	}
+	return fmt.Sprintf("%s@%s:> ", agentName, sandboxID)
+}
+
+func writePromptAttachInputPrompt(writer io.Writer, prompt promptAttachInputPrompt, leadingNewline bool) error {
+	prefix := prompt.String()
+	if leadingNewline {
+		prefix = "\n" + prefix
+	}
+	_, err := io.WriteString(writer, prefix)
+	return err
+}
+
+func execResultFromAttachResult(result *agentcomposev2.AttachResult) *agentcomposev2.ExecResult {
+	if result == nil {
+		return nil
+	}
+	if result.GetExecResult() != nil {
+		return result.GetExecResult()
+	}
+	return &agentcomposev2.ExecResult{
+		ExitCode: result.GetExitCode(),
+		Success:  result.GetSuccess(),
+		Output:   result.GetOutput(),
+		Error:    result.GetError(),
+	}
+}
+
+func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, projectID string, options composeExecOptions, args []string) (*agentcomposev2.ExecRequest, error) {
+	commandText := strings.TrimSpace(options.Command)
+	promptText := strings.TrimSpace(options.Prompt)
+	if commandText != "" && promptText != "" {
+		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires only one of --command or --prompt")}
+	}
+	if commandText == "" && promptText == "" {
+		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires --command or --prompt")}
+	}
 	legacyTargetFlags := []string{}
 	if cmd.Flags().Changed("run-id") {
 		legacyTargetFlags = append(legacyTargetFlags, "--run-id")
-	}
-	if cmd.Flags().Changed("agent") {
-		legacyTargetFlags = append(legacyTargetFlags, "--agent")
 	}
 	if len(legacyTargetFlags) > 1 {
 		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec target can only be specified once")}
@@ -2793,7 +3482,7 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 		if err := writeDeprecatedWarning(cmd.ErrOrStderr(), "agent-compose exec "+legacyTargetFlags[0], "agent-compose exec <sandbox>"); err != nil {
 			return nil, err
 		}
-		command, err := composeExecCommandFromArgs(options, args)
+		command, err := composeExecCommandFromArgs(options, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -2812,20 +3501,6 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 				return nil, err
 			}
 			req.Target = &agentcomposev2.ExecRequest_RunId{RunId: runID}
-		case "--agent":
-			agentName := strings.TrimSpace(options.AgentName)
-			if agentName == "" {
-				return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec --agent requires a value")}
-			}
-			agentName, err = resolveComposeAgentNameFromSpec(normalized, projectID, agentName)
-			if err != nil {
-				return nil, err
-			}
-			req.Target = &agentcomposev2.ExecRequest_Selector{Selector: &agentcomposev2.ExecSandboxSelector{
-				ProjectId:   projectID,
-				ProjectName: normalized.Name,
-				AgentName:   agentName,
-			}}
 		}
 		return req, nil
 	}
@@ -2833,11 +3508,14 @@ func normalizeComposeExecRequest(cmd *cobra.Command, clients cliServiceClients, 
 	if sandbox == "" {
 		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires non-empty sandbox")}
 	}
+	if len(args) > 1 {
+		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec command must be specified with --command")}
+	}
 	sandbox, err := resolveComposeSandboxRefWithProject(cmd.Context(), clients, projectID, sandbox)
 	if err != nil {
 		return nil, err
 	}
-	command, err := composeExecCommandFromArgs(options, args[1:])
+	command, err := composeExecCommandFromArgs(options, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2856,11 +3534,10 @@ func composeExecCommandFromArgs(options composeExecOptions, args []string) (*age
 		}
 		return &agentcomposev2.ExecCommand{Command: "bash", Args: []string{"-lc", commandText}}, nil
 	}
-	commandArgs := append([]string(nil), args...)
-	if len(commandArgs) == 0 {
-		commandArgs = []string{"sh"}
+	if strings.TrimSpace(options.Prompt) != "" {
+		return nil, nil
 	}
-	return &agentcomposev2.ExecCommand{Command: commandArgs[0], Args: append([]string(nil), commandArgs[1:]...)}, nil
+	return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("exec requires --command or --prompt")}
 }
 
 func runComposeImageListCommand(cmd *cobra.Command, cli cliOptions, options composeImageListOptions) error {
@@ -4707,6 +5384,22 @@ func newCLIServiceClients(cli cliOptions) (cliServiceClients, error) {
 		session: agentcomposev1connect.NewSessionServiceClient(httpClient, clientConfig.BaseURL),
 		loader:  agentcomposev1connect.NewLoaderServiceClient(httpClient, clientConfig.BaseURL),
 	}, nil
+}
+
+func newCLIRunAttachServiceClient(cli cliOptions) (agentcomposev2connect.RunServiceClient, error) {
+	clientConfig, err := resolveCLIClientConfig(cli.Host)
+	if err != nil {
+		return nil, err
+	}
+	return agentcomposev2connect.NewRunServiceClient(newDaemonAttachHTTPClient(clientConfig), clientConfig.BaseURL), nil
+}
+
+func newCLIExecAttachServiceClient(cli cliOptions) (agentcomposev2connect.ExecServiceClient, error) {
+	clientConfig, err := resolveCLIClientConfig(cli.Host)
+	if err != nil {
+		return nil, err
+	}
+	return agentcomposev2connect.NewExecServiceClient(newDaemonAttachHTTPClient(clientConfig), clientConfig.BaseURL), nil
 }
 
 func composePSOutputFromProject(ctx context.Context, clients cliServiceClients, project *agentcomposev2.Project, options composePSOptions) (composePSOutput, error) {
@@ -7160,6 +7853,12 @@ func commandExitCode(err error) int {
 }
 
 func commandExitErrorForConnect(err error) error {
+	if isAttachHTTP2TransportMismatch(err) {
+		return commandExitError{
+			Code: exitCodeUnavailable,
+			Err:  fmt.Errorf("%w; attach RPCs require HTTP/2 h2c, restart the agent-compose daemon with a matching build or connect directly without an HTTP/1 proxy", err),
+		}
+	}
 	switch connect.CodeOf(err) {
 	case connect.CodeUnimplemented:
 		return commandExitError{Code: exitCodeUnsupported, Err: err}
@@ -7170,6 +7869,14 @@ func commandExitErrorForConnect(err error) error {
 	default:
 		return err
 	}
+}
+
+func isAttachHTTP2TransportMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "http2: frame too large") && strings.Contains(message, "HTTP/1.1 header")
 }
 
 func commandExitErrorForComposeProject(err error, command, projectName, composePath string) error {
@@ -7355,15 +8062,15 @@ func formatDaemonStatusTime(timestamp float64, timezone string, timezoneOffset *
 }
 
 func newDaemonHTTPClient(clientConfig cliClientConfig) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if clientConfig.UseUnixSocket {
-		socketPath := clientConfig.SocketPath
-		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, "unix", socketPath)
-		}
-	}
-	var roundTripper http.RoundTripper = transport
+	return newDaemonHTTPClientWithTimeout(clientConfig, 10*time.Minute)
+}
+
+func newDaemonAttachHTTPClient(clientConfig cliClientConfig) *http.Client {
+	return newDaemonHTTPClientWithTimeout(clientConfig, 0)
+}
+
+func newDaemonHTTPClientWithTimeout(clientConfig cliClientConfig, timeout time.Duration) *http.Client {
+	roundTripper := http.RoundTripper(newDaemonBaseRoundTripper(clientConfig))
 	if !clientConfig.UseUnixSocket && (clientConfig.AuthUsername != "" || clientConfig.AuthPassword != "") {
 		roundTripper = basicAuthRoundTripper{
 			username: clientConfig.AuthUsername,
@@ -7373,8 +8080,53 @@ func newDaemonHTTPClient(clientConfig cliClientConfig) *http.Client {
 	}
 	return &http.Client{
 		Transport: roundTripper,
-		Timeout:   10 * time.Minute,
+		Timeout:   timeout,
 	}
+}
+
+func newDaemonBaseRoundTripper(clientConfig cliClientConfig) http.RoundTripper {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if clientConfig.UseUnixSocket {
+		socketPath := clientConfig.SocketPath
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, "unix", socketPath)
+		}
+	}
+	if !clientConfig.UseUnixSocket && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(clientConfig.BaseURL)), "http://") {
+		return transport
+	}
+	h2cTransport := &http2.Transport{
+		AllowHTTP: true,
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			if clientConfig.UseUnixSocket {
+				network = "unix"
+				addr = clientConfig.SocketPath
+			}
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+	return daemonAttachRoundTripper{
+		defaultTransport: transport,
+		attachTransport:  h2cTransport,
+	}
+}
+
+type daemonAttachRoundTripper struct {
+	defaultTransport http.RoundTripper
+	attachTransport  http.RoundTripper
+}
+
+func (t daemonAttachRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if isAttachRPCPath(req.URL.Path) {
+		return t.attachTransport.RoundTrip(req)
+	}
+	return t.defaultTransport.RoundTrip(req)
+}
+
+func isAttachRPCPath(path string) bool {
+	return path == agentcomposev2connect.RunServiceRunAttachProcedure || path == agentcomposev2connect.ExecServiceExecAttachProcedure
 }
 
 type basicAuthRoundTripper struct {

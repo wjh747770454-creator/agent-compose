@@ -21,6 +21,7 @@ type RunAgentDelegate interface {
 	RunAgent(context.Context, *connect.Request[agentcomposev2.RunAgentRequest]) (*connect.Response[agentcomposev2.RunAgentResponse], error)
 	StartRun(context.Context, *connect.Request[agentcomposev2.StartRunRequest]) (*connect.Response[agentcomposev2.StartRunResponse], error)
 	RunAgentStream(context.Context, *connect.Request[agentcomposev2.RunAgentRequest], *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error
+	RunAttach(context.Context, *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error
 }
 
 type ActiveRunStopper interface {
@@ -36,6 +37,7 @@ type RunHandler struct {
 	delegate RunAgentDelegate
 	stopper  ActiveRunStopper
 	store    RunStore
+	runLogs  *runs.RunLogHub
 }
 
 func NewRunHandler(delegate RunAgentDelegate, store RunStore, stoppers ...ActiveRunStopper) *RunHandler {
@@ -43,6 +45,12 @@ func NewRunHandler(delegate RunAgentDelegate, store RunStore, stoppers ...Active
 	if len(stoppers) > 0 {
 		handler.stopper = stoppers[0]
 	}
+	return handler
+}
+
+func NewRunHandlerWithRunLogHub(delegate RunAgentDelegate, store RunStore, hub *runs.RunLogHub, stoppers ...ActiveRunStopper) *RunHandler {
+	handler := NewRunHandler(delegate, store, stoppers...)
+	handler.runLogs = hub
 	return handler
 }
 
@@ -59,6 +67,20 @@ func (h *RunHandler) StartRun(ctx context.Context, req *connect.Request[agentcom
 
 func (h *RunHandler) RunAgentStream(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
 	return h.delegate.RunAgentStream(ctx, req, stream)
+}
+
+func (h *RunHandler) RunAttach(ctx context.Context, stream *connect.BidiStream[agentcomposev2.RunAttachRequest, agentcomposev2.RunAttachResponse]) error {
+	if h.delegate == nil {
+		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("run attach is not configured"))
+	}
+	if err := h.delegate.RunAttach(ctx, stream); err != nil {
+		var connectErr *connect.Error
+		if errors.As(err, &connectErr) {
+			return connectErr
+		}
+		return ConnectErrorForDomain(err)
+	}
+	return nil
 }
 
 func (h *RunHandler) GetRun(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -122,35 +144,27 @@ func (h *RunHandler) FollowRunLogs(ctx context.Context, req *connect.Request[age
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
+	if req.Msg.GetFollow() && h.runLogs != nil {
+		return h.followRunLogsWithHub(ctx, req.Msg.GetProjectId(), run, offset, stream)
+	}
+	return h.followRunLogsByPolling(ctx, req, run, offset, stream)
+}
+
+func (h *RunHandler) followRunLogsByPolling(ctx context.Context, req *connect.Request[agentcomposev2.FollowRunLogsRequest], run domain.ProjectRunRecord, offset uint64, stream *connect.ServerStream[agentcomposev2.RunLogChunk]) error {
+	runID := run.RunID
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
+		var err error
 		run, err = h.projectRunForLogRequest(ctx, req.Msg.GetProjectId(), runID)
 		if err != nil {
 			return err
 		}
-		data, nextOffset, err := readRunLogFromOffset(run.LogsPath, offset)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return connect.NewError(connect.CodeInternal, err)
-		}
-		if data != "" {
-			offset = nextOffset
-			if err := stream.Send(&agentcomposev2.RunLogChunk{
-				Data:      data,
-				Offset:    offset,
-				RunStatus: ProjectRunStatusToProto(run.Status),
-				CreatedAt: FormatProjectTime(time.Now().UTC()),
-			}); err != nil {
-				return connect.NewError(connect.CodeUnknown, err)
-			}
+		if err := sendRunLogFileChunk(stream, run, &offset, time.Now().UTC()); err != nil {
+			return err
 		}
 		if !req.Msg.GetFollow() || runs.StatusIsTerminal(run.Status) {
-			return stream.Send(&agentcomposev2.RunLogChunk{
-				Offset:    offset,
-				IsFinal:   true,
-				RunStatus: ProjectRunStatusToProto(run.Status),
-				CreatedAt: FormatProjectTime(time.Now().UTC()),
-			})
+			return sendRunLogFinal(stream, run, offset)
 		}
 		select {
 		case <-ctx.Done():
@@ -158,6 +172,85 @@ func (h *RunHandler) FollowRunLogs(ctx context.Context, req *connect.Request[age
 		case <-ticker.C:
 		}
 	}
+}
+
+func (h *RunHandler) followRunLogsWithHub(ctx context.Context, projectID string, run domain.ProjectRunRecord, offset uint64, stream *connect.ServerStream[agentcomposev2.RunLogChunk]) error {
+	sub := h.runLogs.Subscribe(run.RunID)
+	if sub == nil {
+		return h.followRunLogsByPolling(ctx, connect.NewRequest(&agentcomposev2.FollowRunLogsRequest{ProjectId: projectID, RunId: run.RunID, Follow: true}), run, offset, stream)
+	}
+	defer sub.Close()
+	if err := sendRunLogFileChunk(stream, run, &offset, time.Now().UTC()); err != nil {
+		return err
+	}
+	if runs.StatusIsTerminal(run.Status) {
+		return sendRunLogFinal(stream, run, offset)
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-sub.C():
+			if !ok {
+				return nil
+			}
+			if event.Offset <= offset {
+				continue
+			}
+			current, err := h.projectRunForLogRequest(ctx, projectID, run.RunID)
+			if err != nil {
+				return err
+			}
+			if err := sendRunLogFileChunk(stream, current, &offset, event.CreatedAt); err != nil {
+				return err
+			}
+		case <-ticker.C:
+			current, err := h.projectRunForLogRequest(ctx, projectID, run.RunID)
+			if err != nil {
+				return err
+			}
+			if err := sendRunLogFileChunk(stream, current, &offset, time.Now().UTC()); err != nil {
+				return err
+			}
+			if runs.StatusIsTerminal(current.Status) {
+				return sendRunLogFinal(stream, current, offset)
+			}
+		}
+	}
+}
+
+func sendRunLogFileChunk(stream *connect.ServerStream[agentcomposev2.RunLogChunk], run domain.ProjectRunRecord, offset *uint64, createdAt time.Time) error {
+	data, nextOffset, err := readRunLogFromOffset(run.LogsPath, *offset)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	if data == "" {
+		return nil
+	}
+	*offset = nextOffset
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	if err := stream.Send(&agentcomposev2.RunLogChunk{
+		Data:      data,
+		Offset:    *offset,
+		RunStatus: ProjectRunStatusToProto(run.Status),
+		CreatedAt: FormatProjectTime(createdAt),
+	}); err != nil {
+		return connect.NewError(connect.CodeUnknown, err)
+	}
+	return nil
+}
+
+func sendRunLogFinal(stream *connect.ServerStream[agentcomposev2.RunLogChunk], run domain.ProjectRunRecord, offset uint64) error {
+	return stream.Send(&agentcomposev2.RunLogChunk{
+		Offset:    offset,
+		IsFinal:   true,
+		RunStatus: ProjectRunStatusToProto(run.Status),
+		CreatedAt: FormatProjectTime(time.Now().UTC()),
+	})
 }
 
 func (h *RunHandler) projectRunForLogRequest(ctx context.Context, projectID, runID string) (domain.ProjectRunRecord, error) {

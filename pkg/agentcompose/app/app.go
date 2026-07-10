@@ -63,6 +63,7 @@ func RegisterDependencies(di do.Injector) {
 	do.Provide(di, NewCapProxyServer)
 	do.Provide(di, loaders.NewBus)
 	do.Provide(di, sessions.NewStreamBroker)
+	do.Provide(di, NewRunLogHub)
 	do.Provide(di, NewEventDispatcher)
 	do.Provide(di, NewDashboardOverviewAggregator)
 	do.Provide(di, NewDashboardOverviewHub)
@@ -141,7 +142,7 @@ func RegisterRoutes(di do.Injector) {
 		controller: do.MustInvoke[*runs.Controller](di),
 		supervisor: do.MustInvoke[*RunSupervisor](di),
 	}
-	runHandler := api.NewRunHandler(runDelegate, do.MustInvoke[*configstore.ConfigStore](di), do.MustInvoke[*RunSupervisor](di))
+	runHandler := api.NewRunHandlerWithRunLogHub(runDelegate, do.MustInvoke[*configstore.ConfigStore](di), do.MustInvoke[*runs.RunLogHub](di), do.MustInvoke[*RunSupervisor](di))
 	path, handler = agentcomposev2connect.NewRunServiceHandler(runHandler)
 	app.Any(path+"*", echo.WrapHandler(handler))
 	execHandler := api.NewExecHandler(
@@ -151,6 +152,7 @@ func RegisterRoutes(di do.Injector) {
 		func(session *domain.Sandbox) (api.ExecRuntime, error) {
 			return do.MustInvoke[adapters.RuntimeProvider](di).ForSession(session)
 		},
+		runDelegate,
 	)
 	path, handler = agentcomposev2connect.NewExecServiceHandler(execHandler)
 	app.Any(path+"*", echo.WrapHandler(handler))
@@ -374,6 +376,10 @@ func NewDashboardOverviewAggregator(di do.Injector) (*dashboard.Aggregator, erro
 
 func NewDashboardOverviewHub(di do.Injector) (*dashboard.Hub, error) {
 	return dashboard.NewHub(do.MustInvoke[context.Context](di), do.MustInvoke[*dashboard.Aggregator](di), 250*time.Millisecond), nil
+}
+
+func NewRunLogHub(do.Injector) (*runs.RunLogHub, error) {
+	return runs.NewRunLogHub(), nil
 }
 
 func registerProxyRoutes(app *echo.Echo, di do.Injector) {

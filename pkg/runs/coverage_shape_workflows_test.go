@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -307,6 +308,9 @@ func TestRunsControllerRunProjectAgentSuccessWorkflow(t *testing.T) {
 	if run.Status != domain.ProjectRunStatusSucceeded || run.SandboxID == "" || run.Output != "done" {
 		t.Fatalf("run = %#v", run)
 	}
+	if !strings.Contains(run.ArtifactsDir, filepath.Join("state", "cells", "cell-1")) || filepath.Base(run.LogsPath) != "output.txt" {
+		t.Fatalf("agent run artifact paths = artifacts:%q logs:%q", run.ArtifactsDir, run.LogsPath)
+	}
 	if !started || len(chunks) != 1 || !driver.started || !driver.stopped || executor.request.Message != "do work" {
 		t.Fatalf("started=%v chunks=%#v driver=%#v request=%#v", started, chunks, driver, executor.request)
 	}
@@ -317,6 +321,9 @@ func TestRunsControllerRunProjectAgentSuccessWorkflow(t *testing.T) {
 		t.Fatalf("agent run logs_path content = %q err=%v", string(data), err)
 	}
 	proxyState, err := store.GetProxyState(run.SandboxID)
+	if data, err := os.ReadFile(filepath.Join(run.ArtifactsDir, "output.txt")); err != nil || string(data) != "chunk" {
+		t.Fatalf("agent run output artifact = %q err=%v", string(data), err)
+	}
 	if err != nil {
 		t.Fatalf("GetProxyState returned error: %v", err)
 	}
@@ -529,6 +536,9 @@ func TestRunsControllerRunProjectAgentCommandWorkflow(t *testing.T) {
 	if run.Status != domain.ProjectRunStatusSucceeded || run.Output != "command output\n" || run.ArtifactsDir == "" || run.LogsPath == "" {
 		t.Fatalf("command run = %#v", run)
 	}
+	if !strings.Contains(run.ArtifactsDir, filepath.Join("state", "runs", run.RunID)) || filepath.Base(run.LogsPath) != "transcript.txt" {
+		t.Fatalf("command run artifact paths = artifacts:%q logs:%q", run.ArtifactsDir, run.LogsPath)
+	}
 	transcriptData, err := os.ReadFile(filepath.Join(run.ArtifactsDir, "transcript.txt"))
 	if err != nil || string(transcriptData) != "command output\n" || strings.Contains(string(transcriptData), execution.CommandResultPrefix) {
 		t.Fatalf("command transcript artifact = %q err=%v", string(transcriptData), err)
@@ -646,6 +656,261 @@ func TestRunsControllerRunProjectAgentCommandNonZeroExitPreservesOutput(t *testi
 	transcriptData, err := os.ReadFile(filepath.Join(run.ArtifactsDir, "transcript.txt"))
 	if err != nil || !strings.Contains(string(transcriptData), "partial stdout\n") || !strings.Contains(string(transcriptData), "failure stderr\n") || strings.Contains(string(transcriptData), execution.CommandResultPrefix) {
 		t.Fatalf("failed command transcript = %q err=%v", string(transcriptData), err)
+	}
+}
+
+func TestRunsControllerRunProjectCommandAttachProjectsOutputAndResult(t *testing.T) {
+	ctx := context.Background()
+	controller, configDB, runtime := newTestRunAttachController(t, []driverpkg.RuntimeOutputFrame{
+		{Type: driverpkg.RuntimeOutputStarted},
+		{Type: driverpkg.RuntimeOutputStdout, Data: []byte("hello\n")},
+		{Type: driverpkg.RuntimeOutputStderr, Data: []byte("warn\n")},
+		{Type: driverpkg.RuntimeOutputResult, Result: &driverpkg.RuntimeResult{OperationID: "run-attach", ExitCode: 0, Success: true}},
+	})
+	requests := []*agentcomposev2.RunAttachRequest{{
+		Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+			Request: &agentcomposev2.RunAgentRequest{
+				ProjectId:       "project-1",
+				AgentName:       "worker",
+				Command:         "echo hello",
+				Source:          agentcomposev2.RunSource_RUN_SOURCE_API,
+				ClientRequestId: "attach-request",
+			},
+			Mode:        agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_COMMAND,
+			AttachStdin: true,
+		}},
+	}}
+	var responses []*agentcomposev2.RunAttachResponse
+	err := controller.RunProjectCommandAttach(ctx, recvRunAttachRequests(requests), func(resp *agentcomposev2.RunAttachResponse) error {
+		if started := resp.GetStarted(); started != nil {
+			stored, err := configDB.GetProjectRun(ctx, started.GetRunId())
+			if err != nil {
+				t.Fatalf("get running command attach run: %v", err)
+			}
+			if stored.LogsPath == "" || stored.ArtifactsDir == "" {
+				t.Fatalf("running command attach run paths were not persisted: %#v", stored)
+			}
+		}
+		responses = append(responses, resp)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunProjectCommandAttach returned error: %v", err)
+	}
+	if len(responses) != 4 || responses[0].GetStarted() == nil || responses[1].GetOutput() == nil || responses[2].GetOutput() == nil || responses[3].GetResult() == nil {
+		t.Fatalf("attach responses = %#v", responses)
+	}
+	if responses[1].GetOutput().GetTranscript().GetText() != "hello\n" || responses[2].GetOutput().GetStream() != agentcomposev2.StdioStream_STDIO_STREAM_STDERR {
+		t.Fatalf("attach output projection = %#v / %#v", responses[1].GetOutput(), responses[2].GetOutput())
+	}
+	run := responses[3].GetResult().GetRun()
+	if run.GetStatus() != agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED || !responses[3].GetResult().GetSuccess() {
+		t.Fatalf("attach result = %#v", responses[3].GetResult())
+	}
+	if runtime.spec.ArtifactDir != "" || runtime.spec.Command == nil || runtime.spec.Command.Command != "bash" || strings.Join(runtime.spec.Command.Args, " ") != "-lc echo hello" {
+		t.Fatalf("runtime spec = %#v", runtime.spec)
+	}
+	stored, err := configDB.GetProjectRun(ctx, run.GetRunId())
+	if err != nil || stored.Status != domain.ProjectRunStatusSucceeded || stored.Output != "hello\nwarn\n" || stored.LogsPath == "" {
+		t.Fatalf("stored run = %#v err=%v", stored, err)
+	}
+	data, err := os.ReadFile(stored.LogsPath)
+	if err != nil || string(data) != "hello\nwarn\n" {
+		t.Fatalf("attach transcript = %q err=%v", string(data), err)
+	}
+}
+
+func TestRunsControllerRunProjectCommandAttachValidatesStartFrame(t *testing.T) {
+	controller, _, _ := newTestRunAttachController(t, nil)
+	err := controller.RunProjectCommandAttach(context.Background(), recvRunAttachRequests([]*agentcomposev2.RunAttachRequest{{
+		Frame: &agentcomposev2.RunAttachRequest_Stdin{Stdin: &agentcomposev2.AttachStdin{Data: []byte("x")}},
+	}}), func(*agentcomposev2.RunAttachResponse) error { return nil })
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("RunProjectCommandAttach first frame error = %v, want ErrInvalidRequest", err)
+	}
+}
+
+func TestRunsControllerRunProjectPromptAttachProjectsAgentFrames(t *testing.T) {
+	ctx := context.Background()
+	controller, configDB, runtime := newTestRunAttachController(t, []driverpkg.RuntimeOutputFrame{
+		{Type: driverpkg.RuntimeOutputStarted},
+		{Type: driverpkg.RuntimeOutputStdout, Data: []byte(`{"v":1,"seq":0,"type":"started","provider":"codex","sessionId":"thread-1"}` + "\n")},
+		{Type: driverpkg.RuntimeOutputStdout, Data: []byte(`{"v":1,"seq":1,"type":"agent_event","event":{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"hello agent\n"}}}` + "\n")},
+		{Type: driverpkg.RuntimeOutputStdout, Data: []byte(`{"v":1,"seq":2,"type":"agent_turn_completed","provider":"codex","sessionId":"thread-1","finalText":"hello agent\n"}` + "\n")},
+		{Type: driverpkg.RuntimeOutputStdout, Data: []byte(`{"v":1,"seq":3,"type":"result","provider":"codex","sessionId":"thread-1","stopReason":"eof","finalText":"hello agent\n","transcript":"hello agent\n"}` + "\n")},
+		{Type: driverpkg.RuntimeOutputResult, Result: &driverpkg.RuntimeResult{OperationID: "run-attach", ExitCode: 0, Success: true}},
+	})
+	requests := []*agentcomposev2.RunAttachRequest{{
+		Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+			Request: &agentcomposev2.RunAgentRequest{ProjectId: "project-1", AgentName: "worker", Prompt: "hello"},
+			Mode:    agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT,
+		}},
+	}}
+	var responses []*agentcomposev2.RunAttachResponse
+	err := controller.RunProjectCommandAttach(ctx, recvRunAttachRequests(requests), func(resp *agentcomposev2.RunAttachResponse) error {
+		if started := resp.GetStarted(); started != nil {
+			stored, err := configDB.GetProjectRun(ctx, started.GetRunId())
+			if err != nil {
+				t.Fatalf("get running prompt attach run: %v", err)
+			}
+			if stored.LogsPath == "" || stored.ArtifactsDir == "" {
+				t.Fatalf("running prompt attach run paths were not persisted: %#v", stored)
+			}
+		}
+		responses = append(responses, resp)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunProjectCommandAttach prompt mode returned error: %v", err)
+	}
+	if len(responses) != 5 || responses[0].GetStarted() == nil || responses[1].GetAgentEvent() == nil || responses[2].GetAgentEvent() == nil || responses[3].GetAgentTurnCompleted() == nil || responses[4].GetResult() == nil {
+		t.Fatalf("prompt attach responses = %#v", responses)
+	}
+	if responses[2].GetAgentEvent().GetText() != "hello agent\n" {
+		t.Fatalf("agent event text = %q", responses[2].GetAgentEvent().GetText())
+	}
+	if runtime.spec.Command == nil || runtime.spec.Command.Command != "sh" || !strings.Contains(strings.Join(runtime.spec.Command.Args, " "), "agent-compose-runtime stream") || runtime.spec.TTY {
+		t.Fatalf("runtime spec = %#v", runtime.spec)
+	}
+	if runtime.interaction == nil || len(runtime.interaction.sent) < 2 {
+		t.Fatalf("runtime sent frames = %#v", runtime.interaction)
+	}
+	var startFrame map[string]any
+	if err := json.Unmarshal(runtime.interaction.sent[0].Data, &startFrame); err != nil {
+		t.Fatalf("start frame json: %v", err)
+	}
+	if startFrame["type"] != "start" || startFrame["provider"] != "codex" {
+		t.Fatalf("start frame = %#v", startFrame)
+	}
+	var humanFrame map[string]any
+	if err := json.Unmarshal(runtime.interaction.sent[1].Data, &humanFrame); err != nil {
+		t.Fatalf("human frame json: %v", err)
+	}
+	if humanFrame["type"] != "human_message" || humanFrame["message"] != "hello" {
+		t.Fatalf("human frame = %#v", humanFrame)
+	}
+	run := responses[4].GetResult().GetRun()
+	stored, err := configDB.GetProjectRun(ctx, run.GetRunId())
+	if err != nil || stored.Status != domain.ProjectRunStatusSucceeded || stored.Output != "hello agent\n" {
+		t.Fatalf("stored run = %#v err=%v", stored, err)
+	}
+	transcript, err := os.ReadFile(stored.LogsPath)
+	if err != nil {
+		t.Fatalf("read prompt attach transcript: %v", err)
+	}
+	if string(transcript) != "hello agent\n" {
+		t.Fatalf("prompt attach transcript = %q", string(transcript))
+	}
+}
+
+func TestPromptAttachProjectorLogsResultFinalTextWithoutAgentEventText(t *testing.T) {
+	logsPath := filepath.Join(t.TempDir(), "transcript.txt")
+	projector := newPromptAttachProjector(domain.ProjectRunRecord{RunID: "run-final"}, &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-final"}}, logsPath, nil)
+	_, transition, err := projector.Project([]byte(`{"type":"result","finalText":"final only\n","stopReason":"eof"}` + "\n"))
+	if err != nil {
+		t.Fatalf("project final text result: %v", err)
+	}
+	if transition == nil || transition.Output != "final only\n" {
+		t.Fatalf("transition = %#v", transition)
+	}
+	transcript, err := os.ReadFile(logsPath)
+	if err != nil {
+		t.Fatalf("read transcript: %v", err)
+	}
+	if string(transcript) != "final only\n" {
+		t.Fatalf("transcript = %q", string(transcript))
+	}
+}
+
+func TestPromptAttachProjectorLogsHumanMessagesAndTurnFinalText(t *testing.T) {
+	logsPath := filepath.Join(t.TempDir(), "transcript.txt")
+	hub := NewRunLogHub()
+	sub := hub.Subscribe("run-follow")
+	defer sub.Close()
+	projector := newPromptAttachProjector(domain.ProjectRunRecord{RunID: "run-follow"}, &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-follow"}}, logsPath, hub)
+	if _, _, err := projector.Project([]byte(`{"type":"agent_event","event":{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"first answer\n"}}}` + "\n")); err != nil {
+		t.Fatalf("project first answer: %v", err)
+	}
+	if err := projector.AppendHumanMessage("next question"); err != nil {
+		t.Fatalf("append human message: %v", err)
+	}
+	if _, _, err := projector.Project([]byte(`{"type":"agent_turn_completed","finalText":"first answer\n"}` + "\n")); err != nil {
+		t.Fatalf("project first turn completion: %v", err)
+	}
+	transcript, err := os.ReadFile(logsPath)
+	if err != nil {
+		t.Fatalf("read transcript: %v", err)
+	}
+	if string(transcript) != "first answer\nnext question\n" {
+		t.Fatalf("transcript = %q", string(transcript))
+	}
+	firstEvent := receiveProjectorRunLogEvent(t, sub)
+	secondEvent := receiveProjectorRunLogEvent(t, sub)
+	if firstEvent.Data != "first answer\n" || secondEvent.Data != "next question\n" {
+		t.Fatalf("run log events = %#v / %#v", firstEvent, secondEvent)
+	}
+}
+
+func TestPromptAttachProjectorLogsTurnFinalTextWithoutAgentEventText(t *testing.T) {
+	logsPath := filepath.Join(t.TempDir(), "transcript.txt")
+	projector := newPromptAttachProjector(domain.ProjectRunRecord{RunID: "run-turn-final"}, &domain.Sandbox{Summary: domain.SandboxSummary{ID: "session-turn-final"}}, logsPath, nil)
+	if _, _, err := projector.Project([]byte(`{"type":"agent_turn_completed","finalText":"turn only\n"}` + "\n")); err != nil {
+		t.Fatalf("project turn final text: %v", err)
+	}
+	transcript, err := os.ReadFile(logsPath)
+	if err != nil {
+		t.Fatalf("read transcript: %v", err)
+	}
+	if string(transcript) != "turn only\n" {
+		t.Fatalf("transcript = %q", string(transcript))
+	}
+}
+
+func receiveProjectorRunLogEvent(t *testing.T, sub *RunLogSubscription) RunLogEvent {
+	t.Helper()
+	select {
+	case event := <-sub.C():
+		return event
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for run log event")
+	}
+	return RunLogEvent{}
+}
+
+func TestRunsControllerRunProjectPromptAttachUnsupportedProvidersDoNotOpenRuntime(t *testing.T) {
+	for _, provider := range []string{"claude", "gemini", "opencode"} {
+		t.Run(provider, func(t *testing.T) {
+			ctx := context.Background()
+			controller, configDB, runtime := newTestRunAttachController(t, nil)
+			configDB.agent.Provider = provider
+			requests := []*agentcomposev2.RunAttachRequest{{
+				Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+					Request: &agentcomposev2.RunAgentRequest{ProjectId: "project-1", AgentName: "worker", Prompt: "hello"},
+					Mode:    agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT,
+				}},
+			}}
+			var responses []*agentcomposev2.RunAttachResponse
+			err := controller.RunProjectCommandAttach(ctx, recvRunAttachRequests(requests), func(resp *agentcomposev2.RunAttachResponse) error {
+				responses = append(responses, resp)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("RunProjectCommandAttach prompt mode returned error: %v", err)
+			}
+			if runtime.interaction != nil {
+				t.Fatalf("runtime interaction opened for unsupported provider %s: %#v", provider, runtime.interaction)
+			}
+			if len(responses) != 1 || responses[0].GetResult() == nil || responses[0].GetResult().GetSuccess() {
+				t.Fatalf("prompt attach unsupported provider responses = %#v", responses)
+			}
+			if got := responses[0].GetResult().GetError(); !strings.Contains(got, "prompt attach currently supports codex provider only") {
+				t.Fatalf("prompt attach unsupported provider error = %q", got)
+			}
+			run := responses[0].GetResult().GetRun()
+			if run.GetStatus() != agentcomposev2.RunStatus_RUN_STATUS_FAILED {
+				t.Fatalf("prompt attach unsupported provider run = %#v", run)
+			}
+		})
 	}
 }
 
@@ -1141,13 +1406,13 @@ func TestRunsControllerApplyJupyterOptionsToSandbox(t *testing.T) {
 
 func TestRunsProjectRunLogAppendChunk(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state", "runs", "run-1", "output.txt")
-	if err := appendProjectRunLogChunk(path, domain.ExecChunk{Text: "stdout\n"}); err != nil {
+	if offset, err := appendProjectRunLogChunk(path, domain.ExecChunk{Text: "stdout\n"}); err != nil || offset != 7 {
 		t.Fatalf("append stdout returned error: %v", err)
 	}
-	if err := appendProjectRunLogChunk(path, domain.ExecChunk{Text: "stderr\n", Stream: domain.StdioStderr}); err != nil {
+	if offset, err := appendProjectRunLogChunk(path, domain.ExecChunk{Text: "stderr\n", Stream: domain.StdioStderr}); err != nil || offset != 14 {
 		t.Fatalf("append stderr returned error: %v", err)
 	}
-	if err := appendProjectRunLogChunk(path, domain.ExecChunk{}); err != nil {
+	if _, err := appendProjectRunLogChunk(path, domain.ExecChunk{}); err != nil {
 		t.Fatalf("append empty returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -1229,14 +1494,14 @@ func TestRunsControllerHelperEdgeWorkflows(t *testing.T) {
 	if got := projectRunAgentCellOutputPath(session, " cell-1 "); !strings.Contains(got, filepath.Join("state", "cells", "cell-1", "output.txt")) {
 		t.Fatalf("cell output path = %q", got)
 	}
-	if err := appendProjectRunLogChunk("", domain.ExecChunk{Text: "ignored"}); err != nil {
+	if _, err := appendProjectRunLogChunk("", domain.ExecChunk{Text: "ignored"}); err != nil {
 		t.Fatalf("blank append returned error: %v", err)
 	}
 	fileParent := filepath.Join(root, "not-a-dir")
 	if err := os.WriteFile(fileParent, []byte("file"), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
-	if err := appendProjectRunLogChunk(filepath.Join(fileParent, "output.txt"), domain.ExecChunk{Text: "chunk"}); err == nil {
+	if _, err := appendProjectRunLogChunk(filepath.Join(fileParent, "output.txt"), domain.ExecChunk{Text: "chunk"}); err == nil {
 		t.Fatalf("expected append error under file parent")
 	}
 
@@ -1582,6 +1847,99 @@ func (r *fakeControllerRuntime) ExecStream(_ context.Context, _ *domain.Sandbox,
 func fakeRuntimeCommandPayload(result domain.RuntimeCommandResult) string {
 	data, _ := json.Marshal(result)
 	return execution.CommandResultPrefix + string(data) + "\n"
+}
+
+func newTestRunAttachController(t *testing.T, frames []driverpkg.RuntimeOutputFrame) (*Controller, *fakeControllerStore, *fakeRunAttachRuntime) {
+	t.Helper()
+	root := t.TempDir()
+	config := &appconfig.Config{
+		DataRoot:      root,
+		SandboxRoot:   filepath.Join(root, "sessions"),
+		RuntimeDriver: "boxlite",
+		DefaultImage:  "guest:latest",
+	}
+	store, err := sessionstore.NewWithConfig(config)
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	configDB := &fakeControllerStore{
+		project: domain.ProjectRecord{ID: "project-1", Name: "Project", CurrentRevision: 1},
+		projectAgent: domain.ProjectAgentRecord{
+			ProjectID: "project-1", AgentName: "worker", ManagedAgentID: "agent-1", Driver: "boxlite", Image: "guest:latest",
+		},
+		managed: ManagedAgentDefinition{
+			ID: "agent-1", Enabled: true, Driver: "boxlite", GuestImage: "guest:latest", ManagedProjectID: "project-1", ManagedAgentName: "worker",
+		},
+		revision: domain.ProjectRevisionRecord{ProjectID: "project-1", Revision: 1, SpecJSON: `{"agents":[{"name":"worker"}]}`},
+		agent:    domain.AgentDefinition{ID: "agent-1", Provider: "codex"},
+		runs:     map[string]domain.ProjectRunRecord{},
+	}
+	runtime := &fakeRunAttachRuntime{frames: frames}
+	controller := NewController(ControllerDependencies{
+		Config:   config,
+		Store:    store,
+		ConfigDB: configDB,
+		Driver:   &fakeControllerDriver{store: store},
+		Runtime: func(*domain.Sandbox) (Runtime, error) {
+			return runtime, nil
+		},
+		Images: fakeControllerImages{},
+	})
+	return controller, configDB, runtime
+}
+
+type fakeRunAttachRuntime struct {
+	fakeControllerRuntime
+	spec        driverpkg.RuntimeStartSpec
+	frames      []driverpkg.RuntimeOutputFrame
+	interaction *fakeRunAttachInteraction
+}
+
+func (r *fakeRunAttachRuntime) OpenInteraction(_ context.Context, _ *domain.Sandbox, _ domain.VMState, spec driverpkg.RuntimeStartSpec) (driverpkg.RuntimeInteraction, error) {
+	r.spec = spec
+	r.interaction = &fakeRunAttachInteraction{frames: append([]driverpkg.RuntimeOutputFrame(nil), r.frames...)}
+	return r.interaction, nil
+}
+
+type fakeRunAttachInteraction struct {
+	frames []driverpkg.RuntimeOutputFrame
+	sent   []driverpkg.RuntimeInputFrame
+	closed bool
+}
+
+func (i *fakeRunAttachInteraction) Send(frame driverpkg.RuntimeInputFrame) error {
+	i.sent = append(i.sent, frame)
+	return nil
+}
+
+func (i *fakeRunAttachInteraction) CloseSend() error {
+	i.closed = true
+	return nil
+}
+
+func (i *fakeRunAttachInteraction) Recv() (driverpkg.RuntimeOutputFrame, error) {
+	if len(i.frames) == 0 {
+		return driverpkg.RuntimeOutputFrame{}, io.EOF
+	}
+	frame := i.frames[0]
+	i.frames = i.frames[1:]
+	return frame, nil
+}
+
+func (i *fakeRunAttachInteraction) Wait() (driverpkg.RuntimeResult, error) {
+	return driverpkg.RuntimeResult{Success: true}, nil
+}
+
+func recvRunAttachRequests(requests []*agentcomposev2.RunAttachRequest) RunAttachReceiver {
+	index := 0
+	return func() (*agentcomposev2.RunAttachRequest, error) {
+		if index >= len(requests) {
+			return nil, io.EOF
+		}
+		req := requests[index]
+		index++
+		return req, nil
+	}
 }
 
 type fakeControllerImages struct{}

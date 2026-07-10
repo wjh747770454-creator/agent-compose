@@ -16,7 +16,11 @@ service ProjectService {
 service RunService {
   rpc RunAgent(RunAgentRequest) returns (RunAgentResponse);
   rpc StartRun(StartRunRequest) returns (StartRunResponse);
+  // Stable server-stream projection of RunAgent for non-interactive stream views.
+  // Interactive clients that need stdin, resize, signal, or multi-turn prompt
+  // attachment should use RunAttach.
   rpc RunAgentStream(RunAgentRequest) returns (stream RunAgentStreamResponse);
+  rpc RunAttach(stream RunAttachRequest) returns (stream RunAttachResponse);
   rpc GetRun(GetRunRequest) returns (GetRunResponse);
   rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
   rpc FollowRunLogs(FollowRunLogsRequest) returns (stream RunLogChunk);
@@ -25,7 +29,11 @@ service RunService {
 
 service ExecService {
   rpc Exec(ExecRequest) returns (ExecResponse);
+  // Stable server-stream projection of Exec for non-interactive stream views.
+  // Interactive clients that need stdin, resize, or signal attachment should use
+  // ExecAttach.
   rpc ExecStream(ExecRequest) returns (stream ExecStreamResponse);
+  rpc ExecAttach(stream ExecAttachRequest) returns (stream ExecAttachResponse);
 }
 
 service ImageService {
@@ -118,6 +126,12 @@ enum ExecStreamEventType {
   EXEC_STREAM_EVENT_TYPE_STARTED = 1;
   EXEC_STREAM_EVENT_TYPE_OUTPUT = 2;
   EXEC_STREAM_EVENT_TYPE_COMPLETED = 3;
+}
+
+enum AttachRunMode {
+  ATTACH_RUN_MODE_UNSPECIFIED = 0;
+  ATTACH_RUN_MODE_COMMAND = 1;
+  ATTACH_RUN_MODE_PROMPT = 2;
 }
 
 enum StdioStream {
@@ -490,6 +504,42 @@ message RunAgentStreamResponse {
   TranscriptEvent transcript = 8;
 }
 
+message RunAttachRequest {
+  string client_frame_id = 15;
+
+  oneof frame {
+    RunAttachStart start = 1;
+    AttachStdin stdin = 2;
+    AttachStdinEOF stdin_eof = 3;
+    AttachResize resize = 4;
+    AttachSignal signal = 5;
+    AttachHumanMessage human_message = 6;
+    AttachCancel cancel = 7;
+  }
+}
+
+message RunAttachResponse {
+  string server_frame_id = 15;
+  string created_at = 16;
+
+  oneof frame {
+    AttachStarted started = 1;
+    AttachOutput output = 2;
+    AttachAgentEvent agent_event = 3;
+    AttachAgentTurnCompleted agent_turn_completed = 4;
+    AttachResult result = 5;
+    AttachError error = 6;
+  }
+}
+
+message RunAttachStart {
+  RunAgentRequest request = 1;
+  AttachRunMode mode = 2;
+  bool attach_stdin = 3;
+  bool tty = 4;
+  AttachTerminalSize terminal_size = 5;
+}
+
 message TranscriptEvent {
   StdioStream stream = 1;
   string text = 2;
@@ -675,6 +725,118 @@ message ExecStreamResponse {
   StdioStream stream = 6;
   ExecResult result = 7;
   TranscriptEvent transcript = 8;
+}
+
+message ExecAttachRequest {
+  string client_frame_id = 15;
+
+  oneof frame {
+    ExecAttachStart start = 1;
+    AttachStdin stdin = 2;
+    AttachStdinEOF stdin_eof = 3;
+    AttachResize resize = 4;
+    AttachSignal signal = 5;
+    AttachCancel cancel = 6;
+    AttachHumanMessage human_message = 7;
+  }
+}
+
+message ExecAttachResponse {
+  string server_frame_id = 15;
+  string created_at = 16;
+
+  oneof frame {
+    AttachStarted started = 1;
+    AttachOutput output = 2;
+    AttachResult result = 3;
+    AttachError error = 4;
+    AttachAgentEvent agent_event = 5;
+    AttachAgentTurnCompleted agent_turn_completed = 6;
+  }
+}
+
+message ExecAttachStart {
+  ExecRequest request = 1;
+  bool attach_stdin = 2;
+  bool tty = 3;
+  AttachTerminalSize terminal_size = 4;
+  AttachRunMode mode = 5;
+  string prompt = 6;
+}
+
+message AttachTerminalSize {
+  uint32 rows = 1;
+  uint32 cols = 2;
+}
+
+message AttachStdin {
+  bytes data = 1;
+}
+
+message AttachStdinEOF {
+}
+
+message AttachResize {
+  AttachTerminalSize terminal_size = 1;
+}
+
+message AttachSignal {
+  string signal = 1;
+}
+
+message AttachHumanMessage {
+  string text = 1;
+  map<string, string> metadata = 2;
+}
+
+message AttachCancel {
+  string reason = 1;
+}
+
+message AttachStarted {
+  string operation_id = 1;
+  string exec_id = 2;
+  string run_id = 3;
+  string sandbox_id = 4;
+  RunSummary run = 5;
+  repeated string warnings = 6;
+}
+
+message AttachOutput {
+  bytes data = 1;
+  StdioStream stream = 2;
+  bool tty = 3;
+  TranscriptEvent transcript = 4;
+}
+
+message AttachAgentEvent {
+  string name = 1;
+  string text = 2;
+  string payload_json = 3;
+  string created_at = 4;
+}
+
+message AttachAgentTurnCompleted {
+  string run_id = 1;
+  string result_json = 2;
+  repeated string warnings = 3;
+}
+
+message AttachResult {
+  int32 exit_code = 1;
+  bool success = 2;
+  ExecResult exec_result = 3;
+  RunSummary run = 4;
+  string output = 5;
+  string result_json = 6;
+  string error = 7;
+}
+
+message AttachError {
+  string code = 1;
+  string message = 2;
+  bool terminal = 3;
+  map<string, string> details = 4;
 }
 
 message ExecResult {

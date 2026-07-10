@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	appconfig "agent-compose/pkg/config"
+	driverpkg "agent-compose/pkg/driver"
 	"agent-compose/pkg/execution"
 	domain "agent-compose/pkg/model"
 	"agent-compose/pkg/runs"
@@ -37,22 +39,35 @@ type ExecRuntime interface {
 	ExecStream(context.Context, *domain.Sandbox, domain.VMState, domain.ExecSpec, domain.ExecStreamWriter) (domain.ExecResult, error)
 }
 
-type ExecRuntimeResolver func(*domain.Sandbox) (ExecRuntime, error)
-
-type ExecHandler struct {
-	config   *appconfig.Config
-	store    ExecSandboxStore
-	projects ExecProjectStore
-	runtime  ExecRuntimeResolver
+type ExecInteractionRuntime interface {
+	OpenInteraction(context.Context, *domain.Sandbox, domain.VMState, driverpkg.RuntimeStartSpec) (driverpkg.RuntimeInteraction, error)
 }
 
-func NewExecHandler(config *appconfig.Config, store ExecSandboxStore, projects ExecProjectStore, runtime ExecRuntimeResolver) *ExecHandler {
-	return &ExecHandler{
+type ExecRuntimeResolver func(*domain.Sandbox) (ExecRuntime, error)
+
+type ExecRunAttachDelegate interface {
+	RunProjectCommandAttach(context.Context, runs.RunAttachReceiver, runs.RunAttachSender) error
+}
+
+type ExecHandler struct {
+	config    *appconfig.Config
+	store     ExecSandboxStore
+	projects  ExecProjectStore
+	runtime   ExecRuntimeResolver
+	runAttach ExecRunAttachDelegate
+}
+
+func NewExecHandler(config *appconfig.Config, store ExecSandboxStore, projects ExecProjectStore, runtime ExecRuntimeResolver, runAttach ...ExecRunAttachDelegate) *ExecHandler {
+	handler := &ExecHandler{
 		config:   config,
 		store:    store,
 		projects: projects,
 		runtime:  runtime,
 	}
+	if len(runAttach) > 0 {
+		handler.runAttach = runAttach[0]
+	}
+	return handler
 }
 
 func (h *ExecHandler) Exec(ctx context.Context, req *connect.Request[agentcomposev2.ExecRequest]) (*connect.Response[agentcomposev2.ExecResponse], error) {
@@ -80,7 +95,430 @@ func (h *ExecHandler) ExecStream(ctx context.Context, req *connect.Request[agent
 	})
 }
 
+func (h *ExecHandler) ExecAttach(ctx context.Context, stream *connect.BidiStream[agentcomposev2.ExecAttachRequest, agentcomposev2.ExecAttachResponse]) error {
+	return h.execAttach(ctx, stream.Receive, stream.Send)
+}
+
 type execStreamSender func(*agentcomposev2.ExecStreamResponse) error
+type execAttachReceiver func() (*agentcomposev2.ExecAttachRequest, error)
+type execAttachSender func(*agentcomposev2.ExecAttachResponse) error
+
+func (h *ExecHandler) execAttach(ctx context.Context, receive execAttachReceiver, send execAttachSender) error {
+	if h.store == nil || h.projects == nil || h.runtime == nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("exec runtime dependencies are required"))
+	}
+	if receive == nil || send == nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("exec attach stream is required"))
+	}
+	first, err := receive()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("exec attach start frame is required"))
+		}
+		return connect.NewError(connect.CodeUnknown, err)
+	}
+	start := first.GetStart()
+	if start == nil {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("first exec attach frame must be start"))
+	}
+	mode := start.GetMode()
+	if mode == agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT || strings.TrimSpace(start.GetPrompt()) != "" {
+		return h.execPromptAttach(ctx, start, receive, send)
+	}
+	state, err := h.prepareExecAttach(ctx, start)
+	if err != nil {
+		return err
+	}
+	runner := execAttachRunner{
+		state:   state,
+		receive: receive,
+		send:    send,
+	}
+	return runner.run(ctx)
+}
+
+type execAttachRunner struct {
+	state   *execAttachState
+	receive execAttachReceiver
+	send    execAttachSender
+}
+
+func (r execAttachRunner) run(ctx context.Context) error {
+	interactionRuntime, ok := r.state.runtime.(ExecInteractionRuntime)
+	if !ok {
+		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("exec attach is unsupported by this runtime driver"))
+	}
+	interaction, err := interactionRuntime.OpenInteraction(ctx, r.state.sandbox, r.state.vmState, r.state.spec)
+	if err != nil {
+		if errors.Is(err, driverpkg.ErrRuntimeInteractionUnsupported) {
+			return connect.NewError(connect.CodeUnimplemented, err)
+		}
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	defer func() { _ = interaction.CloseSend() }()
+	return r.runInteraction(interaction)
+}
+
+func (r execAttachRunner) runInteraction(interaction driverpkg.RuntimeInteraction) error {
+	go pumpExecAttachInput(r.receive, interaction)
+
+	projection := newExecAttachProjection(r.state)
+	for {
+		frame, err := interaction.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return sendExecAttachError(r.send, "runtime_recv_error", err.Error(), true)
+		}
+		resp := projection.responseFromRuntimeFrame(frame)
+		if resp == nil {
+			continue
+		}
+		if err := r.send(resp); err != nil {
+			return connect.NewError(connect.CodeUnknown, err)
+		}
+	}
+}
+
+func (h *ExecHandler) execPromptAttach(ctx context.Context, start *agentcomposev2.ExecAttachStart, receive execAttachReceiver, send execAttachSender) error {
+	if h.runAttach == nil {
+		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("exec prompt attach is unsupported"))
+	}
+	req := start.GetRequest()
+	if req == nil {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("exec attach request is required"))
+	}
+	sandbox, runID, err := h.resolveExecTargetSandbox(ctx, req)
+	if err != nil {
+		return err
+	}
+	var run domain.ProjectRunRecord
+	if strings.TrimSpace(runID) != "" {
+		run, err = h.projects.GetProjectRun(ctx, runID)
+		if err != nil {
+			return connect.NewError(connect.CodeInternal, err)
+		}
+	} else {
+		run, err = h.latestSandboxRun(ctx, sandbox.Summary.ID)
+		if err != nil {
+			return err
+		}
+	}
+	projectID := strings.TrimSpace(run.ProjectID)
+	agentName := strings.TrimSpace(run.AgentName)
+	if projectID == "" || agentName == "" {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("exec prompt target must be associated with a project agent"))
+	}
+	initial := &agentcomposev2.RunAttachRequest{
+		Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+			Request: &agentcomposev2.RunAgentRequest{
+				ProjectId:     projectID,
+				AgentName:     agentName,
+				Prompt:        strings.TrimSpace(start.GetPrompt()),
+				SandboxId:     sandbox.Summary.ID,
+				Source:        agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
+				CleanupPolicy: agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING,
+			},
+			Mode:        agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT,
+			AttachStdin: start.GetAttachStdin(),
+			Tty:         false,
+		}},
+	}
+	receiver := newExecPromptRunAttachReceiver(initial, receive)
+	return h.runAttach.RunProjectCommandAttach(ctx, receiver.Receive, func(resp *agentcomposev2.RunAttachResponse) error {
+		return send(execAttachResponseFromRunAttach(resp))
+	})
+}
+
+type execPromptRunAttachReceiver struct {
+	initial   *agentcomposev2.RunAttachRequest
+	receive   execAttachReceiver
+	sentStart bool
+}
+
+func newExecPromptRunAttachReceiver(initial *agentcomposev2.RunAttachRequest, receive execAttachReceiver) *execPromptRunAttachReceiver {
+	return &execPromptRunAttachReceiver{initial: initial, receive: receive}
+}
+
+func (r *execPromptRunAttachReceiver) Receive() (*agentcomposev2.RunAttachRequest, error) {
+	if !r.sentStart {
+		r.sentStart = true
+		return r.initial, nil
+	}
+	req, err := r.receive()
+	if err != nil {
+		return nil, err
+	}
+	switch frame := req.GetFrame().(type) {
+	case *agentcomposev2.ExecAttachRequest_StdinEof:
+		return &agentcomposev2.RunAttachRequest{ClientFrameId: req.GetClientFrameId(), Frame: &agentcomposev2.RunAttachRequest_StdinEof{StdinEof: frame.StdinEof}}, nil
+	case *agentcomposev2.ExecAttachRequest_Resize:
+		return &agentcomposev2.RunAttachRequest{ClientFrameId: req.GetClientFrameId(), Frame: &agentcomposev2.RunAttachRequest_Resize{Resize: frame.Resize}}, nil
+	case *agentcomposev2.ExecAttachRequest_Cancel:
+		return &agentcomposev2.RunAttachRequest{ClientFrameId: req.GetClientFrameId(), Frame: &agentcomposev2.RunAttachRequest_Cancel{Cancel: frame.Cancel}}, nil
+	case *agentcomposev2.ExecAttachRequest_HumanMessage:
+		return &agentcomposev2.RunAttachRequest{ClientFrameId: req.GetClientFrameId(), Frame: &agentcomposev2.RunAttachRequest_HumanMessage{HumanMessage: frame.HumanMessage}}, nil
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid exec prompt attach frame"))
+	}
+}
+
+func execAttachResponseFromRunAttach(resp *agentcomposev2.RunAttachResponse) *agentcomposev2.ExecAttachResponse {
+	out := &agentcomposev2.ExecAttachResponse{
+		ServerFrameId: resp.GetServerFrameId(),
+		CreatedAt:     resp.GetCreatedAt(),
+	}
+	switch frame := resp.GetFrame().(type) {
+	case *agentcomposev2.RunAttachResponse_Started:
+		out.Frame = &agentcomposev2.ExecAttachResponse_Started{Started: frame.Started}
+	case *agentcomposev2.RunAttachResponse_Output:
+		out.Frame = &agentcomposev2.ExecAttachResponse_Output{Output: frame.Output}
+	case *agentcomposev2.RunAttachResponse_Result:
+		out.Frame = &agentcomposev2.ExecAttachResponse_Result{Result: frame.Result}
+	case *agentcomposev2.RunAttachResponse_Error:
+		out.Frame = &agentcomposev2.ExecAttachResponse_Error{Error: frame.Error}
+	case *agentcomposev2.RunAttachResponse_AgentEvent:
+		out.Frame = &agentcomposev2.ExecAttachResponse_AgentEvent{AgentEvent: frame.AgentEvent}
+	case *agentcomposev2.RunAttachResponse_AgentTurnCompleted:
+		out.Frame = &agentcomposev2.ExecAttachResponse_AgentTurnCompleted{AgentTurnCompleted: frame.AgentTurnCompleted}
+	}
+	return out
+}
+
+func (h *ExecHandler) latestSandboxRun(ctx context.Context, sandboxID string) (domain.ProjectRunRecord, error) {
+	runsForSandbox, err := h.projects.ListProjectSandboxRuns(ctx, domain.ProjectSandboxRelationFilter{SandboxID: sandboxID, Limit: 1})
+	if err != nil {
+		return domain.ProjectRunRecord{}, connect.NewError(connect.CodeInternal, err)
+	}
+	if len(runsForSandbox) == 0 {
+		return domain.ProjectRunRecord{}, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("exec prompt target must be associated with a project run"))
+	}
+	return runsForSandbox[0], nil
+}
+
+type execAttachState struct {
+	execID  string
+	runID   string
+	cwd     string
+	request *agentcomposev2.ExecRequest
+	sandbox *domain.Sandbox
+	vmState domain.VMState
+	runtime ExecRuntime
+	spec    driverpkg.RuntimeStartSpec
+	tty     bool
+}
+
+func (h *ExecHandler) prepareExecAttach(ctx context.Context, start *agentcomposev2.ExecAttachStart) (*execAttachState, error) {
+	req := start.GetRequest()
+	if req == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("exec attach request is required"))
+	}
+	sandbox, runID, err := h.resolveExecTargetSandbox(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	command := strings.TrimSpace(req.GetCommand().GetCommand())
+	if command == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("exec command is required"))
+	}
+	appconfig.ApplyDefaultGuestPaths(h.config)
+	cwd := strings.TrimSpace(req.GetCwd())
+	if cwd == "" {
+		cwd = h.config.GuestWorkspacePath
+	}
+	vmState, err := h.store.GetVMState(sandbox.Summary.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	runtime, err := h.runtime(sandbox)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	env := ExecEnvMap(req.GetEnv())
+	execID := uuid.NewString()
+	size := start.GetTerminalSize()
+	spec := driverpkg.RuntimeStartSpec{
+		OperationID: execID,
+		Kind:        driverpkg.RuntimeOperationCommand,
+		Origin:      "exec_attach",
+		Command: &driverpkg.RuntimeCommandSpec{
+			Command: command,
+			Args:    append([]string(nil), req.GetCommand().GetArgs()...),
+			Env:     env,
+			Cwd:     cwd,
+		},
+		Cwd:         cwd,
+		Env:         env,
+		AttachStdin: start.GetAttachStdin(),
+		TTY:         start.GetTty(),
+		Rows:        size.GetRows(),
+		Cols:        size.GetCols(),
+		TimeoutMs:   int64(req.GetTimeoutMs()),
+	}
+	return &execAttachState{
+		execID:  execID,
+		runID:   runID,
+		cwd:     cwd,
+		request: req,
+		sandbox: sandbox,
+		vmState: vmState,
+		runtime: runtime,
+		spec:    spec,
+		tty:     start.GetTty(),
+	}, nil
+}
+
+func pumpExecAttachInput(receive execAttachReceiver, interaction driverpkg.RuntimeInteraction) {
+	for {
+		req, err := receive()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				_ = interaction.CloseSend()
+			}
+			return
+		}
+		frame, ok := runtimeInputFrameFromExecAttach(req)
+		if !ok {
+			_ = interaction.Send(driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputCancel, Message: "invalid exec attach frame"})
+			return
+		}
+		if err := interaction.Send(frame); err != nil {
+			return
+		}
+	}
+}
+
+func runtimeInputFrameFromExecAttach(req *agentcomposev2.ExecAttachRequest) (driverpkg.RuntimeInputFrame, bool) {
+	switch frame := req.GetFrame().(type) {
+	case *agentcomposev2.ExecAttachRequest_Stdin:
+		return driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputStdin, Data: frame.Stdin.GetData()}, true
+	case *agentcomposev2.ExecAttachRequest_StdinEof:
+		return driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputStdinEOF}, true
+	case *agentcomposev2.ExecAttachRequest_Resize:
+		size := frame.Resize.GetTerminalSize()
+		return driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputResize, Rows: size.GetRows(), Cols: size.GetCols()}, true
+	case *agentcomposev2.ExecAttachRequest_Signal:
+		return driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputSignal, Signal: driverpkg.RuntimeSignal(strings.TrimSpace(frame.Signal.GetSignal()))}, true
+	case *agentcomposev2.ExecAttachRequest_Cancel:
+		return driverpkg.RuntimeInputFrame{Type: driverpkg.RuntimeInputCancel, Message: frame.Cancel.GetReason()}, true
+	default:
+		return driverpkg.RuntimeInputFrame{}, false
+	}
+}
+
+type execAttachProjection struct {
+	state       *execAttachState
+	accumulator execution.ExecStreamAccumulator
+}
+
+func newExecAttachProjection(state *execAttachState) *execAttachProjection {
+	return &execAttachProjection{state: state}
+}
+
+func (p *execAttachProjection) responseFromRuntimeFrame(frame driverpkg.RuntimeOutputFrame) *agentcomposev2.ExecAttachResponse {
+	return p.state.responseFromRuntimeFrame(frame, &p.accumulator)
+}
+
+func (s *execAttachState) responseFromRuntimeFrame(frame driverpkg.RuntimeOutputFrame, accumulator *execution.ExecStreamAccumulator) *agentcomposev2.ExecAttachResponse {
+	resp := newExecAttachResponse()
+	switch frame.Type {
+	case driverpkg.RuntimeOutputStarted:
+		resp.Frame = &agentcomposev2.ExecAttachResponse_Started{Started: &agentcomposev2.AttachStarted{
+			OperationId: s.execID,
+			ExecId:      s.execID,
+			RunId:       s.runID,
+			SandboxId:   s.sandbox.Summary.ID,
+		}}
+	case driverpkg.RuntimeOutputStdout, driverpkg.RuntimeOutputStderr:
+		stream := driverOutputStreamToProto(frame.Type)
+		if accumulator != nil {
+			accumulator.WriteChunk(domain.ExecChunk{Text: string(frame.Data), Stream: protoStreamToDomain(stream)})
+		}
+		resp.Frame = &agentcomposev2.ExecAttachResponse_Output{Output: &agentcomposev2.AttachOutput{
+			Data:   append([]byte(nil), frame.Data...),
+			Stream: stream,
+			Tty:    s.tty,
+			Transcript: &agentcomposev2.TranscriptEvent{
+				Stream:    stream,
+				Text:      string(frame.Data),
+				CreatedAt: resp.CreatedAt,
+			},
+		}}
+	case driverpkg.RuntimeOutputResult:
+		result := frame.Result
+		if result == nil {
+			result = &driverpkg.RuntimeResult{OperationID: s.execID}
+		}
+		accumulated := domain.ExecResult{}
+		if accumulator != nil {
+			accumulated = accumulator.Result(result.ExitCode, result.Success)
+		}
+		if strings.TrimSpace(result.Error) != "" {
+			accumulated.Success = false
+		}
+		execResult := ExecResultToProto(s.execID, s.sandbox.Summary.ID, s.runID, s.request, s.cwd, accumulated, errorFromString(result.Error))
+		resp.Frame = &agentcomposev2.ExecAttachResponse_Result{Result: &agentcomposev2.AttachResult{
+			ExitCode:   int32(result.ExitCode),
+			Success:    result.Success,
+			ExecResult: execResult,
+			Output:     accumulated.Output,
+			Error:      result.Error,
+		}}
+	case driverpkg.RuntimeOutputError:
+		code := "runtime_error"
+		message := "runtime interaction failed"
+		if frame.Error != nil {
+			code = firstNonEmpty(frame.Error.Code, code)
+			message = firstNonEmpty(frame.Error.Message, message)
+		}
+		resp.Frame = &agentcomposev2.ExecAttachResponse_Error{Error: &agentcomposev2.AttachError{Code: code, Message: message, Terminal: true}}
+	default:
+		return nil
+	}
+	return resp
+}
+
+func newExecAttachResponse() *agentcomposev2.ExecAttachResponse {
+	return &agentcomposev2.ExecAttachResponse{
+		ServerFrameId: uuid.NewString(),
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func driverOutputStreamToProto(frameType driverpkg.RuntimeOutputFrameType) agentcomposev2.StdioStream {
+	if frameType == driverpkg.RuntimeOutputStderr {
+		return agentcomposev2.StdioStream_STDIO_STREAM_STDERR
+	}
+	return agentcomposev2.StdioStream_STDIO_STREAM_STDOUT
+}
+
+func protoStreamToDomain(stream agentcomposev2.StdioStream) domain.StdioStream {
+	if stream == agentcomposev2.StdioStream_STDIO_STREAM_STDERR {
+		return domain.StdioStderr
+	}
+	return domain.StdioStdout
+}
+
+func sendExecAttachError(send execAttachSender, code, message string, terminal bool) error {
+	resp := newExecAttachResponse()
+	resp.Frame = &agentcomposev2.ExecAttachResponse_Error{Error: &agentcomposev2.AttachError{
+		Code:     code,
+		Message:  message,
+		Terminal: terminal,
+	}}
+	if err := send(resp); err != nil {
+		return connect.NewError(connect.CodeUnknown, err)
+	}
+	return nil
+}
+
+func errorFromString(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return errors.New(text)
+}
 
 func (h *ExecHandler) executeProjectCommand(ctx context.Context, req *agentcomposev2.ExecRequest, execID string, send execStreamSender) (*agentcomposev2.ExecResult, error) {
 	if h.store == nil || h.projects == nil || h.runtime == nil {
@@ -265,13 +703,16 @@ func (h *ExecHandler) resolveExecTargetSandbox(ctx context.Context, req *agentco
 			ids = append(ids, item.sandbox.Summary.ID)
 		}
 		slices.Sort(ids)
-		return nil, "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("multiple running sandboxes found for %s: %s", contextText, strings.Join(ids, ", ")))
+		return nil, "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("multiple runningsandboxs found for %s: %s", contextText, strings.Join(ids, ", ")))
 	}
 	return candidates[0].sandbox, candidates[0].run.RunID, nil
 }
 
 func (h *ExecHandler) sandboxForProjectRun(ctx context.Context, run domain.ProjectRunRecord) (*domain.Sandbox, error) {
 	sandboxID := strings.TrimSpace(run.SandboxID)
+	if sandboxID == "" {
+		sandboxID = strings.TrimSpace(run.SandboxID)
+	}
 	if sandboxID == "" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("run %s has no sandbox", run.RunID))
 	}
