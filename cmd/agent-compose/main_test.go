@@ -1761,6 +1761,94 @@ agents:
 	}
 }
 
+func TestIntegrationCLIRunDetachJupyterExposePrintsURL(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-detach-jupyter
+agents:
+  reviewer:
+    provider: codex
+`)
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			startRun: func(ctx context.Context, req *connect.Request[agentcomposev2.StartRunRequest]) (*connect.Response[agentcomposev2.StartRunResponse], error) {
+				runReq := req.Msg.GetRun()
+				if runReq.GetJupyter() == nil || !runReq.GetJupyter().GetEnabled() || !runReq.GetJupyter().GetExpose() {
+					t.Fatalf("StartRun jupyter request = %#v", runReq)
+				}
+				return connect.NewResponse(&agentcomposev2.StartRunResponse{
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-detached-jupyter",
+						ProjectId: runReq.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_PENDING,
+						Source:    agentcomposev2.RunSource_RUN_SOURCE_MANUAL,
+					},
+					Started: true,
+				}), nil
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				if req.Msg.GetRunId() != "run-detached-jupyter" {
+					t.Fatalf("GetRun id = %q", req.Msg.GetRunId())
+				}
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-detached-jupyter", "reviewer", "sandbox-detached-jupyter", agentcomposev2.RunStatus_RUN_STATUS_RUNNING, 0, "")}), nil
+			},
+		},
+		session: sessionServiceStub{
+			getSessionProxy: func(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error) {
+				return connect.NewResponse(testCLISessionProxyResponse(req.Msg.GetSessionId(), "detached-token")), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "-d", "--host", server.URL, "--file", composePath, "reviewer", "--jupyter-expose", "--prompt", "inspect")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("run -d --jupyter-expose code/stderr = %d / %q", exitCode, stderr)
+	}
+	if want := "Jupyter: " + server.URL + "/agent-compose/session/sandbox-detached-jupyter/lab?token=detached-token"; !strings.Contains(stdout, want) {
+		t.Fatalf("run -d --jupyter-expose stdout %q does not contain %q", stdout, want)
+	}
+}
+
+func TestWaitForDetachedRunSandboxStopsOnTerminalRun(t *testing.T) {
+	client := runServiceStub{
+		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+			return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), req.Msg.GetRunId(), "reviewer", "", agentcomposev2.RunStatus_RUN_STATUS_FAILED, 1, "")}), nil
+		},
+	}
+	run, err := waitForDetachedRunSandbox(context.Background(), client, "project-detached", "run-terminal", time.Second)
+	if err == nil || !strings.Contains(err.Error(), "completed before reporting a sandbox") {
+		t.Fatalf("waitForDetachedRunSandbox err = %v", err)
+	}
+	if run == nil || run.GetRunId() != "run-terminal" {
+		t.Fatalf("waitForDetachedRunSandbox run = %#v", run)
+	}
+}
+
+func TestWaitForDetachedRunSandboxSlowGetRunReturnsTimeoutMessage(t *testing.T) {
+	var calls int
+	client := runServiceStub{
+		getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+			calls++
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+	run, err := waitForDetachedRunSandbox(context.Background(), client, "project-detached", "run-slow", 10*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "timed out waiting for run run-slow to report a sandbox") {
+		t.Fatalf("waitForDetachedRunSandbox err = %v", err)
+	}
+	if strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("waitForDetachedRunSandbox leaked context error: %v", err)
+	}
+	if run != nil {
+		t.Fatalf("waitForDetachedRunSandbox run = %#v, want nil", run)
+	}
+	if calls != 1 {
+		t.Fatalf("GetRun calls = %d, want 1", calls)
+	}
+}
+
 func TestIntegrationCLIRunDetachJSON(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-run-detach-json
@@ -1923,15 +2011,171 @@ agents:
 				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-jupyter", "reviewer", "sandbox-jupyter", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
 			},
 		},
+		session: sessionServiceStub{
+			getSessionProxy: func(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error) {
+				if req.Msg.GetSessionId() != "sandbox-jupyter" {
+					t.Fatalf("GetSessionProxy id = %q", req.Msg.GetSessionId())
+				}
+				return connect.NewResponse(testCLISessionProxyResponse("sandbox-jupyter", "sync-token")), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "reviewer", "--jupyter-expose", "--keep-running", "--prompt", "inspect")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("run --jupyter-expose code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+	}
+	if want := "Jupyter: " + server.URL + "/agent-compose/session/sandbox-jupyter/lab?token=sync-token\n"; stdout != want {
+		t.Fatalf("run --jupyter-expose stdout = %q, want %q", stdout, want)
+	}
+	if !sawRequest {
+		t.Fatal("RunAgentStream was not called")
+	}
+}
+
+func TestIntegrationCLIRunJupyterExposeDefaultCleanupDoesNotPrintURL(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-jupyter-stopped
+agents:
+  reviewer:
+    provider: codex
+`)
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				if req.Msg.GetJupyter() == nil || !req.Msg.GetJupyter().GetEnabled() || !req.Msg.GetJupyter().GetExpose() {
+					t.Fatalf("RunAgentStream jupyter request = %#v", req.Msg)
+				}
+				if req.Msg.GetCleanupPolicy() != agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_STOP_ON_COMPLETION {
+					t.Fatalf("RunAgentStream cleanup policy = %#v", req.Msg.GetCleanupPolicy())
+				}
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-jupyter-stopped",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-jupyter-stopped",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SandboxId: "sandbox-jupyter-stopped",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-jupyter-stopped", "reviewer", "sandbox-jupyter-stopped", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+		session: sessionServiceStub{
+			getSessionProxy: func(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error) {
+				t.Fatalf("GetSessionProxy should not be called for stopped jupyter run")
+				return nil, nil
+			},
+		},
 	})
 	defer server.Close()
 
 	stdout, stderr, _, exitCode := executeCLICommand("run", "--host", server.URL, "--file", composePath, "reviewer", "--jupyter-expose", "--prompt", "inspect")
 	if exitCode != 0 || stdout != "" || stderr != "" {
-		t.Fatalf("run --jupyter-expose code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
+		t.Fatalf("run --jupyter-expose default cleanup code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
 	}
-	if !sawRequest {
-		t.Fatal("RunAgentStream was not called")
+}
+
+func TestIntegrationCLIRunJupyterExposeJSONIncludesURL(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-jupyter-json
+agents:
+  reviewer:
+    provider: codex
+`)
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				if req.Msg.GetJupyter() == nil || !req.Msg.GetJupyter().GetEnabled() || !req.Msg.GetJupyter().GetExpose() {
+					t.Fatalf("RunAgentStream jupyter request = %#v", req.Msg)
+				}
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-jupyter-json",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-jupyter-json",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SandboxId: "sandbox-jupyter-json",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-jupyter-json", "reviewer", "sandbox-jupyter-json", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+		session: sessionServiceStub{
+			getSessionProxy: func(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error) {
+				return connect.NewResponse(testCLISessionProxyResponse(req.Msg.GetSessionId(), "json-token")), nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--json", "--host", server.URL, "--file", composePath, "reviewer", "--jupyter-expose", "--keep-running", "--prompt", "inspect")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("run --json --jupyter-expose code/stderr = %d / %q", exitCode, stderr)
+	}
+	var decoded composeRunOutput
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("decode jupyter run JSON: %v\n%s", err, stdout)
+	}
+	if decoded.JupyterPath != "/agent-compose/session/sandbox-jupyter-json/lab" || decoded.JupyterURL != server.URL+"/agent-compose/session/sandbox-jupyter-json/lab?token=json-token" {
+		t.Fatalf("jupyter JSON fields = %q / %q", decoded.JupyterPath, decoded.JupyterURL)
+	}
+}
+
+func TestIntegrationCLIRunJupyterExposeJSONDefaultCleanupOmitsURL(t *testing.T) {
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: cli-run-jupyter-json-stopped
+agents:
+  reviewer:
+    provider: codex
+`)
+	server := newComposeServiceStubServer(t, composeServiceStubs{
+		run: runServiceStub{
+			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
+				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
+					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
+					RunId:     "run-jupyter-json-stopped",
+					Run: &agentcomposev2.RunSummary{
+						RunId:     "run-jupyter-json-stopped",
+						ProjectId: req.Msg.GetProjectId(),
+						AgentName: "reviewer",
+						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+						SandboxId: "sandbox-jupyter-json-stopped",
+					},
+				})
+			},
+			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-jupyter-json-stopped", "reviewer", "sandbox-jupyter-json-stopped", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+			},
+		},
+		session: sessionServiceStub{
+			getSessionProxy: func(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error) {
+				t.Fatalf("GetSessionProxy should not be called for stopped jupyter JSON run")
+				return nil, nil
+			},
+		},
+	})
+	defer server.Close()
+
+	stdout, stderr, _, exitCode := executeCLICommand("run", "--json", "--host", server.URL, "--file", composePath, "reviewer", "--jupyter-expose", "--prompt", "inspect")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("run --json --jupyter-expose default cleanup code/stderr = %d / %q", exitCode, stderr)
+	}
+	var decoded composeRunOutput
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("decode stopped jupyter run JSON: %v\n%s", err, stdout)
+	}
+	if decoded.JupyterURL != "" || decoded.JupyterPath != "" {
+		t.Fatalf("stopped jupyter JSON fields = %q / %q", decoded.JupyterPath, decoded.JupyterURL)
 	}
 }
 
@@ -8874,6 +9118,7 @@ type composeServiceStubs struct {
 	volume  volumeServiceStub
 	sandbox sandboxServiceStub
 	session sessionServiceStub
+	config  configServiceStub
 	loader  loaderServiceStub
 }
 
@@ -9084,10 +9329,11 @@ func (s sandboxServiceStub) GetSandboxStats(ctx context.Context, req *connect.Re
 }
 
 type sessionServiceStub struct {
-	getSession    func(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
-	listSessions  func(context.Context, *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error)
-	resumeSession func(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
-	stopSession   func(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
+	getSession      func(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
+	getSessionProxy func(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error)
+	listSessions    func(context.Context, *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error)
+	resumeSession   func(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
+	stopSession     func(context.Context, *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionResponse], error)
 
 	agentcomposev1connect.UnimplementedSessionServiceHandler
 }
@@ -9097,6 +9343,13 @@ func (s sessionServiceStub) GetSession(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("GetSession stub is not configured"))
 	}
 	return s.getSession(ctx, req)
+}
+
+func (s sessionServiceStub) GetSessionProxy(ctx context.Context, req *connect.Request[agentcomposev1.SessionIDRequest]) (*connect.Response[agentcomposev1.SessionProxyResponse], error) {
+	if s.getSessionProxy == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("GetSessionProxy stub is not configured"))
+	}
+	return s.getSessionProxy(ctx, req)
 }
 
 func (s sessionServiceStub) ListSessions(ctx context.Context, req *connect.Request[agentcomposev1.ListSessionsRequest]) (*connect.Response[agentcomposev1.ListSessionsResponse], error) {
@@ -9118,6 +9371,19 @@ func (s sessionServiceStub) StopSession(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("StopSession stub is not configured"))
 	}
 	return s.stopSession(ctx, req)
+}
+
+type configServiceStub struct {
+	getRuntimeConfig func(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[agentcomposev1.RuntimeConfigResponse], error)
+
+	agentcomposev1connect.UnimplementedConfigServiceHandler
+}
+
+func (s configServiceStub) GetRuntimeConfig(ctx context.Context, req *connect.Request[emptypb.Empty]) (*connect.Response[agentcomposev1.RuntimeConfigResponse], error) {
+	if s.getRuntimeConfig == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("GetRuntimeConfig stub is not configured"))
+	}
+	return s.getRuntimeConfig(ctx, req)
 }
 
 func TestResolveComposeSandboxRefFromSessions(t *testing.T) {
@@ -9260,8 +9526,12 @@ func newComposeServiceStubServer(t *testing.T, stubs composeServiceStubs) *httpt
 		path, handler := agentcomposev2connect.NewSandboxServiceHandler(stubs.sandbox)
 		mux.Handle(path, handler)
 	}
-	if stubs.session.getSession != nil || stubs.session.listSessions != nil || stubs.session.resumeSession != nil || stubs.session.stopSession != nil {
+	if stubs.session.getSession != nil || stubs.session.getSessionProxy != nil || stubs.session.listSessions != nil || stubs.session.resumeSession != nil || stubs.session.stopSession != nil {
 		path, handler := agentcomposev1connect.NewSessionServiceHandler(stubs.session)
+		mux.Handle(path, handler)
+	}
+	if stubs.config.getRuntimeConfig != nil {
+		path, handler := agentcomposev1connect.NewConfigServiceHandler(stubs.config)
 		mux.Handle(path, handler)
 	}
 	if stubs.loader.getLoader != nil {
@@ -9382,6 +9652,17 @@ func testCLIVolume(name string) *agentcomposev2.Volume {
 func testCLISessionDetail(sessionID, vmStatus string) *agentcomposev1.SessionDetail {
 	return &agentcomposev1.SessionDetail{
 		Summary: testCLISessionSummary(sessionID, vmStatus, "project-cli", "reviewer", ""),
+	}
+}
+
+func testCLISessionProxyResponse(sessionID, token string) *agentcomposev1.SessionProxyResponse {
+	proxyPath := "/agent-compose/session/" + sessionID + "/lab"
+	return &agentcomposev1.SessionProxyResponse{
+		SessionId:   sessionID,
+		ProxyPath:   proxyPath,
+		NotebookUrl: proxyPath + "?token=" + token,
+		Driver:      "boxlite",
+		VmStatus:    "RUNNING",
 	}
 }
 

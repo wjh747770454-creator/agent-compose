@@ -44,6 +44,7 @@ service LLMService {
 }
 
 service ConfigService {
+  rpc GetRuntimeConfig(google.protobuf.Empty) returns (RuntimeConfigResponse);
   rpc GetGlobalEnvConfig(google.protobuf.Empty) returns (GlobalEnvConfigResponse);
   rpc UpdateGlobalEnvConfig(UpdateGlobalEnvConfigRequest) returns (GlobalEnvConfigResponse);
   rpc GetCapabilityGatewayConfig(google.protobuf.Empty) returns (CapabilityGatewayConfig);
@@ -229,6 +230,10 @@ message SessionSummary {
   repeated SessionTag tags = 11;
   string guest_image = 12;
   string trigger_source = 13;
+}
+
+message RuntimeConfigResponse {
+  string agent_compose_host = 1;
 }
 
 message ListSessionsRequest {

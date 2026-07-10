@@ -356,7 +356,10 @@ func TestE2EAPIMappingCoverageWorkflows(t *testing.T) {
 func TestAPILightweightHandlersCoverageWorkflows(t *testing.T) {
 	ctx := context.Background()
 	configStore := newFakeConfigStore()
-	configHandler := NewConfigHandler(&appconfig.Config{DataRoot: t.TempDir()}, configStore)
+	configHandler := NewConfigHandler(&appconfig.Config{DataRoot: t.TempDir(), AgentComposeHost: "https://agent-compose.example/"}, configStore)
+	if resp, err := configHandler.GetRuntimeConfig(ctx, connect.NewRequest(&emptypb.Empty{})); err != nil || resp.Msg.GetAgentComposeHost() != "https://agent-compose.example" {
+		t.Fatalf("get runtime config resp=%v err=%v", resp, err)
+	}
 	if resp, err := configHandler.GetGlobalEnvConfig(ctx, connect.NewRequest(&emptypb.Empty{})); err != nil || len(resp.Msg.GetEnvItems()) != 1 {
 		t.Fatalf("get global env resp=%v err=%v", resp, err)
 	}

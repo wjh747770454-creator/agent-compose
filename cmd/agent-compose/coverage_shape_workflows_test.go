@@ -550,7 +550,7 @@ func testComposeRunExecAndLogsEdgeHelpers(t *testing.T) {
 		t.Fatalf("warnings output = %q", out.String())
 	}
 	out.Reset()
-	if err := writeDetachedRunText(&out, &agentcomposev2.RunSummary{Status: agentcomposev2.RunStatus_RUN_STATUS_PENDING}, "agent-compose logs"); err != nil {
+	if err := writeDetachedRunText(&out, &agentcomposev2.RunSummary{Status: agentcomposev2.RunStatus_RUN_STATUS_PENDING}, "agent-compose logs", composeRunJupyterOutput{}); err != nil {
 		t.Fatalf("writeDetachedRunText returned error: %v", err)
 	}
 	if !strings.Contains(out.String(), "Run: -") || !strings.Contains(out.String(), "Status: pending") {

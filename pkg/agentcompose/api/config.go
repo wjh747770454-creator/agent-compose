@@ -39,6 +39,14 @@ func NewConfigHandler(config *appconfig.Config, store ConfigStore) *ConfigHandle
 	return &ConfigHandler{config: config, store: store}
 }
 
+func (h *ConfigHandler) GetRuntimeConfig(ctx context.Context, req *connect.Request[emptypb.Empty]) (*connect.Response[agentcomposev1.RuntimeConfigResponse], error) {
+	_ = ctx
+	_ = req
+	return connect.NewResponse(&agentcomposev1.RuntimeConfigResponse{
+		AgentComposeHost: strings.TrimRight(strings.TrimSpace(h.config.AgentComposeHost), "/"),
+	}), nil
+}
+
 func (h *ConfigHandler) GetGlobalEnvConfig(ctx context.Context, req *connect.Request[emptypb.Empty]) (*connect.Response[agentcomposev1.GlobalEnvConfigResponse], error) {
 	_ = req
 	items, err := h.store.ListGlobalEnv(ctx)

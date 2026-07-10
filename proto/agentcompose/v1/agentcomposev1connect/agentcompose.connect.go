@@ -114,6 +114,9 @@ const (
 	AgentDefinitionServiceCreateAgentSessionProcedure = "/agentcompose.v1.AgentDefinitionService/CreateAgentSession"
 	// LLMServiceGenerateProcedure is the fully-qualified name of the LLMService's Generate RPC.
 	LLMServiceGenerateProcedure = "/agentcompose.v1.LLMService/Generate"
+	// ConfigServiceGetRuntimeConfigProcedure is the fully-qualified name of the ConfigService's
+	// GetRuntimeConfig RPC.
+	ConfigServiceGetRuntimeConfigProcedure = "/agentcompose.v1.ConfigService/GetRuntimeConfig"
 	// ConfigServiceGetGlobalEnvConfigProcedure is the fully-qualified name of the ConfigService's
 	// GetGlobalEnvConfig RPC.
 	ConfigServiceGetGlobalEnvConfigProcedure = "/agentcompose.v1.ConfigService/GetGlobalEnvConfig"
@@ -985,6 +988,7 @@ func (UnimplementedLLMServiceHandler) Generate(context.Context, *connect.Request
 
 // ConfigServiceClient is a client for the agentcompose.v1.ConfigService service.
 type ConfigServiceClient interface {
+	GetRuntimeConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[v1.RuntimeConfigResponse], error)
 	GetGlobalEnvConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[v1.GlobalEnvConfigResponse], error)
 	UpdateGlobalEnvConfig(context.Context, *connect.Request[v1.UpdateGlobalEnvConfigRequest]) (*connect.Response[v1.GlobalEnvConfigResponse], error)
 	GetCapabilityGatewayConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[v1.CapabilityGatewayConfig], error)
@@ -1006,6 +1010,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 	baseURL = strings.TrimRight(baseURL, "/")
 	configServiceMethods := v1.File_proto_agentcompose_v1_agentcompose_proto.Services().ByName("ConfigService").Methods()
 	return &configServiceClient{
+		getRuntimeConfig: connect.NewClient[emptypb.Empty, v1.RuntimeConfigResponse](
+			httpClient,
+			baseURL+ConfigServiceGetRuntimeConfigProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetRuntimeConfig")),
+			connect.WithClientOptions(opts...),
+		),
 		getGlobalEnvConfig: connect.NewClient[emptypb.Empty, v1.GlobalEnvConfigResponse](
 			httpClient,
 			baseURL+ConfigServiceGetGlobalEnvConfigProcedure,
@@ -1059,6 +1069,7 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 
 // configServiceClient implements ConfigServiceClient.
 type configServiceClient struct {
+	getRuntimeConfig              *connect.Client[emptypb.Empty, v1.RuntimeConfigResponse]
 	getGlobalEnvConfig            *connect.Client[emptypb.Empty, v1.GlobalEnvConfigResponse]
 	updateGlobalEnvConfig         *connect.Client[v1.UpdateGlobalEnvConfigRequest, v1.GlobalEnvConfigResponse]
 	getCapabilityGatewayConfig    *connect.Client[emptypb.Empty, v1.CapabilityGatewayConfig]
@@ -1067,6 +1078,11 @@ type configServiceClient struct {
 	createWorkspaceConfig         *connect.Client[v1.CreateWorkspaceConfigRequest, v1.WorkspaceConfigResponse]
 	updateWorkspaceConfig         *connect.Client[v1.UpdateWorkspaceConfigRequest, v1.WorkspaceConfigResponse]
 	deleteWorkspaceConfig         *connect.Client[v1.WorkspaceConfigIDRequest, emptypb.Empty]
+}
+
+// GetRuntimeConfig calls agentcompose.v1.ConfigService.GetRuntimeConfig.
+func (c *configServiceClient) GetRuntimeConfig(ctx context.Context, req *connect.Request[emptypb.Empty]) (*connect.Response[v1.RuntimeConfigResponse], error) {
+	return c.getRuntimeConfig.CallUnary(ctx, req)
 }
 
 // GetGlobalEnvConfig calls agentcompose.v1.ConfigService.GetGlobalEnvConfig.
@@ -1111,6 +1127,7 @@ func (c *configServiceClient) DeleteWorkspaceConfig(ctx context.Context, req *co
 
 // ConfigServiceHandler is an implementation of the agentcompose.v1.ConfigService service.
 type ConfigServiceHandler interface {
+	GetRuntimeConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[v1.RuntimeConfigResponse], error)
 	GetGlobalEnvConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[v1.GlobalEnvConfigResponse], error)
 	UpdateGlobalEnvConfig(context.Context, *connect.Request[v1.UpdateGlobalEnvConfigRequest]) (*connect.Response[v1.GlobalEnvConfigResponse], error)
 	GetCapabilityGatewayConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[v1.CapabilityGatewayConfig], error)
@@ -1128,6 +1145,12 @@ type ConfigServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	configServiceMethods := v1.File_proto_agentcompose_v1_agentcompose_proto.Services().ByName("ConfigService").Methods()
+	configServiceGetRuntimeConfigHandler := connect.NewUnaryHandler(
+		ConfigServiceGetRuntimeConfigProcedure,
+		svc.GetRuntimeConfig,
+		connect.WithSchema(configServiceMethods.ByName("GetRuntimeConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
 	configServiceGetGlobalEnvConfigHandler := connect.NewUnaryHandler(
 		ConfigServiceGetGlobalEnvConfigProcedure,
 		svc.GetGlobalEnvConfig,
@@ -1178,6 +1201,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 	)
 	return "/agentcompose.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case ConfigServiceGetRuntimeConfigProcedure:
+			configServiceGetRuntimeConfigHandler.ServeHTTP(w, r)
 		case ConfigServiceGetGlobalEnvConfigProcedure:
 			configServiceGetGlobalEnvConfigHandler.ServeHTTP(w, r)
 		case ConfigServiceUpdateGlobalEnvConfigProcedure:
@@ -1202,6 +1227,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 
 // UnimplementedConfigServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedConfigServiceHandler struct{}
+
+func (UnimplementedConfigServiceHandler) GetRuntimeConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[v1.RuntimeConfigResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v1.ConfigService.GetRuntimeConfig is not implemented"))
+}
 
 func (UnimplementedConfigServiceHandler) GetGlobalEnvConfig(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[v1.GlobalEnvConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v1.ConfigService.GetGlobalEnvConfig is not implemented"))

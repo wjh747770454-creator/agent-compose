@@ -7,6 +7,7 @@ data
 build/*
 vendor
 node_modules
+**/node_modules
 runtime/javascript/node_modules
 runtime/agent-compose-runtime-sdk/node_modules
 .pnpm-store
