@@ -132,10 +132,69 @@ func jupyterOptionsFromAgentSpec(agent *agentcomposev2.AgentSpec) sessionstore.C
 
 func DecodeRevisionSpec(raw string) (*agentcomposev2.ProjectSpec, error) {
 	var spec agentcomposev2.ProjectSpec
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &spec); err != nil {
+	data := []byte(strings.TrimSpace(raw))
+	if err := json.Unmarshal(data, &spec); err != nil {
 		return nil, fmt.Errorf("decode project revision spec: %w", err)
 	}
+	if err := restoreCanonicalProjectWorkspaces(data, &spec); err != nil {
+		return nil, err
+	}
 	return &spec, nil
+}
+
+type canonicalRevisionSpec struct {
+	Workspaces []json.RawMessage `json:"workspaces"`
+}
+
+type canonicalRevisionWorkspace struct {
+	Key       string                        `json:"key"`
+	Name      string                        `json:"name"`
+	Provider  string                        `json:"provider"`
+	URL       string                        `json:"url"`
+	Branch    string                        `json:"branch"`
+	Path      string                        `json:"path"`
+	Workspace *agentcomposev2.WorkspaceSpec `json:"workspace"`
+}
+
+func restoreCanonicalProjectWorkspaces(data []byte, spec *agentcomposev2.ProjectSpec) error {
+	if spec == nil || len(spec.GetWorkspaces()) == 0 {
+		return nil
+	}
+	var stored canonicalRevisionSpec
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return fmt.Errorf("decode project revision workspace compatibility shape: %w", err)
+	}
+	for i, raw := range stored.Workspaces {
+		if i >= len(spec.Workspaces) || spec.Workspaces[i].GetWorkspace() != nil {
+			continue
+		}
+		var workspace canonicalRevisionWorkspace
+		if err := json.Unmarshal(raw, &workspace); err != nil {
+			return fmt.Errorf("decode project revision workspace %d: %w", i, err)
+		}
+		if workspace.Workspace != nil {
+			spec.Workspaces[i].Workspace = workspace.Workspace
+			continue
+		}
+		if strings.TrimSpace(workspace.Provider) == "" &&
+			strings.TrimSpace(workspace.URL) == "" &&
+			strings.TrimSpace(workspace.Branch) == "" &&
+			strings.TrimSpace(workspace.Path) == "" {
+			continue
+		}
+		if key := strings.TrimSpace(workspace.Key); key != "" {
+			spec.Workspaces[i].Name = key
+		} else if strings.TrimSpace(spec.Workspaces[i].GetName()) == "" {
+			spec.Workspaces[i].Name = strings.TrimSpace(workspace.Name)
+		}
+		spec.Workspaces[i].Workspace = &agentcomposev2.WorkspaceSpec{
+			Provider: workspace.Provider,
+			Url:      workspace.URL,
+			Branch:   workspace.Branch,
+			Path:     workspace.Path,
+		}
+	}
+	return nil
 }
 
 func AgentSpecByName(spec *agentcomposev2.ProjectSpec, name string) (*agentcomposev2.AgentSpec, bool) {
@@ -204,16 +263,14 @@ func ProjectRunWorkspaceSpecsFromV2(projectWorkspaces []*agentcomposev2.NamedWor
 		hasName := strings.TrimSpace(agent.Name) != ""
 		hasInline := strings.TrimSpace(agent.Provider) != "" || strings.TrimSpace(agent.URL) != "" || strings.TrimSpace(agent.Branch) != "" || strings.TrimSpace(agent.Path) != ""
 		switch {
-		case hasName && hasInline:
-			return nil, nil, fmt.Errorf("agent workspace reference cannot set name together with provider, url, branch, or path")
+		case hasInline:
+			return nil, agent, nil
 		case hasName:
 			workspace, ok := globals[strings.TrimSpace(agent.Name)]
 			if !ok {
 				return nil, nil, fmt.Errorf("agent workspace %q is not defined", agent.Name)
 			}
 			return nil, &workspace, nil
-		case hasInline:
-			return nil, agent, nil
 		}
 	}
 
