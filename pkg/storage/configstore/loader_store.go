@@ -19,6 +19,9 @@ type loaderStore struct {
 }
 
 func (s *loaderStore) ensureLoaderSchema(ctx context.Context) error {
+	if err := s.recoverLoaderBindingTriggerMigration(ctx); err != nil {
+		return err
+	}
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS loader (
             id TEXT PRIMARY KEY,
@@ -131,6 +134,54 @@ func (s *loaderStore) ensureLoaderSchema(ctx context.Context) error {
 	}
 	if err := s.ensureLoaderBindingTriggerColumn(ctx); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *loaderStore) recoverLoaderBindingTriggerMigration(ctx context.Context) error {
+	legacyColumns, err := TableColumnTypes(ctx, s.db, "loader_binding_legacy")
+	if err != nil {
+		return err
+	}
+	if len(legacyColumns) == 0 {
+		return nil
+	}
+	columns, err := TableColumnTypes(ctx, s.db, "loader_binding")
+	if err != nil {
+		return err
+	}
+	if len(columns) > 0 {
+		if _, ok := columns["trigger_id"]; !ok {
+			return fmt.Errorf("recover loader binding trigger migration: loader_binding and loader_binding_legacy both use legacy schema")
+		}
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin loader binding trigger recovery: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if len(columns) == 0 {
+		if _, err := tx.ExecContext(ctx, `CREATE TABLE loader_binding (
+			loader_id TEXT NOT NULL,
+			trigger_id TEXT NOT NULL DEFAULT '',
+			sandbox_id TEXT NOT NULL,
+			created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+			updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+			PRIMARY KEY(loader_id, trigger_id)
+		)`); err != nil {
+			return fmt.Errorf("recover loader binding trigger migration: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO loader_binding(loader_id, trigger_id, sandbox_id, created_at, updated_at)
+		SELECT loader_id, '', sandbox_id, created_at, updated_at FROM loader_binding_legacy`); err != nil {
+		return fmt.Errorf("recover loader binding trigger migration: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE loader_binding_legacy`); err != nil {
+		return fmt.Errorf("recover loader binding trigger migration: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit loader binding trigger recovery: %w", err)
 	}
 	return nil
 }

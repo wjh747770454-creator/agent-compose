@@ -48,6 +48,10 @@ func TestConfigStoreMigratesLegacySQLiteSessionSchema(t *testing.T) {
 	testConfigStoreMigratesLegacySQLiteSessionSchema(t)
 }
 
+func TestConfigStoreRecoversInterruptedLoaderBindingTriggerMigration(t *testing.T) {
+	testConfigStoreRecoversInterruptedLoaderBindingTriggerMigration(t)
+}
+
 func TestIntegrationConfigStoreProjectSchemaMigrationWorkflows(t *testing.T) {
 	testConfigStoreProjectSchemaMigrationWorkflows(t)
 }
@@ -158,6 +162,33 @@ func testConfigStoreMigratesLegacySQLiteSessionSchema(t *testing.T) {
 		t.Fatalf("migrated event links=%#v err=%v", links, err)
 	}
 	assertTableColumns(t, store, "event_session_link", "session_id")
+}
+
+func testConfigStoreRecoversInterruptedLoaderBindingTriggerMigration(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	db := newMemoryDB(t)
+	if _, err := db.ExecContext(ctx, `CREATE TABLE loader_binding_legacy(
+		loader_id TEXT PRIMARY KEY,
+		sandbox_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`); err != nil {
+		t.Fatalf("create interrupted migration fixture: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO loader_binding_legacy(loader_id, sandbox_id, created_at, updated_at)
+		VALUES('loader-1', 'sandbox-1', 1, 2)`); err != nil {
+		t.Fatalf("insert interrupted migration fixture: %v", err)
+	}
+	store := FromDB(db)
+	if err := store.initSchema(ctx); err != nil {
+		t.Fatalf("initSchema interrupted migration recovery returned error: %v", err)
+	}
+	assertTableColumns(t, store, "loader_binding", "trigger_id", "sandbox_id")
+	assertTableDoesNotExist(t, store, "loader_binding_legacy")
+	if binding, found, err := store.GetLoaderBinding(ctx, "loader-1", ""); err != nil || !found || binding.SandboxID != "sandbox-1" {
+		t.Fatalf("recovered binding=%#v found=%v err=%v", binding, found, err)
+	}
 }
 
 func testConfigStoreProjectCRUDCoverageWorkflows(t *testing.T) {
