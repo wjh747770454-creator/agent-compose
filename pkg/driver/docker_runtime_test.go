@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	containerapi "github.com/docker/docker/api/types/container"
 	mountapi "github.com/docker/docker/api/types/mount"
 	networkapi "github.com/docker/docker/api/types/network"
+	"github.com/docker/go-connections/nat"
 )
 
 func TestDockerRuntimeBindRuntimeMountSourceUsesHostSandboxRoot(t *testing.T) {
@@ -486,25 +488,97 @@ func TestSelectDockerNetworkNameReturnsFalseWithoutNetworks(t *testing.T) {
 	}
 }
 
+func TestDockerJupyterPortConfigRequestsAutomaticLoopbackBinding(t *testing.T) {
+	exposedPorts, portBindings := dockerJupyterPortConfig(9999)
+	port := nat.Port("9999/tcp")
+	if _, ok := exposedPorts[port]; !ok {
+		t.Fatalf("exposed ports = %#v, want %s", exposedPorts, port)
+	}
+	bindings := portBindings[port]
+	if len(bindings) != 1 || bindings[0].HostIP != "127.0.0.1" || bindings[0].HostPort != "" {
+		t.Fatalf("port bindings = %#v, want automatic loopback binding", portBindings)
+	}
+}
+
+func TestDockerJupyterHostPortSelectsValidLoopbackBinding(t *testing.T) {
+	containerInfo := dockerInspectWithJupyterBindings("container-1", "/runtime-ref", 9999, []nat.PortBinding{
+		{HostIP: "0.0.0.0", HostPort: "41000"},
+		{HostIP: "127.0.0.1", HostPort: "invalid"},
+		{HostIP: "::1", HostPort: "42000"},
+		{HostIP: "127.0.0.1", HostPort: "43000"},
+	})
+	got, err := dockerJupyterHostPort(containerInfo, 9999)
+	if err != nil {
+		t.Fatalf("dockerJupyterHostPort returned error: %v", err)
+	}
+	if got != 42000 {
+		t.Fatalf("dockerJupyterHostPort = %d, want first valid loopback port 42000", got)
+	}
+}
+
+func TestDockerJupyterHostPortRejectsInvalidBindings(t *testing.T) {
+	tests := []struct {
+		name          string
+		containerInfo containerapi.InspectResponse
+		guestPort     int
+	}{
+		{name: "zero guest port", containerInfo: dockerInspectWithJupyterBindings("container-1", "/runtime-ref", 9999, []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "42000"}})},
+		{name: "missing network settings", containerInfo: containerapi.InspectResponse{ContainerJSONBase: &containerapi.ContainerJSONBase{ID: "container-1"}}, guestPort: 9999},
+		{name: "missing binding", containerInfo: dockerInspectWithJupyterBindings("container-1", "/runtime-ref", 8888, []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "42000"}}), guestPort: 9999},
+		{name: "zero port", containerInfo: dockerInspectWithJupyterBindings("container-1", "/runtime-ref", 9999, []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "0"}}), guestPort: 9999},
+		{name: "invalid port", containerInfo: dockerInspectWithJupyterBindings("container-1", "/runtime-ref", 9999, []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "abc"}}), guestPort: 9999},
+		{name: "non-loopback", containerInfo: dockerInspectWithJupyterBindings("container-1", "/runtime-ref", 9999, []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "42000"}}), guestPort: 9999},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := dockerJupyterHostPort(tt.containerInfo, tt.guestPort); err == nil {
+				t.Fatal("dockerJupyterHostPort returned nil error")
+			}
+		})
+	}
+}
+
 func TestDockerRuntimeSandboxProxyStateUsesContainerNameAndGuestPort(t *testing.T) {
 	runtime := &dockerRuntime{config: &appconfig.Config{JupyterGuestPort: 8888}}
-	got := runtime.dockerSandboxProxyState(&Sandbox{
+	sandbox := &Sandbox{
 		Summary: SandboxSummary{
 			ID:         "session 1",
 			RuntimeRef: "runtime-ref",
 		},
-	}, VMState{}, ProxyState{
+	}
+	state := ProxyState{
 		GuestHost: "127.0.0.1",
-		HostPort:  39000,
+		HostPort:  39000, // stale persisted value
 		GuestPort: 9999,
 		Token:     "secret",
 		Enabled:   true,
-	})
-
-	if got.GuestHost != "runtime-ref" || got.GuestPort != 9999 {
-		t.Fatalf("dockerSandboxProxyState target = %s:%d, want runtime-ref:9999", got.GuestHost, got.GuestPort)
 	}
-	if got.HostPort != 39000 || got.Token != "secret" {
-		t.Fatalf("dockerSandboxProxyState did not preserve host port/token: %+v", got)
+	containerInfo := dockerInspectWithJupyterBindings("container-1", "/actual-runtime-ref", 9999, []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "42000"}})
+
+	hostState, err := runtime.dockerSandboxProxyState(sandbox, VMState{}, state, containerInfo, false)
+	if err != nil {
+		t.Fatalf("host dockerSandboxProxyState returned error: %v", err)
+	}
+	if hostState.GuestHost != "127.0.0.1" || hostState.HostPort != 42000 {
+		t.Fatalf("host daemon proxy state = %+v, want 127.0.0.1:42000", hostState)
+	}
+	containerState, err := runtime.dockerSandboxProxyState(sandbox, VMState{}, state, containerInfo, true)
+	if err != nil {
+		t.Fatalf("container dockerSandboxProxyState returned error: %v", err)
+	}
+	if containerState.GuestHost != "actual-runtime-ref" || containerState.GuestPort != 9999 || containerState.HostPort != 42000 {
+		t.Fatalf("container daemon proxy state = %+v, want actual-runtime-ref:9999 with host port 42000", containerState)
+	}
+	if containerState.Token != "secret" {
+		t.Fatalf("dockerSandboxProxyState did not preserve token: %+v", containerState)
+	}
+}
+
+func dockerInspectWithJupyterBindings(id, name string, guestPort int, bindings []nat.PortBinding) containerapi.InspectResponse {
+	networkSettings := &containerapi.NetworkSettings{}
+	networkSettings.Ports = nat.PortMap{nat.Port(strconv.Itoa(guestPort) + "/tcp"): bindings}
+	return containerapi.InspectResponse{
+		ContainerJSONBase: &containerapi.ContainerJSONBase{ID: id, Name: name},
+		NetworkSettings:   networkSettings,
 	}
 }

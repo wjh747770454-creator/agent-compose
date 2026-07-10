@@ -6,9 +6,70 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestDockerJupyterAutomaticPortsSmoke(t *testing.T) {
+	runtimeSmokeEnabled(t, RuntimeDriverDocker)
+	image := strings.TrimSpace(os.Getenv("SMOKE_DOCKER_JUPYTER_IMAGE"))
+	if image == "" {
+		t.Skip("set SMOKE_DOCKER_JUPYTER_IMAGE to a Docker image containing JupyterLab")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	config := newRuntimeSmokeConfig(t, RuntimeDriverDocker)
+	config.DockerDefaultImage = image
+	config.JupyterReadyTimeout = 2 * time.Minute
+	runtime := &dockerRuntime{config: config}
+
+	type runningSandbox struct {
+		sandbox    *Sandbox
+		vmState    VMState
+		proxyState ProxyState
+	}
+	running := make([]runningSandbox, 0, 2)
+	hostPorts := map[int]struct{}{}
+	for range 2 {
+		sandbox, vmState, proxyState := newRuntimeSmokeSandbox(t, ctx, config, RuntimeDriverDocker)
+		sandbox.Summary.GuestImage = image
+		vmState.Image = image
+		proxyState.Enabled = true
+		proxyState.Token = sandbox.Summary.ID
+		cleanupRuntimeSmokeSandbox(t, config, runtime, sandbox, vmState)
+		info, err := runtime.EnsureSandbox(ctx, sandbox, vmState, proxyState)
+		if err != nil {
+			t.Fatalf("EnsureSandbox(%s) error = %v", sandbox.Summary.ID, err)
+		}
+		if info.ProxyState == nil || info.ProxyState.HostPort <= 0 || info.ProxyState.GuestHost != "127.0.0.1" {
+			t.Fatalf("EnsureSandbox(%s) proxy state = %+v, want host-mapped target", sandbox.Summary.ID, info.ProxyState)
+		}
+		if _, duplicate := hostPorts[info.ProxyState.HostPort]; duplicate {
+			t.Fatalf("Docker assigned duplicate Jupyter host port %d", info.ProxyState.HostPort)
+		}
+		hostPorts[info.ProxyState.HostPort] = struct{}{}
+		vmState.BoxID = info.BoxID
+		proxyState = *info.ProxyState
+		running = append(running, runningSandbox{sandbox: sandbox, vmState: vmState, proxyState: proxyState})
+	}
+
+	first := running[0]
+	missing, err := runtime.StopSandbox(ctx, first.sandbox, first.vmState)
+	if err != nil || missing {
+		t.Fatalf("StopSandbox() missing=%v error=%v", missing, err)
+	}
+	first.vmState.StoppedAt = time.Now().UTC()
+	resumed, err := runtime.EnsureSandbox(ctx, first.sandbox, first.vmState, first.proxyState)
+	if err != nil {
+		t.Fatalf("resume EnsureSandbox() error = %v", err)
+	}
+	if resumed.ProxyState == nil || resumed.ProxyState.HostPort <= 0 || resumed.ProxyState.GuestHost != "127.0.0.1" {
+		t.Fatalf("resumed proxy state = %+v, want refreshed host-mapped target", resumed.ProxyState)
+	}
+}
 
 func TestDockerStopResumePreservesWritableLayerSmoke(t *testing.T) {
 	runtimeSmokeEnabled(t, RuntimeDriverDocker)

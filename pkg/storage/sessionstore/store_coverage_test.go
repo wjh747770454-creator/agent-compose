@@ -144,6 +144,29 @@ func TestStoreCreateSessionWithJupyterOptions(t *testing.T) {
 	}
 }
 
+func TestStoreCreateSessionJupyterHostPortDependsOnDriver(t *testing.T) {
+	ctx := context.Background()
+	for _, driver := range []string{driverpkg.RuntimeDriverDocker, driverpkg.RuntimeDriverBoxlite, driverpkg.RuntimeDriverMicrosandbox} {
+		t.Run(driver, func(t *testing.T) {
+			store := newCoverageStore(t)
+			session, err := store.CreateSandboxWithOptions(ctx, "Jupyter", "", driver, "", "", "", nil, nil, nil, CreateSandboxOptions{JupyterEnabled: true})
+			if err != nil {
+				t.Fatalf("CreateSandboxWithOptions returned error: %v", err)
+			}
+			proxyState, err := store.GetProxyState(session.Summary.ID)
+			if err != nil {
+				t.Fatalf("GetProxyState returned error: %v", err)
+			}
+			if driver == driverpkg.RuntimeDriverDocker && proxyState.HostPort != 0 {
+				t.Fatalf("docker HostPort = %d, want Docker-assigned zero initial port", proxyState.HostPort)
+			}
+			if driver != driverpkg.RuntimeDriverDocker && proxyState.HostPort == 0 {
+				t.Fatalf("%s HostPort = 0, want preallocated port", driver)
+			}
+		})
+	}
+}
+
 func TestStoreCreateSessionInitializesJSONLEvents(t *testing.T) {
 	ctx := context.Background()
 	store := newCoverageStore(t)

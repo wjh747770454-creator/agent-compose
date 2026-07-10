@@ -166,15 +166,17 @@ func (s *Store) CreateSandboxWithOptions(_ context.Context, title, baseWorkspace
 		Exposed:   options.JupyterExpose,
 	}
 	if proxyState.Enabled {
-		hostPort, err := s.allocateHostPort()
-		if err != nil {
-			return nil, err
-		}
 		guestPort := options.JupyterGuestPort
 		if guestPort == 0 {
 			guestPort = s.config.JupyterGuestPort
 		}
-		proxyState.HostPort = hostPort
+		if driver != driverpkg.RuntimeDriverDocker {
+			hostPort, err := s.allocateHostPort()
+			if err != nil {
+				return nil, err
+			}
+			proxyState.HostPort = hostPort
+		}
 		proxyState.GuestPort = guestPort
 		proxyState.JupyterURL = session.Summary.ProxyPath
 		proxyState.Token = uuid.NewString()

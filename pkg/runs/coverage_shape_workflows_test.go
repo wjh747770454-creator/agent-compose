@@ -1451,7 +1451,7 @@ func TestRunsControllerApplyJupyterOptionsToSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProxyState before returned error: %v", err)
 	}
-	if err := fixture.controller.applyJupyterOptionsToSandbox(session.Summary.ID, sessionstore.CreateSandboxOptions{}); err != nil {
+	if err := fixture.controller.applyJupyterOptionsToSandbox(session, sessionstore.CreateSandboxOptions{}); err != nil {
 		t.Fatalf("apply empty options returned error: %v", err)
 	}
 	unchanged, err := fixture.store.GetProxyState(session.Summary.ID)
@@ -1461,7 +1461,7 @@ func TestRunsControllerApplyJupyterOptionsToSandbox(t *testing.T) {
 	if unchanged != before {
 		t.Fatalf("empty options changed proxy state before=%#v after=%#v", before, unchanged)
 	}
-	if err := fixture.controller.applyJupyterOptionsToSandbox(session.Summary.ID, sessionstore.CreateSandboxOptions{JupyterExpose: true, JupyterGuestPort: 9999}); err != nil {
+	if err := fixture.controller.applyJupyterOptionsToSandbox(session, sessionstore.CreateSandboxOptions{JupyterExpose: true, JupyterGuestPort: 9999}); err != nil {
 		t.Fatalf("apply jupyter options returned error: %v", err)
 	}
 	enabled, err := fixture.store.GetProxyState(session.Summary.ID)
@@ -1470,6 +1470,25 @@ func TestRunsControllerApplyJupyterOptionsToSandbox(t *testing.T) {
 	}
 	if !enabled.Enabled || !enabled.Exposed || enabled.GuestPort != 9999 || enabled.HostPort == 0 || strings.TrimSpace(enabled.Token) == "" || enabled.JupyterURL != enabled.ProxyPath {
 		t.Fatalf("enabled proxy state = %#v", enabled)
+	}
+}
+
+func TestRunsControllerApplyJupyterOptionsLeavesDockerHostPortForRuntime(t *testing.T) {
+	fixture := newControllerRunFixture(t)
+	fixture.config.JupyterGuestPort = 8888
+	sandbox, err := fixture.store.CreateSandbox(fixture.ctx, "docker jupyter", "", driverpkg.RuntimeDriverDocker, "guest:latest", "", domain.SandboxTypeManual, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSandbox returned error: %v", err)
+	}
+	if err := fixture.controller.applyJupyterOptionsToSandbox(sandbox, sessionstore.CreateSandboxOptions{JupyterEnabled: true}); err != nil {
+		t.Fatalf("applyJupyterOptionsToSandbox returned error: %v", err)
+	}
+	state, err := fixture.store.GetProxyState(sandbox.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetProxyState returned error: %v", err)
+	}
+	if !state.Enabled || state.GuestPort != 8888 || state.HostPort != 0 || state.Token == "" {
+		t.Fatalf("docker proxy state = %+v, want enabled state with runtime-assigned host port", state)
 	}
 }
 
