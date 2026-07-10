@@ -1243,12 +1243,10 @@ func errorFromRuntimeResult(result driverpkg.RuntimeResult) error {
 }
 
 func pumpRunAttachInput(receive RunAttachReceiver, interaction driverpkg.RuntimeInteraction) {
+	defer func() { _ = interaction.CloseSend() }()
 	for {
 		req, err := receive()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				_ = interaction.CloseSend()
-			}
 			return
 		}
 		frame, ok := runtimeInputFrameFromRunAttach(req)
@@ -1337,13 +1335,11 @@ func (w *promptWrapperInput) send(frame map[string]any) error {
 }
 
 func pumpRunPromptAttachInput(receive RunAttachReceiver, input *promptWrapperInput, onHumanMessage func(string) error) {
+	defer func() { _ = input.interaction.CloseSend() }()
 	for {
 		req, err := receive()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				_ = input.EOF()
-				_ = input.interaction.CloseSend()
-			}
+			_ = input.EOF()
 			return
 		}
 		switch frame := req.GetFrame().(type) {
@@ -1369,11 +1365,9 @@ func pumpRunPromptAttachInput(receive RunAttachReceiver, input *promptWrapperInp
 			}
 		case *agentcomposev2.RunAttachRequest_StdinEof:
 			_ = input.EOF()
-			_ = input.interaction.CloseSend()
 			return
 		case *agentcomposev2.RunAttachRequest_Cancel:
 			_ = input.Cancel(frame.Cancel.GetReason())
-			_ = input.interaction.CloseSend()
 			return
 		default:
 			_ = input.Cancel("invalid run prompt attach frame")

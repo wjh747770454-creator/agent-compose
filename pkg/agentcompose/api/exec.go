@@ -371,12 +371,10 @@ func (h *ExecHandler) prepareExecAttach(ctx context.Context, start *agentcompose
 }
 
 func pumpExecAttachInput(receive execAttachReceiver, interaction driverpkg.RuntimeInteraction) {
+	defer func() { _ = interaction.CloseSend() }()
 	for {
 		req, err := receive()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				_ = interaction.CloseSend()
-			}
 			return
 		}
 		frame, ok := runtimeInputFrameFromExecAttach(req)

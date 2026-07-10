@@ -238,10 +238,26 @@ func (a *DaemonApp) listen() (*daemonServers, error) {
 			shutdownErr := servers.shutdown(context.Background())
 			return nil, errors.Join(fmt.Errorf("listen HTTP_LISTEN %q: %w", a.Config.HttpListen, err), shutdownErr)
 		}
+		if !isLoopbackListenAddress(a.Config.HttpListen) {
+			a.Logger.Warn("HTTP_LISTEN exposes unencrypted h2c traffic; use a TLS-terminating reverse proxy before exposing this listener", "address", a.Config.HttpListen)
+		}
 		servers.add("HTTP_LISTEN", a.Config.HttpListen, tcpListener, a.Echo, nil)
 	}
 
 	return servers, nil
+}
+
+func isLoopbackListenAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *daemonServers) add(name, value string, listener net.Listener, handler http.Handler, cleanup func() error) {
