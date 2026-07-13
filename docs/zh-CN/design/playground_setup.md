@@ -171,7 +171,7 @@ curl -sS -X POST \
 说明：
 
 - `base_workspace` 不是当前 playground 烟雾验证的必要参数。
-- 如果你要准备真实 workspace，优先使用 `ConfigService` 管理 `workspace_id`，当前支持的 workspace 类型是 `git`。
+- 如果你要准备真实 workspace，优先使用 `ConfigService` 管理 `workspace_id`，当前支持的 workspace 类型是 `file` 和 `git`。
 
 ### 7. 通过 v1 兼容 API 查询 sandbox 状态
 

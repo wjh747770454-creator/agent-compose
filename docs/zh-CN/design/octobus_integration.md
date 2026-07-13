@@ -181,7 +181,7 @@ CAP_TOKEN=<每个 sandbox 新生成 uuid>   # secret
 
 tag：每个能力集一个 `capset=<capset_id>`。前提仅是至少一个 capset 已选 + `CAP_GRPC_TARGET` 已配置；后者缺失则跳过能力注入并记 warning，不阻塞创建。
 
-**步骤 2：`writeCapabilityGuide(sandbox, capset_ids)`（workspace 准备之后、`StartSessionVM` 之前，best-effort）** —— 对每个 capset 调 OctoBus `GET /admin/v1/catalog/{capset_id}?format=md&grpc=true` 渲染能力说明 markdown，写入**sandbox MPI catalog** `<sandboxDir>/runtime/mpi/catalog.md`（经挂载出现在 guest `/data/runtime/mpi/catalog.md`）。`agent-compose-runtime`（`runtime/javascript`）的 `readMpiContext` 会读这个 catalog，把它作为**高优先级上下文注入 agent system prompt**：codex 进 `config.developer_instructions`，claude 进 `systemPrompt`（preset `claude_code` + `append`）。所以创建 sandbox 后 agent 一启动就知道有哪些能力可调，无需自己 cat 文件。渲染内容含每个 gRPC 方法及其 `x-octobus-*` metadata（capset / instance）和「用 server reflection 获取描述符」的指引，guest 据此在调用时携带 `x-octobus-capset` / `x-octobus-instance`。不含 OctoBus 地址与 token（只取 `grpc` 段）。**OctoBus 不可达 / 渲染失败时记事件并继续，sandbox/loader 照常启动**。
+**步骤 2：`writeCapabilityGuide(sandbox, capset_ids)`（共享 Workspace Provisioner 已建立 `ready` 之后、`StartSessionVM` 之前，best-effort）** —— 对每个 capset 调 OctoBus `GET /admin/v1/catalog/{capset_id}?format=md&grpc=true` 渲染能力说明 markdown，写入**sandbox MPI catalog** `<sandboxDir>/runtime/mpi/catalog.md`（经挂载出现在 guest `/data/runtime/mpi/catalog.md`）。`agent-compose-runtime`（`runtime/javascript`）的 `readMpiContext` 会读这个 catalog，把它作为**高优先级上下文注入 agent system prompt**：codex 进 `config.developer_instructions`，claude 进 `systemPrompt`（preset `claude_code` + `append`）。所以创建 sandbox 后 agent 一启动就知道有哪些能力可调，无需自己 cat 文件。渲染内容含每个 gRPC 方法及其 `x-octobus-*` metadata（capset / instance）和「用 server reflection 获取描述符」的指引，guest 据此在调用时携带 `x-octobus-capset` / `x-octobus-instance`。不含 OctoBus 地址与 token（只取 `grpc` 段）。**OctoBus 不可达 / 渲染失败时记事件并继续，sandbox/loader 照常启动**。
 
 > 覆盖范围：codex、claude 经 `mpiContext` 注入 system prompt；gemini runner 当前未消费 `mpiContext`（已有 gap，本期不处理）。
 
@@ -204,7 +204,7 @@ agent definition、创建 sandbox 与 loader 都保存能力集选择，`capset_
 | `SandboxRPCBridge.createSession` / `loader_manager.go` loader run | 接收 `capset_ids`；建库前调步骤 1，建库后调步骤 2 |
 | `BuildGatewaySandboxVars`（步骤 1） | 纯本地生成 `CAP_GRPC_TARGET` / `CAP_TOKEN` env items + `capset` tags（不调 OctoBus） |
 | `Store.CreateSandbox` | 持久化合并后的 `EnvItems` 和 tags，建立 sandbox 目录 |
-| workspace 准备 | 填充工作区（git clone / file copy） |
+| 共享 Workspace Provisioner | 建立 `ready`；首次 provisioning 可能 clone/copy，`ready` resume 不触碰 workspace |
 | `writeCapabilityGuide`（步骤 2） | 渲染能力说明 md 写入 sandbox MPI catalog `runtime/mpi/catalog.md`（guest `/data/runtime/mpi/catalog.md`） |
 | runtime driver | 将 `sandbox.EnvItems` 注入 guest，挂载工作区与 runtime 目录 |
 | `agent-compose-runtime`（guest） | `readMpiContext` 读 catalog → 注入 codex / claude 的 system prompt |

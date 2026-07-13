@@ -617,7 +617,9 @@ data/agent-compose/
     ├── runtime/
     ├── state/
     │   ├── cells.json
-    │   └── events.jsonl
+    │   ├── events.jsonl
+    │   └── workspace-provisioning/
+    │       └── attempt-<id>/
     ├── logs/
     ├── vm/
     │   └── runtime.json
@@ -691,6 +693,12 @@ states:
 - `ready`: provisioning completed, or a legacy sandbox was accepted as already
   initialized. This is terminal for the lifetime of the sandbox.
 
+The allowed transitions are `pending -> ready|failed` and `failed -> pending`.
+Every successful transition updates the UTC `updated_at` timestamp. Unknown
+versions or states fail closed without changing the workspace. The record is an
+internal `workspace_provisioning` field in sandbox `metadata.json`; it is not
+exposed through `SandboxSummary`, the public API, or list filters.
+
 The process-level `Provisioner` is shared by every lifecycle path that can start
 or restart a workspace-backed sandbox: v1 session create/resume,
 `sessions.Lifecycle.ResumeLoaded` and Jupyter `EnsureProxyReady`, loader sandbox
@@ -700,6 +708,32 @@ create/resume flag or workspace directory contents. For `pending` and `failed`,
 it materializes into a same-filesystem staging directory, promotes the result,
 and persists `ready` before the runtime driver is allowed to start. A
 provisioning or state-persistence error prevents the driver from starting.
+
+Calls for the same sandbox ID are serialized in-process with `singleflight`.
+The shared operation reloads authoritative metadata before deciding what to do,
+and every caller reloads it again before returning, so a stale caller cannot
+overwrite the final state. Callers waiting on the same attempt may cancel their
+own context without canceling the shared operation; different sandboxes can be
+provisioned concurrently. This is not a distributed lock for multiple daemon
+processes sharing one `SANDBOX_ROOT`.
+
+For `pending` and retrying `failed` sandboxes, providers receive only a staging
+workspace under
+`<sandbox>/state/workspace-provisioning/attempt-<id>`. The Provisioner removes
+only stale `attempt-*` entries, materializes the complete source there, and
+promotes it to the authoritative `<sandbox>/workspace` with a same-filesystem
+rename. It requires the stored workspace path to equal that authoritative path
+and rejects symlinked sandbox, state, or provisioning roots. Provider code
+therefore cannot write the formal workspace before promotion. Sandbox metadata
+updates use a synced temporary file and same-directory rename, so a failed save
+does not truncate the previous metadata.
+
+Materialization, staging, or promotion failures persist `failed`; a later start
+first transitions it back to `pending` and retries from a fresh attempt. If
+persisting either the failure state or `ready` also fails, the returned error
+preserves the state-write failure, and the runtime still does not start. A
+runtime-driver failure after `ready` is different: provisioning remains
+`ready`, and the next resume retries only runtime startup.
 
 For `ready`, the Provisioner returns without resolving the workspace config,
 reading or inspecting the Workspace Source or sandbox workspace, or invoking a

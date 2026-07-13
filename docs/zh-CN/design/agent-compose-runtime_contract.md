@@ -93,7 +93,7 @@ host 在 `Store.CreateSandbox` 阶段创建：
   state/events.jsonl
 ```
 
-如果 sandbox 绑定了 git workspace，host 会在启动 runtime 前把仓库 clone 到 `<sandbox>/workspace`。
+如果 sandbox 绑定了 Git workspace，host 会在首次 workspace provisioning 期间把仓库 clone 到 `<sandbox>/workspace`，并在首次成功启动 runtime 前持久化 `ready`。进入 `ready` 后，后续 runtime 启动和 resume 都会复用该 workspace，不再 clone 或刷新。
 
 ### 3.2 agent prompt 文件
 

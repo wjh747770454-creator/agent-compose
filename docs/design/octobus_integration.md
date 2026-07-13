@@ -241,8 +241,9 @@ least one capset is selected and `CAP_GRPC_TARGET` is configured. If the latter
 is missing, capability injection is skipped and a warning is recorded; creation
 is not blocked.
 
-**Step 2: `writeCapabilityGuide(sandbox, capset_ids)` after
-workspace preparation and before `StartSessionVM`, best-effort.** For each
+**Step 2: `writeCapabilityGuide(sandbox, capset_ids)` after the shared
+Workspace Provisioner has established `ready` and before `StartSessionVM`,
+best-effort.** For each
 capset, call OctoBus
 `GET /admin/v1/catalog/{capset_id}?format=md&grpc=true` to render capability
 guide markdown, then write it to the **sandbox MPI catalog**
@@ -292,7 +293,7 @@ Injection chain:
 | `SandboxRPCBridge.createSession` / `loader_manager.go` loader run | Receive `capset_ids`; call step 1 before DB creation and step 2 after DB creation |
 | `BuildGatewaySandboxVars` (step 1) | Locally generate `CAP_GRPC_TARGET` / `CAP_TOKEN` env items + `capset` tags, without calling OctoBus |
 | `Store.CreateSandbox` | Persist merged `EnvItems` and tags, create sandbox directory |
-| workspace preparation | Populate workspace with git clone / file copy |
+| shared Workspace Provisioner | Establish `ready`; initial provisioning may clone/copy, while a ready resume leaves the workspace untouched |
 | `writeCapabilityGuide` (step 2) | Render capability guide markdown into sandbox MPI catalog `runtime/mpi/catalog.md` (guest `/data/runtime/mpi/catalog.md`) |
 | runtime driver | Inject `sandbox.EnvItems` into guest and mount workspace/runtime directories |
 | `agent-compose-runtime` (guest) | `readMpiContext` reads catalog and injects Codex / Claude system prompt |

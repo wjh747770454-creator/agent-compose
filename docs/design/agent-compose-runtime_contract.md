@@ -113,7 +113,9 @@ During `Store.CreateSandbox`, the host creates:
 ```
 
 If the sandbox is bound to a Git workspace, the host clones the repository into
-`<sandbox>/workspace` before starting runtime.
+`<sandbox>/workspace` during its initial workspace provisioning, before the
+first successful runtime start. Once provisioning is `ready`, later runtime
+starts and resumes reuse the workspace without cloning or refreshing it.
 
 ### 3.2 Agent Prompt File
 

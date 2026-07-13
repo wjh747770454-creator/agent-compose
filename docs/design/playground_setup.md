@@ -191,7 +191,8 @@ Notes:
 - `base_workspace` is not required for the current playground smoke
   verification.
 - If you need a real workspace, prefer managing `workspace_id` through
-  `ConfigService`. The currently supported workspace type is `git`.
+  `ConfigService`. The currently supported workspace types are `file` and
+  `git`.
 
 ### 7. Query Sandbox State Through v1 Compatibility API
 
