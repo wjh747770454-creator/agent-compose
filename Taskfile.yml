@@ -252,7 +252,7 @@ tasks:
   playground:up:
     desc: Build images and start the local playground service
     dir: '{{.TASKFILE_DIR}}/playground'
-    deps: ['image:agent-compose-guest', 'image:agent-compose']
+    deps: ['image:agent-compose', 'image:agent-compose-guest']
     cmds:
       - docker compose up -d agent-compose
 
