@@ -20,8 +20,8 @@
 
 - 已确认：resume 严格保持 sandbox workspace；旧 sandbox 原样迁移；首版无 reset API；真实 runtime 使用 Docker E2E。
 - 已完成文档：技术规格、实施计划。
-- 代码任务：12/20 完成。
-- 当前下一目标：4.4。
+- 代码任务：13/20 完成。
+- 当前下一目标：5.1。
 
 ## 执行规则
 
@@ -480,26 +480,40 @@
       - 变更范围仅为三个 integration test 文件和本账本；未修改 production code、cmd、proto/generated client、SQLite schema、公开 CLI/API shape、环境变量、compose、runtime mount、Task/TESTING 或 CI。无未运行的任务内门禁或其他例外。
     - 下一目标：4.4 运行默认 Unit/Integration 阶段门禁。
 
-- [ ] 4.4 运行默认 Unit/Integration 阶段门禁
+- [x] 4.4 运行默认 Unit/Integration 阶段门禁
   - 依赖：4.2、4.3。
   - 工作内容：
     - 审计测试命名符合 shape selector，不新增复用同一 helper 的伪 E2E wrapper。
     - 运行 unit/integration task 和受影响 package 全量测试。
     - 修复 flaky、共享目录、网络或执行顺序依赖。
   - 可并行子任务：
-    - [ ] 可并行：测试命名/shape 审计。
-    - [ ] 可并行：受影响 package 覆盖率缺口审计。
+    - [x] 可并行：测试命名/shape 审计。
+    - [x] 可并行：受影响 package 覆盖率缺口审计。
   - 测试方案：
     - `task test:unit`
     - `task test:integration`
     - `./scripts/with-go-toolchain.sh go test ./pkg/workspaces ./pkg/sessions ./pkg/agentcompose/adapters ./pkg/runs -count=1`
   - 验收标准：默认门禁内的 unit/integration 全部通过；所有核心行为已有确定性、非 Docker 回归。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：5.1。
+    - 状态：已完成。
+    - 变更：
+      - 本任务不修改 production 或测试代码，仅完成阶段 4 默认门禁、shape 审计、覆盖缺口映射和本账本收口。
+      - Workspace Resume 阶段从 4.1 到 4.3 共新增九个独立 `TestIntegration*` 工作流和一个 manifest unit helper/test 集；未新增复用 helper/fake 的 `TestE2E` wrapper。
+      - 覆盖审计把 manifest、file/local/Git ready 保持、v1/Jupyter/Loader/Project、Store 重建、legacy、file/Git provisioning failure、runtime failure、staging、并发和 cleanup 逐项映射到直接断言。
+    - 验证：
+      - `task test:unit`：通过；Go unit shape 全部通过，runtime SDK `5 files / 31 tests` 通过，runtime JavaScript `11 files / 131 tests` 通过。
+      - `task test:integration`：通过；Go integration shape 全部通过，runtime JavaScript `5 files / 56 tests` 通过。
+      - `./scripts/with-go-toolchain.sh go test ./pkg/workspaces ./pkg/sessions ./pkg/agentcompose/adapters ./pkg/runs -count=1`：通过。
+      - `./scripts/with-go-toolchain.sh go test ./pkg/workspaces ./pkg/sessions ./pkg/agentcompose/adapters ./pkg/runs -run 'TestIntegration.*(Workspace|Session|Proxy|Loader|Project|Persistence|Legacy|Retry|Failure)' -count=10`：通过。
+      - 独立覆盖审计对五个相关 package 的 focused selector 执行 `-count=2` 和 `-shuffle=on -count=3`：均通过。
+      - `git diff --check`：通过。
+    - 审计与例外：
+      - Shape selector 清单共 `1016` 个 base tests：`783 unit / 158 Integration / 75 E2E`，`test/e2e` 另有 `2` 个；不存在重名、同时带 Integration/E2E marker 或 global anchored regex 碰撞。
+      - `git diff faa02ee..HEAD` 证明阶段 4 精确新增九个 `TestIntegration*`、零个 `TestE2E*`；九个测试均被 harness 精确选择一次，无 skip、Docker、公开网络、共享目录或执行顺序依赖。
+      - 独立只读覆盖审计未发现阶段 4 行为缺口；十次重复和三次 shuffled 执行均稳定。受控本地 Git fixture 需要本机 `git` executable，并在 `t.TempDir` 中使用 `file://` repo，符合现有 harness。
+      - 仓库仍有既存 core-E2E shape debt：base E2E 中 `65/75` 是单 helper wrapper，本分支涉及的 affected packages 中保留 `11` 个，但它们在 `origin/main` 上已同名同体存在；`test/e2e` 两个测试也尚无未来策略要求的 build tag。该 debt 未由 Workspace Resume 新增，不违反本任务“不新增伪 E2E wrapper”的范围，后续核心 E2E 体系另行收口。
+      - 静态审计继续确认 `PrepareSessionWorkspace` 与 `HostWorkspaceInitialized` 零命中，production materializer 仅由 Provisioner staging 调用。变更范围仅为本账本；未修改 production/test code、proto/generated client、SQLite schema、公开 CLI/API、环境变量、compose、runtime mount、Task/TESTING 或 CI。
+    - 下一目标：5.1 提取 host-daemon Docker E2E 公共 helper。
 
 ## 5. 真实 Docker E2E 和文档
 
