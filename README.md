@@ -127,6 +127,11 @@ agents:
       branch: main
 ```
 
+Scheduler scripts may be inline JavaScript or an explicit `{ url: ... }`
+source using a local path, `file://`, `http://`, or `https://`. `config` and
+`up` fetch URL sources locally and send an inline snapshot to the daemon. Use
+either `scheduler.script` or `scheduler.triggers` in one scheduler.
+
 Add scheduled or event-driven runs. Use either `scheduler.triggers` **or** an
 inline `scheduler.script`, not both in the same scheduler:
 

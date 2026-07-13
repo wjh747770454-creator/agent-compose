@@ -648,6 +648,8 @@ func TestE2EAPILightweightHandlersCoverageWorkflows(t *testing.T) {
 func TestIntegrationAPIStoreBackedHandlerWorkflows(t *testing.T) {
 	t.Run("session handler", TestSessionHandlerGetAndListSessionsUseStoreAndReconciler)
 	t.Run("project proto mapping", TestProjectSpecToProtoIncludesSchedulerScript)
+	t.Run("project URL snapshot proto mapping", TestProjectSpecToProtoURLSnapshotMatchesInline)
+	t.Run("unresolved project URL proto mapping", TestProjectSpecToProtoRejectsUnresolvedSchedulerScriptURL)
 }
 
 func TestE2EAPIStoreBackedHandlerWorkflows(t *testing.T) {

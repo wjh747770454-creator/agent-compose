@@ -673,6 +673,147 @@ agents:
 	}
 }
 
+func TestConfigCommandExpandsSchedulerScriptURLs(t *testing.T) {
+	const script = `scheduler.interval("from-url", "1h");`
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, script)
+	}))
+	defer httpServer.Close()
+
+	for _, tc := range []struct {
+		name     string
+		location func(string) string
+	}{
+		{name: "relative file", location: func(dir string) string {
+			path := filepath.Join(dir, "scripts", "scheduler.js")
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return "./scripts/scheduler.js"
+		}},
+		{name: "HTTP", location: func(string) string { return httpServer.URL + "/scheduler.js" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			composePath := writeComposeFile(t, dir, fmt.Sprintf(`
+name: config-script-url
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: %s
+`, tc.location(dir)))
+			stdout, stderr, runCount, err := executeCommand("config", "--file", composePath)
+			if err != nil || stderr != "" || runCount != 0 {
+				t.Fatalf("config stdout=%q stderr=%q runCount=%d err=%v", stdout, stderr, runCount, err)
+			}
+			if !strings.Contains(stdout, script) || strings.Contains(stdout, "url:") {
+				t.Fatalf("config did not expand URL to inline snapshot:\n%s", stdout)
+			}
+		})
+	}
+}
+
+func TestUpResolvesSchedulerScriptURLBeforeApply(t *testing.T) {
+	const script = `scheduler.interval("from-url", "1h");`
+	sourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, script)
+	}))
+	defer sourceServer.Close()
+
+	var captured *agentcomposev2.ApplyProjectRequest
+	daemon := newComposeServiceStubServer(t, composeServiceStubs{project: projectServiceStub{
+		applyProject: func(_ context.Context, req *connect.Request[agentcomposev2.ApplyProjectRequest]) (*connect.Response[agentcomposev2.ApplyProjectResponse], error) {
+			captured = req.Msg
+			return connect.NewResponse(&agentcomposev2.ApplyProjectResponse{Applied: true}), nil
+		},
+	}})
+	defer daemon.Close()
+
+	composePath := writeComposeFile(t, t.TempDir(), fmt.Sprintf(`
+name: up-script-url
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: %s/scheduler.js
+`, sourceServer.URL))
+	_, expected, err := loadResolvedNormalizedCompose(context.Background(), cliOptions{ComposeFile: composePath})
+	if err != nil {
+		t.Fatalf("load expected spec: %v", err)
+	}
+	expectedHash, err := expected.Hash()
+	if err != nil {
+		t.Fatalf("hash expected spec: %v", err)
+	}
+
+	stdout, stderr, _, exitCode := executeCLICommand("up", "--file", composePath, "--host", daemon.URL, "--json")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("up stdout=%q stderr=%q exit=%d", stdout, stderr, exitCode)
+	}
+	if captured == nil || captured.GetExpectedSpecHash() != expectedHash {
+		t.Fatalf("Apply request = %#v, want expected hash %q", captured, expectedHash)
+	}
+	gotScript := captured.GetSpec().GetAgents()[0].GetScheduler().GetScript()
+	if gotScript != script {
+		t.Fatalf("wire scheduler script = %q, want %q", gotScript, script)
+	}
+}
+
+func TestUpScriptURLFetchFailureDoesNotApply(t *testing.T) {
+	sourceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer sourceServer.Close()
+	var daemonRequests int
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		daemonRequests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer daemon.Close()
+	composePath := writeComposeFile(t, t.TempDir(), fmt.Sprintf(`
+name: failed-script-url
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: %s/scheduler.js
+`, sourceServer.URL))
+	_, stderr, _, exitCode := executeCLICommand("up", "--file", composePath, "--host", daemon.URL)
+	if exitCode == 0 || !strings.Contains(stderr, "status 503") {
+		t.Fatalf("up stderr=%q exit=%d", stderr, exitCode)
+	}
+	if daemonRequests != 0 {
+		t.Fatalf("daemon received %d request(s), want none", daemonRequests)
+	}
+}
+
+func TestDownDoesNotFetchSchedulerScriptURL(t *testing.T) {
+	var removeCalls int
+	daemon := newComposeServiceStubServer(t, composeServiceStubs{project: projectServiceStub{
+		removeProject: func(context.Context, *connect.Request[agentcomposev2.RemoveProjectRequest]) (*connect.Response[agentcomposev2.RemoveProjectResponse], error) {
+			removeCalls++
+			return connect.NewResponse(&agentcomposev2.RemoveProjectResponse{}), nil
+		},
+	}})
+	defer daemon.Close()
+	composePath := writeComposeFile(t, t.TempDir(), `
+name: down-unreachable-script
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: http://127.0.0.1:1/unreachable.js
+`)
+	_, stderr, _, exitCode := executeCLICommand("down", "--file", composePath, "--host", daemon.URL, "--json")
+	if exitCode != 0 || stderr != "" || removeCalls != 1 {
+		t.Fatalf("down stderr=%q exit=%d removeCalls=%d", stderr, exitCode, removeCalls)
+	}
+}
+
 func TestConfigCommandUsesGlobalFileProjectNameAndJSON(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "file-project")
 	composePath := writeComposeFile(t, dir, `
@@ -9123,11 +9264,19 @@ type composeServiceStubs struct {
 }
 
 type projectServiceStub struct {
+	applyProject  func(context.Context, *connect.Request[agentcomposev2.ApplyProjectRequest]) (*connect.Response[agentcomposev2.ApplyProjectResponse], error)
 	getProject    func(context.Context, *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error)
 	listProjects  func(context.Context, *connect.Request[agentcomposev2.ListProjectsRequest]) (*connect.Response[agentcomposev2.ListProjectsResponse], error)
 	removeProject func(context.Context, *connect.Request[agentcomposev2.RemoveProjectRequest]) (*connect.Response[agentcomposev2.RemoveProjectResponse], error)
 
 	agentcomposev2connect.UnimplementedProjectServiceHandler
+}
+
+func (s projectServiceStub) ApplyProject(ctx context.Context, req *connect.Request[agentcomposev2.ApplyProjectRequest]) (*connect.Response[agentcomposev2.ApplyProjectResponse], error) {
+	if s.applyProject == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("ApplyProject stub is not configured"))
+	}
+	return s.applyProject(ctx, req)
 }
 
 func (s projectServiceStub) GetProject(ctx context.Context, req *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error) {
@@ -9498,7 +9647,7 @@ func (s loaderServiceStub) GetLoader(ctx context.Context, req *connect.Request[a
 func newComposeServiceStubServer(t *testing.T, stubs composeServiceStubs) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	if stubs.project.getProject != nil || stubs.project.listProjects != nil || stubs.project.removeProject != nil {
+	if stubs.project.applyProject != nil || stubs.project.getProject != nil || stubs.project.listProjects != nil || stubs.project.removeProject != nil {
 		path, handler := agentcomposev2connect.NewProjectServiceHandler(stubs.project)
 		mux.Handle(path, handler)
 	}

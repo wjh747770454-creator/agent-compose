@@ -122,11 +122,48 @@ agents:
 	if agent.Scheduler == nil {
 		t.Fatalf("scheduler is nil")
 	}
-	if !strings.Contains(agent.Scheduler.Script, `scheduler.interval("hourly-review"`) {
+	if !strings.Contains(agent.Scheduler.Script.Inline, `scheduler.interval("hourly-review"`) {
 		t.Fatalf("scheduler script = %q, want inline qjs", agent.Scheduler.Script)
 	}
 	if got := len(agent.Scheduler.Triggers); got != 0 {
 		t.Fatalf("trigger count = %d, want 0", got)
+	}
+}
+
+func TestParseSchedulerScriptURL(t *testing.T) {
+	spec, err := Parse([]byte(`
+name: url-project
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: ./scripts/scheduler.js
+`))
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	source := spec.Agents["reviewer"].Scheduler.Script
+	if source.Inline != "" || source.URL != "./scripts/scheduler.js" {
+		t.Fatalf("scheduler script source = %#v", source)
+	}
+}
+
+func TestParseRejectsInvalidSchedulerScriptURLObject(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "unknown field", body: "url: ./scheduler.js\n        extra: true", want: "scheduler.script.extra"},
+		{name: "empty URL", body: `url: ""`, want: "scheduler.script.url"},
+		{name: "missing URL", body: `{}`, want: "scheduler.script.url"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte("agents:\n  reviewer:\n    scheduler:\n      script:\n        " + tc.body + "\n"))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Parse error = %v, want path %q", err, tc.want)
+			}
+		})
 	}
 }
 

@@ -458,7 +458,7 @@ func (c *Controller) projectManagedSchedulerBuildsFromSpec(ctx context.Context, 
 		if agent.Scheduler == nil {
 			continue
 		}
-		if script := strings.TrimSpace(agent.Scheduler.Script); script != "" {
+		if agent.Scheduler.HasScript() {
 			inlineScripts[agent.Name] = agent.Scheduler.Script
 		}
 	}

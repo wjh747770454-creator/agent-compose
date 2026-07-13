@@ -141,8 +141,21 @@ func DryRunProjectChanges(project domain.ProjectRecord, agents []domain.ProjectA
 }
 
 func ProjectSpecToProto(spec *compose.NormalizedProjectSpec) *agentcomposev2.ProjectSpec {
-	if spec == nil {
+	result, err := ProjectSpecToProtoChecked(spec)
+	if err != nil {
 		return nil
+	}
+	return result
+}
+
+// ProjectSpecToProtoChecked prevents an unresolved CLI-only script URL from
+// being mistaken for inline scheduler source on the wire.
+func ProjectSpecToProtoChecked(spec *compose.NormalizedProjectSpec) (*agentcomposev2.ProjectSpec, error) {
+	if spec == nil {
+		return nil, nil
+	}
+	if err := spec.ValidateResolvedScriptURLs(); err != nil {
+		return nil, err
 	}
 	return &agentcomposev2.ProjectSpec{
 		Name:       spec.Name,
@@ -152,7 +165,7 @@ func ProjectSpecToProto(spec *compose.NormalizedProjectSpec) *agentcomposev2.Pro
 		Network:    NetworkSpecToProto(spec.Network),
 		Volumes:    ProjectVolumeSpecsToProto(spec.Volumes),
 		Mcps:       MCPServerSpecsToProto(spec.MCPs),
-	}
+	}, nil
 }
 
 func NamedWorkspaceSpecsToProto(workspaces map[string]compose.WorkspaceSpec) []*agentcomposev2.NamedWorkspaceSpec {
@@ -359,6 +372,9 @@ func DriverSpecToProto(driver *compose.NormalizedDriverSpec) *agentcomposev2.Dri
 
 func SchedulerSpecToProto(scheduler *compose.NormalizedSchedulerSpec) *agentcomposev2.SchedulerSpec {
 	if scheduler == nil {
+		return nil
+	}
+	if scheduler.HasScript() && strings.TrimSpace(scheduler.Script) == "" {
 		return nil
 	}
 	triggers := make([]*agentcomposev2.TriggerSpec, 0, len(scheduler.Triggers))

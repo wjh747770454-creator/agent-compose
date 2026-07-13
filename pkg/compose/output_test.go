@@ -2,6 +2,7 @@ package compose
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -512,6 +513,61 @@ agents:
 
 	if got := mustHash(t, changed); got == mustHash(t, base) {
 		t.Fatalf("hash did not change when scheduler script changed")
+	}
+}
+
+func TestResolvedSchedulerScriptURLUsesSnapshotForOutputAndHash(t *testing.T) {
+	inline := mustNormalizeCompose(t, `
+name: script-url-hash
+agents:
+  reviewer:
+    scheduler:
+      script: scheduler.interval("hourly-review", "1h");
+`, nil)
+	resolve := func(location, content string) *NormalizedProjectSpec {
+		spec := mustParseCompose(t, "name: script-url-hash\nagents:\n  reviewer:\n    scheduler:\n      script:\n        url: "+location+"\n")
+		normalized, err := Normalize(spec, NormalizeOptions{
+			ComposePath:       "/project/agent-compose.yml",
+			ResolveScriptURLs: true,
+			ScriptSourceResolver: ScriptSourceResolverFunc(func(context.Context, string) ([]byte, error) {
+				return []byte(content), nil
+			}),
+		})
+		if err != nil {
+			t.Fatalf("Normalize URL source: %v", err)
+		}
+		return normalized
+	}
+	first := resolve("https://one.example/scheduler.js", inline.Agents[0].Scheduler.Script)
+	second := resolve("https://two.example/other.js", inline.Agents[0].Scheduler.Script)
+	changed := resolve("https://one.example/scheduler.js", `scheduler.interval("hourly-review", "2h");`)
+	if mustHash(t, first) != mustHash(t, inline) || mustHash(t, second) != mustHash(t, inline) {
+		t.Fatal("equivalent URL snapshots and inline scripts must have identical hashes")
+	}
+	if mustHash(t, changed) == mustHash(t, inline) {
+		t.Fatal("changed URL content must change the hash")
+	}
+	inlineJSON, _ := inline.MarshalCanonicalJSON(false)
+	urlJSON, _ := first.MarshalCanonicalJSON(false)
+	if !bytes.Equal(inlineJSON, urlJSON) {
+		t.Fatalf("canonical snapshots differ:\n%s\n%s", inlineJSON, urlJSON)
+	}
+}
+
+func TestUnresolvedSchedulerScriptURLFailsCanonicalOutputAndHash(t *testing.T) {
+	spec := mustParseCompose(t, "name: unresolved-url\nagents:\n  reviewer:\n    scheduler:\n      script:\n        url: ./scheduler.js\n")
+	normalized, err := Normalize(spec, NormalizeOptions{ComposePath: "/project/agent-compose.yml"})
+	if err != nil {
+		t.Fatalf("Normalize returned error: %v", err)
+	}
+	if !normalized.Agents[0].Scheduler.HasScript() {
+		t.Fatal("unresolved source should retain HasScript semantics")
+	}
+	if _, err := normalized.Hash(); err == nil || !strings.Contains(err.Error(), "unresolved") {
+		t.Fatalf("Hash error = %v", err)
+	}
+	if _, err := normalized.MarshalCanonicalYAML(false); err == nil || !strings.Contains(err.Error(), "scheduler.script.url") {
+		t.Fatalf("MarshalCanonicalYAML error = %v", err)
 	}
 }
 

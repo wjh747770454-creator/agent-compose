@@ -156,6 +156,21 @@ agents:
         }
 ```
 
+CLI 编写的 compose 文件也可以使用显式脚本来源：
+
+```yaml
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: ./scripts/reviewer-scheduler.js
+```
+
+支持无 scheme 的相对/绝对路径、`file://`、`http://` 和 `https://`。`config`
+与 `up` 在 CLI 本机解析来源，在计算 hash 或发送 v2 请求前替换成内联快照。
+daemon、v2 API、持久化 revision 和 loader runtime 仍只接收脚本文本；URL 不是
+运行时 import，只有再次执行 `config` 或 `up` 才会重新获取。
+
 规范化规则：
 
 - `name` 为空时，从 compose 文件所在目录推导。
@@ -164,8 +179,15 @@ agents:
 - `firecracker` 可出现在 schema 中，但当前规范化直接返回 unsupported。
 - `network` 为空或 `mode: default` 可接受，其他网络模式返回 unsupported。
 - trigger 支持 `cron`、`interval`、`timeout`、`event`，每个 trigger 必须恰好指定一种类型。
-- `scheduler.script` 是 inline QJS scalar，保存到受管 loader 的 `script` 字段；空白脚本视为未设置。
-- `scheduler.script` 与非空 `scheduler.triggers` 互斥。当前不支持 `scheduler.script_file`、`import` / `require` 或 bundling。
+- `scheduler.script` 可以是 inline QJS scalar，也可以是仅含非空 `url` 字段的
+  mapping。URL 内容会规范化成相同的受管 loader 内联 `script` 快照。空白 inline
+  脚本视为未设置，URL 内容为空则报错。
+- `scheduler.script` 与非空 `scheduler.triggers` 互斥；scalar 不会自动识别成
+  URL。当前不支持 `scheduler.script_file`、`import` / `require`、bundling、鉴权
+  header 或后台刷新。
+- URL 获取总超时 10 秒，最多 5 次重定向，解码后内容上限 1 MiB。文件最终必须
+  是普通文件，内容必须为 UTF-8；HTTP(S) 要求 2xx，并拒绝 userinfo、不支持的
+  redirect scheme 和 HTTPS 降级到 HTTP。
 - `${NAME}` 从 CLI 进程环境或显式注入环境读取；缺失变量会报字段路径化错误，空变量值合法。
 - `secret: true` 的值参与 normalized spec 和 hash，但在 YAML/JSON 展示输出中脱敏。
 - spec hash 基于 canonical JSON 计算，对 YAML/JSON 字段顺序不敏感。
@@ -230,9 +252,9 @@ v2 `ProjectSpec` 是 CLI 和 API 客户端传递 compose 当前态的 wire shape
 
 - `enabled`
 - 声明式 `triggers`
-- inline QJS `script`
+- inline QJS `script`（包括已经由 CLI 快照化的 URL 来源）
 
-服务端收到 v2 `ProjectSpec` 后会先转换回 compose YAML shape，再走 `pkg/compose` 的 parse/normalize 规则；`ProjectSpecResponse` 也会把 normalized `scheduler.script` 回传给 CLI 和 API 响应。这样本地 `config`、CLI `up`、`ValidateProject` 和直接 v2 API 调用使用同一套字段、互斥规则和 spec hash 计算。
+URL authoring 形态不会进入 wire shape。服务端收到 v2 `ProjectSpec` 后会先转换回 compose YAML shape，再走 `pkg/compose` 的 parse/normalize 规则；`ProjectSpecResponse` 也会把 normalized `scheduler.script` 回传给 CLI 和 API 响应。这样本地 `config`、CLI `up`、`ValidateProject` 和直接 v2 API 调用使用同一套字段、互斥规则和 spec hash 计算。
 
 ### HTTP 路由
 

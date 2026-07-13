@@ -67,7 +67,24 @@ func TestE2EDockerSchedulerScriptHelloWorldFlow(t *testing.T) {
 	waitForHTTPStatus(t, client, "http://agent-compose/api/version", http.StatusOK)
 
 	t.Setenv("AGENT_COMPOSE_SOCKET", socketPath)
-	composePath := writeComposeFile(t, filepath.Join(root, "project"), fmt.Sprintf(`
+	projectDir := filepath.Join(root, "project")
+	scriptDir := filepath.Join(projectDir, "scripts")
+	if err := os.MkdirAll(scriptDir, 0o700); err != nil {
+		t.Fatalf("create scheduler script dir: %v", err)
+	}
+	scriptPath := filepath.Join(scriptDir, "hello-scheduler.js")
+	if err := os.WriteFile(scriptPath, []byte(fmt.Sprintf(`
+scheduler.cron("hello-every-minute", "*/1 * * * *", async function() {
+  const result = await scheduler.shell("echo %s", {
+    sessionPolicy: "new",
+    title: "e2e docker hello"
+  });
+  return { ok: result.success, output: result.output };
+});
+`, helloText)), 0o600); err != nil {
+		t.Fatalf("write scheduler script: %v", err)
+	}
+	composePath := writeComposeFile(t, projectDir, fmt.Sprintf(`
 name: e2e-docker-script
 workspaces:
   default:
@@ -80,15 +97,9 @@ agents:
     driver:
       docker: {}
     scheduler:
-      script: |
-        scheduler.cron("hello-every-minute", "*/1 * * * *", async function() {
-          const result = await scheduler.shell("echo %s", {
-            sessionPolicy: "new",
-            title: "e2e docker hello"
-          });
-          return { ok: result.success, output: result.output };
-        });
-`, guestImage, helloText))
+      script:
+        url: ./scripts/hello-scheduler.js
+`, guestImage))
 
 	stdout, stderr, _, exitCode := executeCLICommand("up", "--file", composePath)
 	if exitCode != 0 {

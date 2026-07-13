@@ -91,11 +91,34 @@ func (s *NormalizedProjectSpec) Hash() (string, error) {
 }
 
 func (s *NormalizedProjectSpec) MarshalCanonicalJSON(redactSecrets bool) ([]byte, error) {
+	if err := s.ValidateResolvedScriptURLs(); err != nil {
+		return nil, err
+	}
 	return json.Marshal(s.ordered(redactSecrets))
 }
 
 func (s *NormalizedProjectSpec) MarshalCanonicalYAML(redactSecrets bool) ([]byte, error) {
+	if err := s.ValidateResolvedScriptURLs(); err != nil {
+		return nil, err
+	}
 	return yaml.Marshal(s.ordered(redactSecrets))
+}
+
+// ValidateResolvedScriptURLs fails when a CLI-only URL source has not been
+// materialized into an inline snapshot yet.
+func (s *NormalizedProjectSpec) ValidateResolvedScriptURLs() error {
+	if s == nil {
+		return nil
+	}
+	for _, agent := range s.Agents {
+		if agent.Scheduler.hasUnresolvedScriptURL() {
+			return &ValidationError{
+				Path:    joinPath("agents", agent.Name) + ".scheduler.script.url",
+				Message: "script URL source is unresolved",
+			}
+		}
+	}
+	return nil
 }
 
 func (s *NormalizedProjectSpec) ordered(redactSecrets bool) orderedProjectSpec {
@@ -389,7 +412,12 @@ func cloneNormalizedSchedulerSpec(value *NormalizedSchedulerSpec) *NormalizedSch
 	if value == nil {
 		return nil
 	}
-	cloned := &NormalizedSchedulerSpec{Enabled: value.Enabled, SandboxPolicy: value.SandboxPolicy, Script: value.Script}
+	cloned := &NormalizedSchedulerSpec{
+		Enabled:       value.Enabled,
+		SandboxPolicy: value.SandboxPolicy,
+		Script:        value.Script,
+		scriptURL:     value.scriptURL,
+	}
 	for _, trigger := range value.Triggers {
 		cloned.Triggers = append(cloned.Triggers, cloneNormalizedTriggerSpec(trigger))
 	}

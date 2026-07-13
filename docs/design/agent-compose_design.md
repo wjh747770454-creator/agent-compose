@@ -203,6 +203,23 @@ agents:
         }
 ```
 
+For CLI-authored compose files, the script may instead use an explicit source:
+
+```yaml
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: ./scripts/reviewer-scheduler.js
+```
+
+Scheme-less relative and absolute paths, `file://`, `http://`, and `https://`
+are supported. `config` and `up` resolve the source on the CLI host and replace
+it with an inline snapshot before hashing or sending the v2 request. The daemon,
+v2 API, stored revisions, and loader runtime continue to accept script text
+only; a URL is not a runtime import and is fetched again only by a later
+`config` or `up` invocation.
+
 Normalization rules:
 
 - If `name` is empty, it is derived from the compose file directory.
@@ -222,11 +239,18 @@ Normalization rules:
   Scheduler script calls outside a trigger callback use the loader-level sticky
   sandbox. Inline scripts may continue to override individual calls with
   `scheduler.agent(prompt, { sandboxPolicy: "..." })`.
-- `scheduler.script` is an inline QJS scalar saved into the managed loader
-  `script` field. Blank scripts are treated as unset.
+- `scheduler.script` is either an inline QJS scalar or an explicit mapping with
+  the single non-empty field `url`. URL content is normalized into the same
+  inline managed-loader `script` snapshot. Blank inline scripts are unset;
+  blank URL content is an error.
 - `scheduler.script` and non-empty `scheduler.triggers` are mutually exclusive.
-  `scheduler.script_file`, `import` / `require`, and bundling are not currently
-  supported.
+  Scalar values are never auto-detected as URLs. `scheduler.script_file`,
+  `import` / `require`, bundling, authentication headers, and background refresh
+  are not supported.
+- URL fetches have a 10-second total timeout, at most five redirects, and a
+  1 MiB decoded-content limit. Files must resolve to regular files and content
+  must be UTF-8. HTTP(S) requires 2xx and rejects userinfo, unsupported redirect
+  schemes, and HTTPS-to-HTTP downgrade.
 - `${NAME}` is read from the CLI process environment or explicitly injected
   environment. Missing variables produce field-path errors. Empty variable values
   are valid.
@@ -305,9 +329,10 @@ current compose state. `AgentSpec.scheduler` contains:
 
 - `enabled`
 - declarative `triggers`
-- inline QJS `script`
+- inline QJS `script` (including URL sources already snapshotted by the CLI)
 
-When the server receives a v2 `ProjectSpec`, it first converts it back to the
+URL authoring syntax is deliberately absent from this wire shape. When the
+server receives a v2 `ProjectSpec`, it first converts it back to the
 compose YAML shape, then runs the same parse/normalize rules in `pkg/compose`.
 `ProjectSpecResponse` also returns the normalized `scheduler.script` to CLI and
 API responses. This keeps local `config`, CLI `up`, `ValidateProject`, and direct

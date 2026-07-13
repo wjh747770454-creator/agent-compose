@@ -105,7 +105,50 @@ type SchedulerSpec struct {
 	Enabled       *bool         `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	SandboxPolicy *string       `yaml:"sandbox_policy,omitempty" json:"sandbox_policy,omitempty"`
 	Triggers      []TriggerSpec `yaml:"triggers,omitempty" json:"triggers,omitempty"`
-	Script        string        `yaml:"script,omitempty" json:"script,omitempty"`
+	Script        ScriptSource  `yaml:"script,omitempty" json:"script,omitempty"`
+}
+
+// ScriptSource is the authoring shape accepted by scheduler.script. Inline is
+// populated for the scalar form and URL for the explicit {url: ...} form.
+// The two forms are mutually exclusive.
+type ScriptSource struct {
+	Inline string
+	URL    string
+}
+
+// IsZero reports whether neither authoring form is set.
+func (s ScriptSource) IsZero() bool {
+	return s.Inline == "" && s.URL == ""
+}
+
+func (s *ScriptSource) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var inline string
+		if err := value.Decode(&inline); err != nil {
+			return err
+		}
+		*s = ScriptSource{Inline: inline}
+		return nil
+	case yaml.MappingNode:
+		var source struct {
+			URL string `yaml:"url"`
+		}
+		if err := value.Decode(&source); err != nil {
+			return err
+		}
+		*s = ScriptSource{URL: source.URL}
+		return nil
+	default:
+		return fmt.Errorf("expected scalar or mapping, got %s", nodeKindName(value.Kind))
+	}
+}
+
+func (s ScriptSource) MarshalYAML() (any, error) {
+	if s.URL != "" {
+		return map[string]string{"url": s.URL}, nil
+	}
+	return s.Inline, nil
 }
 
 type TriggerSpec struct {
@@ -608,8 +651,32 @@ func validateScheduler(node *yaml.Node, path string) error {
 		"enabled":        validateBool,
 		"sandbox_policy": validateScalar,
 		"triggers":       validateTriggerList,
-		"script":         validateScalar,
+		"script":         validateScriptSource,
 	})
+}
+
+func validateScriptSource(node *yaml.Node, path string) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		return validateScalar(node, path)
+	case yaml.MappingNode:
+		if err := validateMapping(node, path, map[string]nodeValidator{
+			"url": validateScalar,
+		}); err != nil {
+			return err
+		}
+		if len(node.Content) == 0 {
+			return newParseError(node, path+".url", "script URL is required")
+		}
+		for i := 0; i < len(node.Content); i += 2 {
+			if node.Content[i].Value == "url" && strings.TrimSpace(node.Content[i+1].Value) == "" {
+				return newParseError(node.Content[i+1], path+".url", "script URL is required")
+			}
+		}
+		return nil
+	default:
+		return newParseError(node, path, "expected scalar or mapping")
+	}
 }
 
 func validateJupyter(node *yaml.Node, path string) error {

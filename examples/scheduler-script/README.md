@@ -10,7 +10,7 @@
 - 每个触发器都写显式、稳定的 `triggerId`。
 - 需要长期暂停触发器时，用 UI 或 API 禁用触发器。`scheduler.clearInterval(...)` 和 `scheduler.clearTimeout(...)` 只会移除当前脚本求值期间注册出来的触发器，不会持久禁用已经保存的触发器。
 
-## 在 agent-compose.yml 中内联
+## 在 agent-compose.yml 中使用
 
 同样的 scheduler runtime 脚本可以直接写在 project compose 文件的 `scheduler.script` 中：
 
@@ -30,7 +30,23 @@ agents:
         }
 ```
 
-`scheduler.script` 和声明式 `scheduler.triggers` 是二选一关系。需要简单 cron/interval/event/timeout 加 prompt 时用 `scheduler.triggers`；需要共享状态、多个 trigger 共用 workflow、调用 `scheduler.llm` / `scheduler.exec` / `scheduler.event.publish` 等能力时用 `scheduler.script`。当前只支持 inline script，不支持 `script_file`、`import` / `require` 或 bundling。
+`scheduler.script` 和声明式 `scheduler.triggers` 是二选一关系。需要简单 cron/interval/event/timeout 加 prompt 时用 `scheduler.triggers`；需要共享状态、多个 trigger 共用 workflow、调用 `scheduler.llm` / `scheduler.exec` / `scheduler.event.publish` 等能力时用 `scheduler.script`。inline scalar 和下面的 URL object 都使用同一套 loader runtime。
+
+脚本也可以保存在独立文件中，并通过显式 URL 对象引用：
+
+```yaml
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: ./02-interval-heartbeat.js
+```
+
+无 scheme 的相对路径以 compose 文件目录为基准；也支持绝对路径、`file://`、
+`http://` 和 `https://`。这是 CLI authoring 能力：`agent-compose config` 和
+`agent-compose up` 在本机获取一次并生成内联内容快照，daemon、v2 API、revision
+和 loader 只看到脚本文本。它不是运行时 `import`，来源内容变化只会在下次
+`up` 时生效。当前仍不支持 `import` / `require`、bundling、鉴权 header 或后台刷新。
 
 ## 触发器 ID
 

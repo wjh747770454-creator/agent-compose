@@ -1,11 +1,63 @@
 package api
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"agent-compose/pkg/compose"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 )
+
+func TestProjectSpecToProtoRejectsUnresolvedSchedulerScriptURL(t *testing.T) {
+	raw, err := compose.Parse([]byte("name: unresolved-url\nagents:\n  reviewer:\n    scheduler:\n      script:\n        url: ./scheduler.js\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := compose.Normalize(raw, compose.NormalizeOptions{ComposePath: "/project/agent-compose.yml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := ProjectSpecToProto(normalized); result != nil {
+		t.Fatalf("ProjectSpecToProto unresolved result = %#v", result)
+	}
+	if _, err := ProjectSpecToProtoChecked(normalized); err == nil || !strings.Contains(err.Error(), "unresolved") {
+		t.Fatalf("ProjectSpecToProtoChecked error = %v", err)
+	}
+	if result := SchedulerSpecToProto(normalized.Agents[0].Scheduler); result != nil {
+		t.Fatalf("SchedulerSpecToProto unresolved result = %#v", result)
+	}
+}
+
+func TestProjectSpecToProtoURLSnapshotMatchesInline(t *testing.T) {
+	const script = `scheduler.interval("hourly-review", "1h");`
+	inlineRaw, _ := compose.Parse([]byte("name: proto-snapshot\nagents:\n  reviewer:\n    scheduler:\n      script: '" + script + "'\n"))
+	inline, err := compose.Normalize(inlineRaw, compose.NormalizeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	urlRaw, _ := compose.Parse([]byte("name: proto-snapshot\nagents:\n  reviewer:\n    scheduler:\n      script:\n        url: https://example.test/scheduler.js\n"))
+	fromURL, err := compose.Normalize(urlRaw, compose.NormalizeOptions{
+		ResolveScriptURLs: true,
+		ScriptSourceResolver: compose.ScriptSourceResolverFunc(func(context.Context, string) ([]byte, error) {
+			return []byte(script), nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inlineProto, err := ProjectSpecToProtoChecked(inline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	urlProto, err := ProjectSpecToProtoChecked(fromURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inlineProto.String() != urlProto.String() {
+		t.Fatalf("proto snapshots differ:\n%s\n%s", inlineProto, urlProto)
+	}
+}
 
 func TestProjectSpecToProtoIncludesSchedulerScript(t *testing.T) {
 	const script = `scheduler.interval("hourly-review", "1h");`

@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/robfig/cron/v3"
 )
@@ -26,9 +28,12 @@ var exactEnvReferencePattern = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}
 var composeCronParser = cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
 type NormalizeOptions struct {
-	ProjectDir  string
-	ComposePath string
-	Env         map[string]string
+	ProjectDir           string
+	ComposePath          string
+	Env                  map[string]string
+	ResolveScriptURLs    bool
+	ScriptSourceResolver ScriptSourceResolver
+	Context              context.Context
 }
 
 type NormalizedProjectSpec struct {
@@ -118,6 +123,18 @@ type NormalizedSchedulerSpec struct {
 	SandboxPolicy string                  `yaml:"sandbox_policy" json:"sandbox_policy"`
 	Script        string                  `yaml:"script,omitempty" json:"script,omitempty"`
 	Triggers      []NormalizedTriggerSpec `yaml:"triggers,omitempty" json:"triggers,omitempty"`
+
+	scriptURL string
+}
+
+// HasScript reports whether a scheduler has either an inline script snapshot
+// or an unresolved URL source.
+func (s *NormalizedSchedulerSpec) HasScript() bool {
+	return s != nil && (strings.TrimSpace(s.Script) != "" || s.scriptURL != "")
+}
+
+func (s *NormalizedSchedulerSpec) hasUnresolvedScriptURL() bool {
+	return s != nil && s.scriptURL != ""
 }
 
 type NormalizedTriggerSpec struct {
@@ -223,7 +240,7 @@ func normalizeAgent(name string, agent AgentSpec, options NormalizeOptions, proj
 	if err != nil {
 		return NormalizedAgentSpec{}, err
 	}
-	scheduler, err := normalizeSchedulerSpec(joinPath("agents", name)+".scheduler", agent.Scheduler)
+	scheduler, err := normalizeSchedulerSpec(joinPath("agents", name)+".scheduler", agent.Scheduler, options)
 	if err != nil {
 		return NormalizedAgentSpec{}, err
 	}
@@ -1041,7 +1058,7 @@ func normalizeDriverSpec(path string, driver *DriverSpec) (*NormalizedDriverSpec
 	return normalized, nil
 }
 
-func normalizeSchedulerSpec(path string, scheduler *SchedulerSpec) (*NormalizedSchedulerSpec, error) {
+func normalizeSchedulerSpec(path string, scheduler *SchedulerSpec, options NormalizeOptions) (*NormalizedSchedulerSpec, error) {
 	if scheduler == nil {
 		return nil, nil
 	}
@@ -1050,8 +1067,22 @@ func normalizeSchedulerSpec(path string, scheduler *SchedulerSpec) (*NormalizedS
 	if scheduler.Enabled != nil {
 		enabled = *scheduler.Enabled
 	}
-	script := strings.TrimSpace(scheduler.Script)
-	if script != "" && len(scheduler.Triggers) > 0 {
+	script := strings.TrimSpace(scheduler.Script.Inline)
+	scriptURL := strings.TrimSpace(scheduler.Script.URL)
+	if scheduler.Script.Inline != "" && scriptURL != "" {
+		return nil, &ValidationError{Path: path + ".script", Message: "script must use exactly one of inline content or url"}
+	}
+	if scheduler.Script.URL != "" && scriptURL == "" {
+		return nil, &ValidationError{Path: path + ".script.url", Message: "script URL is required"}
+	}
+	if scriptURL != "" {
+		var err error
+		scriptURL, err = normalizeScriptSourceURL(scriptURL, options)
+		if err != nil {
+			return nil, &ValidationError{Path: path + ".script.url", Message: err.Error()}
+		}
+	}
+	if (script != "" || scriptURL != "") && len(scheduler.Triggers) > 0 {
 		return nil, &ValidationError{Path: path, Message: "scheduler script and triggers are mutually exclusive"}
 	}
 	sandboxPolicy, err := normalizeSandboxPolicy(path+".sandbox_policy", scheduler.SandboxPolicy, "new")
@@ -1059,6 +1090,32 @@ func normalizeSchedulerSpec(path string, scheduler *SchedulerSpec) (*NormalizedS
 		return nil, err
 	}
 	normalized := &NormalizedSchedulerSpec{Enabled: enabled, SandboxPolicy: sandboxPolicy, Script: script}
+	if scriptURL != "" {
+		if !options.ResolveScriptURLs {
+			normalized.scriptURL = scriptURL
+		} else {
+			resolver := options.ScriptSourceResolver
+			if resolver == nil {
+				resolver = NewDefaultScriptSourceResolver()
+			}
+			ctx := options.Context
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			content, err := resolver.Resolve(ctx, scriptURL)
+			if err != nil {
+				return nil, &ValidationError{Path: path + ".script.url", Message: err.Error()}
+			}
+			if !utf8.Valid(content) {
+				return nil, &ValidationError{Path: path + ".script.url", Message: "script content must be valid UTF-8"}
+			}
+			text := strings.TrimPrefix(string(content), "\ufeff")
+			normalized.Script = strings.TrimSpace(text)
+			if normalized.Script == "" {
+				return nil, &ValidationError{Path: path + ".script.url", Message: "script content is empty"}
+			}
+		}
+	}
 	for i, trigger := range scheduler.Triggers {
 		normalizedTrigger, err := normalizeTriggerSpec(fmt.Sprintf("%s.triggers[%d]", path, i), trigger)
 		if err != nil {

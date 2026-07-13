@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -780,6 +781,101 @@ agents:
 	}
 	if got := len(scheduler.Triggers); got != 0 {
 		t.Fatalf("scheduler triggers = %d, want 0", got)
+	}
+}
+
+func TestNormalizeResolvesSchedulerScriptURLSnapshot(t *testing.T) {
+	composePath := filepath.Join(t.TempDir(), "project", "agent-compose.yml")
+	spec := mustParseCompose(t, `
+name: url-script
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: ./scripts/scheduler.js
+`)
+	var gotLocation string
+	normalized, err := Normalize(spec, NormalizeOptions{
+		ComposePath:       composePath,
+		ResolveScriptURLs: true,
+		ScriptSourceResolver: ScriptSourceResolverFunc(func(_ context.Context, location string) ([]byte, error) {
+			gotLocation = location
+			return []byte("\xef\xbb\xbf  scheduler.timeout('once', 1000, main);  \n"), nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Normalize returned error: %v", err)
+	}
+	wantLocation := filepath.Join(filepath.Dir(composePath), "scripts", "scheduler.js")
+	if gotLocation != wantLocation {
+		t.Fatalf("resolver location = %q, want %q", gotLocation, wantLocation)
+	}
+	scheduler := normalized.Agents[0].Scheduler
+	if scheduler.Script != "scheduler.timeout('once', 1000, main);" || !scheduler.HasScript() {
+		t.Fatalf("normalized scheduler = %#v", scheduler)
+	}
+}
+
+func TestNormalizeSchedulerScriptURLValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "unsupported scheme", url: "s3://bucket/scheduler.js", want: "scheme"},
+		{name: "HTTP host required", url: "https:///scheduler.js", want: "host"},
+		{name: "userinfo rejected", url: "https://user:secret@example.test/scheduler.js", want: "userinfo"},
+		{name: "remote file authority", url: "file://server/scheduler.js", want: "authority"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := mustParseCompose(t, "name: invalid-url\nagents:\n  reviewer:\n    scheduler:\n      script:\n        url: "+tc.url+"\n")
+			_, err := Normalize(spec, NormalizeOptions{})
+			if err == nil || !strings.Contains(err.Error(), "agents.reviewer.scheduler.script.url") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Normalize error = %v, want URL path and %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeRejectsSchedulerScriptURLWithTriggers(t *testing.T) {
+	spec := mustParseCompose(t, `
+name: mixed-url-scheduler
+agents:
+  reviewer:
+    scheduler:
+      script:
+        url: ./scheduler.js
+      triggers:
+        - interval: 1h
+`)
+	_, err := Normalize(spec, NormalizeOptions{ComposePath: "/project/agent-compose.yml"})
+	if err == nil || !strings.Contains(err.Error(), "script and triggers are mutually exclusive") {
+		t.Fatalf("Normalize error = %v", err)
+	}
+}
+
+func TestNormalizeRejectsInvalidResolvedSchedulerScriptContent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content []byte
+		want    string
+	}{
+		{name: "invalid UTF-8", content: []byte{0xff}, want: "valid UTF-8"},
+		{name: "empty", content: []byte(" \n\t"), want: "content is empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := mustParseCompose(t, "name: invalid-content\nagents:\n  reviewer:\n    scheduler:\n      script:\n        url: ./scheduler.js\n")
+			_, err := Normalize(spec, NormalizeOptions{
+				ComposePath:       "/project/agent-compose.yml",
+				ResolveScriptURLs: true,
+				ScriptSourceResolver: ScriptSourceResolverFunc(func(context.Context, string) ([]byte, error) {
+					return tc.content, nil
+				}),
+			})
+			if err == nil || !strings.Contains(err.Error(), "scheduler.script.url") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Normalize error = %v", err)
+			}
+		})
 	}
 }
 

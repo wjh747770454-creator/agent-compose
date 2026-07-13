@@ -7,6 +7,10 @@ ARG GRPCURL_VERSION=v1.9.3
 ARG PROTOC_GEN_GO_VERSION=v1.36.11
 ARG PROTOC_GEN_GO_GRPC_VERSION=v1.6.2
 ARG NODE_MAJOR=22
+ARG CODEX_VERSION=0.144.1
+ARG CLAUDE_CODE_VERSION=2.1.206
+ARG GEMINI_CLI_VERSION=0.50.0
+ARG OPENCODE_VERSION=1.17.18
 
 FROM ${REGISTRY_MIRROR}/library/golang:${GO_VERSION}-alpine AS golang-toolchain
 
@@ -18,6 +22,10 @@ ARG GRPCURL_VERSION
 ARG PROTOC_GEN_GO_VERSION
 ARG PROTOC_GEN_GO_GRPC_VERSION
 ARG NODE_MAJOR
+ARG CODEX_VERSION
+ARG CLAUDE_CODE_VERSION
+ARG GEMINI_CLI_VERSION
+ARG OPENCODE_VERSION
 ARG TARGETARCH
 
 RUN if [ -f /etc/apt/sources.list ]; then \
@@ -75,7 +83,12 @@ RUN set -e; \
       arm64) CLAUDE_CODE_PLATFORM_PACKAGE=@anthropic-ai/claude-code-linux-arm64 ;; \
       *) echo "unsupported Claude Code target arch: ${target_arch}" >&2; exit 1 ;; \
     esac; \
-    npm install -g @openai/codex @anthropic-ai/claude-code "${CLAUDE_CODE_PLATFORM_PACKAGE}" @google/gemini-cli opencode-ai
+    npm install -g \
+      "@openai/codex@${CODEX_VERSION}" \
+      "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+      "${CLAUDE_CODE_PLATFORM_PACKAGE}@${CLAUDE_CODE_VERSION}" \
+      "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
+      "opencode-ai@${OPENCODE_VERSION}"
 
 RUN mkdir -p /usr/local/share/jupyter/kernels/javascript /root/.codex /root/.opencode /root/.local/bin /root/.cargo/bin /root/go/bin /workspace /data/state /data/runtime /data/logs
 

@@ -52,7 +52,6 @@ import (
 	"agent-compose/pkg/health"
 	"agent-compose/pkg/identity"
 	domain "agent-compose/pkg/model"
-	"agent-compose/pkg/projects"
 	agentcomposev1 "agent-compose/proto/agentcompose/v1"
 	"agent-compose/proto/agentcompose/v1/agentcomposev1connect"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
@@ -1222,7 +1221,7 @@ func composeRunArgs(_ *cobra.Command, args []string) error {
 }
 
 func runComposeConfigCommand(cmd *cobra.Command, cli cliOptions, options composeConfigOptions) error {
-	_, normalized, err := loadNormalizedCompose(cli)
+	_, normalized, err := loadResolvedNormalizedCompose(cmd.Context(), cli)
 	if err != nil {
 		return err
 	}
@@ -1320,7 +1319,7 @@ func listAllProjects(ctx context.Context, client agentcomposev2connect.ProjectSe
 }
 
 func runComposeUpCommand(cmd *cobra.Command, cli cliOptions) error {
-	composePath, normalized, err := loadNormalizedCompose(cli)
+	composePath, normalized, err := loadResolvedNormalizedCompose(cmd.Context(), cli)
 	if err != nil {
 		return err
 	}
@@ -1333,8 +1332,12 @@ func runComposeUpCommand(cmd *cobra.Command, cli cliOptions) error {
 		return err
 	}
 	client := agentcomposev2connect.NewProjectServiceClient(newDaemonHTTPClient(clientConfig), clientConfig.BaseURL)
+	protoSpec, err := api.ProjectSpecToProtoChecked(normalized)
+	if err != nil {
+		return fmt.Errorf("%s: serialize normalized compose spec: %w", composePath, err)
+	}
 	resp, err := client.ApplyProject(cmd.Context(), connect.NewRequest(&agentcomposev2.ApplyProjectRequest{
-		Spec: api.ProjectSpecToProto(normalized),
+		Spec: protoSpec,
 		Source: &agentcomposev2.ProjectSource{
 			ComposePath: composePath,
 			ProjectDir:  filepath.Dir(composePath),
@@ -2062,7 +2065,7 @@ func listComposeSchedulerTriggers(ctx context.Context, clients cliServiceClients
 			return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("resolve scheduler loader for agent %q: %w", agent.Name, err)}
 		}
 		schedulerEnabled := agent.Scheduler.Enabled
-		if strings.TrimSpace(agent.Scheduler.Script) != "" {
+		if agent.Scheduler.HasScript() {
 			loader, err := clients.loader.GetLoader(ctx, connect.NewRequest(&agentcomposev1.LoaderIDRequest{LoaderId: managedLoaderID}))
 			if err != nil {
 				return nil, commandExitErrorForConnect(fmt.Errorf("get scheduler loader %s: %w", managedLoaderID, err))
@@ -4574,14 +4577,22 @@ func resolveComposeProject(cli cliOptions) (string, *compose.NormalizedProjectSp
 	if err != nil {
 		return "", nil, "", err
 	}
-	project, err := projects.NewRecordFromSpec(normalized, composePath)
+	projectID, err := domain.StableProjectID(normalized.Name, domain.NormalizeProjectSourcePath(composePath))
 	if err != nil {
 		return "", nil, "", commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("%s: resolve project %s: %w", composePath, normalized.Name, err)}
 	}
-	return composePath, normalized, project.ID, nil
+	return composePath, normalized, projectID, nil
 }
 
 func loadNormalizedCompose(cli cliOptions) (string, *compose.NormalizedProjectSpec, error) {
+	return loadNormalizedComposeWithOptions(context.Background(), cli, false)
+}
+
+func loadResolvedNormalizedCompose(ctx context.Context, cli cliOptions) (string, *compose.NormalizedProjectSpec, error) {
+	return loadNormalizedComposeWithOptions(ctx, cli, true)
+}
+
+func loadNormalizedComposeWithOptions(ctx context.Context, cli cliOptions, resolveScriptURLs bool) (string, *compose.NormalizedProjectSpec, error) {
 	composePath, err := resolveComposePath(cli.ComposeFile)
 	if err != nil {
 		return "", nil, err
@@ -4593,7 +4604,11 @@ func loadNormalizedCompose(cli cliOptions) (string, *compose.NormalizedProjectSp
 	if projectName := strings.TrimSpace(cli.ProjectName); projectName != "" {
 		spec.Name = projectName
 	}
-	normalized, err := compose.Normalize(spec, compose.NormalizeOptions{ComposePath: composePath})
+	normalized, err := compose.Normalize(spec, compose.NormalizeOptions{
+		ComposePath:       composePath,
+		ResolveScriptURLs: resolveScriptURLs,
+		Context:           ctx,
+	})
 	if err != nil {
 		return "", nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("%s: %w", composePath, err)}
 	}

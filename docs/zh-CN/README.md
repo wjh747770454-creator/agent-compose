@@ -140,6 +140,11 @@ agents:
 （脚本用的稳定 JSON 输出）、`--host` / `AGENT_COMPOSE_HOST`（连接 TCP daemon）、
 `AGENT_COMPOSE_SOCKET`（Unix socket 路径）。完整参考见[命令行使用手册](command-line-manual.md)。
 
+`scheduler.script` 支持内联 JavaScript，或使用显式的 `{ url: ... }` 来源
+（本地路径、`file://`、`http://`、`https://`）。`config` 和 `up` 在 CLI 本机
+获取来源并向 daemon 发送内联快照；同一 scheduler 中 `scheduler.script` 和
+`scheduler.triggers` 二选一。
+
 ## Runtime Driver
 
 - **`docker`**（默认）：使用 Docker 容器运行 guest，需要可用的 Docker daemon。
