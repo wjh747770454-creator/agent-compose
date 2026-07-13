@@ -9,8 +9,8 @@
 - 当前变更：platform-runtime-build。
 - 已确认产物：macOS Docker-only binary、Linux 三 Driver binary、Linux 三 Driver multi-arch Docker image。
 - 发布边界：binary 只用于本地和 CI 验证，不进入 GitHub Release。
-- 当前进度：6/18 个父任务完成。
-- 当前下一目标：3.1 实现唯一 Binary Build Helper 与确定性脚本测试。
+- 当前进度：7/18 个父任务完成。
+- 当前下一目标：3.2 重构 Taskfile 平台分发、Proto任务与兼容 Alias。
 
 ## 文档索引
 
@@ -284,7 +284,7 @@
 
 参考：[实施计划阶段 3](docs/plan/platform-runtime-build-implementation-plan.md#阶段-3统一-binary-build-helper-与-task-合同)
 
-- [ ] 3.1 实现唯一 Binary Build Helper 与确定性脚本测试
+- [x] 3.1 实现唯一 Binary Build Helper 与确定性脚本测试
   - 依赖：2.2、2.3。
   - 工作内容：
     - 新增scripts/build-agent-compose-binary.sh，支持auto、darwin-docker、linux-full及goarch/output/version参数。
@@ -293,20 +293,33 @@
     - 仅BUILD_VERBOSE=1启用-x；提供print-config测试模式。
     - 拒绝未知profile/arch、空output和含换行version；错误不泄露secret。
   - 可并行子任务：
-    - [ ] 可并行：参数/profile/build命令实现。
-    - [ ] 可并行：artifact preflight与错误诊断。
-    - [ ] 可并行：fake Go/toolchain shell测试和bash语法检查。
+    - [x] 可并行：参数/profile/build命令实现。
+    - [x] 可并行：artifact preflight与错误诊断。
+    - [x] 可并行：fake Go/toolchain shell测试和bash语法检查。
   - 测试方案：
     - bash -n scripts/build-agent-compose-binary.sh
     - ./scripts/test-build-agent-compose-binary.sh
     - 用helper分别构建darwin/amd64和darwin/arm64。
   - 验收标准：profile参数只有一个owner；shell测试不访问网络；print-config与binary metadata一致；linux-full缺artifact时go build前失败。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：3.2。
+    - 状态：已完成。
+    - 变更：
+      - 新增唯一 binary owner `scripts/build-agent-compose-binary.sh`，固定 `darwin-docker` 与 `linux-full` 的 target OS、CGO、tags、compiled drivers和`BuildVersion` ldflags；`auto`仅按Go `GOHOSTOS`/`GOHOSTARCH`分发，拒绝非Darwin/Linux host及macOS宿主直接构建Linux full CGO产物。
+      - helper要求明确output，支持amd64/arm64与Taskfile等价的git version fallback；相对output固定从仓库根解析，输出父目录仅在preflight通过后创建。默认日志不启用`-x`，只有`BUILD_VERBOSE=1`启用；`--print-config`以稳定七行输出完整profile与version且不构建、不读取artifact。
+      - Linux full在Go build前聚合校验两套现有owner产物：BoxLite header、static/shared library、guest/shim及Microsandbox msb、agentd、libkrunfw、FFI shared library；Darwin profile完全不访问这些路径。
+      - 新增隔离的fake Go/toolchain shell suite，硬失败curl/wget/docker并覆盖profile/host分发、精确env/argv、全部artifact诊断、verbose、print-config、version fallback、非法参数、换行/quote边界、shell注入与代理secret不泄漏。
+    - 验证：
+      - `bash -n scripts/build-agent-compose-binary.sh`、`bash -n scripts/test-build-agent-compose-binary.sh`及`./scripts/test-build-agent-compose-binary.sh`：通过，输出`all checks passed`；测试不访问网络、Docker或真实Go build。
+      - helper真实构建Darwin amd64、arm64：通过；`file`分别确认为Mach-O x86_64与arm64，`go version -m`确认两者target及`helper-3.1` ldflags。
+      - helper使用当前完整artifact真实构建Linux amd64 full binary：通过；`--json version`精确报告`helper-3.1`、`linux`、`amd64`和`docker,boxlite,microsandbox`，与`--print-config`一致；文本version仍精确为`helper-3.1`。
+      - 缺失artifact隔离验证聚合报告九项失败、Go build为零且output目录未创建；`git diff --check`通过。
+      - `task lint`：通过，`0 issues`；`task build`：通过；`task test`：通过，Unit `77.25%`、Integration `65.96%`、E2E `61.84%`、Combined `79.54%`。
+    - 审计与例外：
+      - helper只验证既有本地产物并编译链接，不下载artifact、不探测KVM、不启动runtime；真实full binary构建在`GOPROXY=off`条件的独立审计中也通过，native runtime继续保持lazy。
+      - 当前本地两套artifact是amd64，因此本任务真实Linux full执行证据为amd64；Linux arm64 full依赖同架构compiler/artifact，保留给后续native Task、Docker与CI矩阵，不用宿主CGO静默交叉构建。
+      - `shellcheck`在当前环境不可用；已用两个`bash -n`、确定性fake-toolchain suite和真实三产物build覆盖。Taskfile/Dockerfile仍保留旧内联命令，分别按3.2和阶段4接入同一helper，本任务未提前修改。
+      - 未修改Taskfile、Dockerfile、proto、SQLite schema、guest protocol、coverage threshold/exclusion、默认Driver或暂停的Workspace Resume账本；按计划未检查远端CI。
+    - 下一目标：3.2 重构 Taskfile 平台分发、Proto任务与兼容 Alias。
 
 - [ ] 3.2 重构 Taskfile 平台分发、Proto任务与兼容 Alias
   - 依赖：3.1。
