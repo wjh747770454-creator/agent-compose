@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -801,6 +802,94 @@ func TestRunsControllerRunProjectPromptAttachProjectsAgentFrames(t *testing.T) {
 	if string(transcript) != "hello agent\n" {
 		t.Fatalf("prompt attach transcript = %q", string(transcript))
 	}
+}
+
+func TestRunsControllerRunProjectPromptAttachGatesQueuedTurnsAndOrdersTranscript(t *testing.T) {
+	ctx := context.Background()
+	controller, configDB, runtime := newTestRunAttachController(t, nil)
+	interaction := newScriptedRunAttachInteraction()
+	runtime.interactionOverride = interaction
+
+	requests := make(chan *agentcomposev2.RunAttachRequest, 4)
+	requests <- &agentcomposev2.RunAttachRequest{Frame: &agentcomposev2.RunAttachRequest_Start{Start: &agentcomposev2.RunAttachStart{
+		Request: &agentcomposev2.RunAgentRequest{ProjectId: "project-1", AgentName: "worker", Prompt: "human-1"},
+		Mode:    agentcomposev2.AttachRunMode_ATTACH_RUN_MODE_PROMPT,
+	}}}
+	requests <- humanMessageAttachRequest("human-2")
+	requests <- humanMessageAttachRequest("human-3")
+	requests <- &agentcomposev2.RunAttachRequest{Frame: &agentcomposev2.RunAttachRequest_StdinEof{StdinEof: &agentcomposev2.AttachStdinEOF{}}}
+	close(requests)
+
+	var responses []*agentcomposev2.RunAttachResponse
+	done := make(chan error, 1)
+	go func() {
+		done <- controller.RunProjectCommandAttach(ctx, func() (*agentcomposev2.RunAttachRequest, error) {
+			req, ok := <-requests
+			if !ok {
+				return nil, io.EOF
+			}
+			return req, nil
+		}, func(resp *agentcomposev2.RunAttachResponse) error {
+			responses = append(responses, resp)
+			return nil
+		})
+	}()
+
+	assertPromptRuntimeFrame(t, receiveRuntimeInputFrame(t, interaction.sent), "start", "")
+	assertPromptRuntimeFrame(t, receiveRuntimeInputFrame(t, interaction.sent), "human_message", "human-1")
+	assertNoRuntimeInputFrame(t, interaction.sent)
+
+	interaction.frames <- driverpkg.RuntimeOutputFrame{Type: driverpkg.RuntimeOutputStarted}
+	interaction.frames <- promptRuntimeStdoutFrame(`{"v":1,"seq":0,"type":"started","provider":"codex","sessionId":"thread-1"}`)
+	interaction.frames <- promptRuntimeStdoutFrame(`{"v":1,"seq":1,"type":"agent_event","event":{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"agent-1\n"}}}`)
+	interaction.frames <- promptRuntimeStdoutFrame(`{"v":1,"seq":2,"type":"agent_turn_completed","provider":"codex","sessionId":"thread-1","finalText":"agent-1\n"}`)
+	assertPromptRuntimeFrame(t, receiveRuntimeInputFrame(t, interaction.sent), "human_message", "human-2")
+	assertNoRuntimeInputFrame(t, interaction.sent)
+
+	interaction.frames <- promptRuntimeStdoutFrame(`{"v":1,"seq":3,"type":"agent_event","event":{"type":"item.completed","item":{"id":"m2","type":"agent_message","text":"agent-2\n"}}}`)
+	interaction.frames <- promptRuntimeStdoutFrame(`{"v":1,"seq":4,"type":"agent_turn_completed","provider":"codex","sessionId":"thread-1","finalText":"agent-2\n"}`)
+	assertPromptRuntimeFrame(t, receiveRuntimeInputFrame(t, interaction.sent), "human_message", "human-3")
+	assertPromptRuntimeFrame(t, receiveRuntimeInputFrame(t, interaction.sent), "eof", "")
+
+	interaction.frames <- promptRuntimeStdoutFrame(`{"v":1,"seq":5,"type":"agent_event","event":{"type":"item.completed","item":{"id":"m3","type":"agent_message","text":"agent-3\n"}}}`)
+	interaction.frames <- promptRuntimeStdoutFrame(`{"v":1,"seq":6,"type":"agent_turn_completed","provider":"codex","sessionId":"thread-1","finalText":"agent-3\n"}`)
+	interaction.frames <- promptRuntimeStdoutFrame(`{"v":1,"seq":7,"type":"result","provider":"codex","sessionId":"thread-1","stopReason":"eof","finalText":"agent-3\n","transcript":"agent-1\nagent-2\nagent-3\n"}`)
+	interaction.frames <- driverpkg.RuntimeOutputFrame{Type: driverpkg.RuntimeOutputResult, Result: &driverpkg.RuntimeResult{OperationID: "run-attach", Success: true}}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunProjectCommandAttach returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("RunProjectCommandAttach did not finish")
+	}
+
+	var result *agentcomposev2.AttachResult
+	for _, response := range responses {
+		if response.GetResult() != nil {
+			result = response.GetResult()
+		}
+	}
+	if result == nil || result.GetRun() == nil {
+		t.Fatalf("prompt attach responses have no result: %#v", responses)
+	}
+	stored, err := configDB.GetProjectRun(ctx, result.GetRun().GetRunId())
+	if err != nil {
+		t.Fatalf("get stored run: %v", err)
+	}
+	transcript, err := os.ReadFile(stored.LogsPath)
+	if err != nil {
+		t.Fatalf("read transcript: %v", err)
+	}
+	const expected = "agent-1\nhuman-2\nagent-2\nhuman-3\nagent-3\n"
+	if string(transcript) != expected {
+		t.Fatalf("transcript = %q, want %q", string(transcript), expected)
+	}
+}
+
+func promptRuntimeStdoutFrame(line string) driverpkg.RuntimeOutputFrame {
+	return driverpkg.RuntimeOutputFrame{Type: driverpkg.RuntimeOutputStdout, Data: []byte(line + "\n")}
 }
 
 func TestPromptAttachProjectorLogsResultFinalTextWithoutAgentEventText(t *testing.T) {
@@ -2171,15 +2260,56 @@ func newTestRunAttachController(t *testing.T, frames []driverpkg.RuntimeOutputFr
 
 type fakeRunAttachRuntime struct {
 	fakeControllerRuntime
-	spec        driverpkg.RuntimeStartSpec
-	frames      []driverpkg.RuntimeOutputFrame
-	interaction *fakeRunAttachInteraction
+	spec                driverpkg.RuntimeStartSpec
+	frames              []driverpkg.RuntimeOutputFrame
+	interaction         *fakeRunAttachInteraction
+	interactionOverride driverpkg.RuntimeInteraction
 }
 
 func (r *fakeRunAttachRuntime) OpenInteraction(_ context.Context, _ *domain.Sandbox, _ domain.VMState, spec driverpkg.RuntimeStartSpec) (driverpkg.RuntimeInteraction, error) {
 	r.spec = spec
+	if r.interactionOverride != nil {
+		return r.interactionOverride, nil
+	}
 	r.interaction = &fakeRunAttachInteraction{frames: append([]driverpkg.RuntimeOutputFrame(nil), r.frames...)}
 	return r.interaction, nil
+}
+
+type scriptedRunAttachInteraction struct {
+	frames    chan driverpkg.RuntimeOutputFrame
+	sent      chan driverpkg.RuntimeInputFrame
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newScriptedRunAttachInteraction() *scriptedRunAttachInteraction {
+	return &scriptedRunAttachInteraction{
+		frames: make(chan driverpkg.RuntimeOutputFrame, 16),
+		sent:   make(chan driverpkg.RuntimeInputFrame, 8),
+		closed: make(chan struct{}),
+	}
+}
+
+func (i *scriptedRunAttachInteraction) Send(frame driverpkg.RuntimeInputFrame) error {
+	i.sent <- frame
+	return nil
+}
+
+func (i *scriptedRunAttachInteraction) CloseSend() error {
+	i.closeOnce.Do(func() { close(i.closed) })
+	return nil
+}
+
+func (i *scriptedRunAttachInteraction) Recv() (driverpkg.RuntimeOutputFrame, error) {
+	frame, ok := <-i.frames
+	if !ok {
+		return driverpkg.RuntimeOutputFrame{}, io.EOF
+	}
+	return frame, nil
+}
+
+func (*scriptedRunAttachInteraction) Wait() (driverpkg.RuntimeResult, error) {
+	return driverpkg.RuntimeResult{Success: true}, nil
 }
 
 type fakeRunAttachInteraction struct {
