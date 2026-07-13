@@ -3,6 +3,7 @@ package workspaces
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ func TestProvisionerConcurrentEnsureSameSandboxSingleMaterialization(t *testing.
 	const callerCount = 32
 
 	sandboxID := "concurrent-same-sandbox"
-	store := newConcurrentProvisionerStore(newConcurrentProvisionerSandbox(sandboxID))
+	store := newConcurrentProvisionerStore(newConcurrentProvisionerSandbox(t, sandboxID))
 	materializerStarted := make(chan string, 1)
 	releaseMaterializer := make(chan struct{})
 	materializer := &concurrentProvisionerMaterializer{
@@ -85,8 +86,8 @@ func TestProvisionerConcurrentEnsureSameSandboxSingleMaterialization(t *testing.
 func TestProvisionerConcurrentEnsureDifferentSandboxesOverlap(t *testing.T) {
 	sandboxIDs := []string{"concurrent-sandbox-a", "concurrent-sandbox-b"}
 	store := newConcurrentProvisionerStore(
-		newConcurrentProvisionerSandbox(sandboxIDs[0]),
-		newConcurrentProvisionerSandbox(sandboxIDs[1]),
+		newConcurrentProvisionerSandbox(t, sandboxIDs[0]),
+		newConcurrentProvisionerSandbox(t, sandboxIDs[1]),
 	)
 	materializerStarted := make(chan string, len(sandboxIDs))
 	releaseMaterializers := make(chan struct{})
@@ -154,7 +155,7 @@ func TestProvisionerConcurrentEnsureDifferentSandboxesOverlap(t *testing.T) {
 
 func TestProvisionerConcurrentWaiterCancellationDoesNotCancelSharedAttempt(t *testing.T) {
 	sandboxID := "concurrent-waiter-cancel"
-	store := newConcurrentProvisionerStore(newConcurrentProvisionerSandbox(sandboxID))
+	store := newConcurrentProvisionerStore(newConcurrentProvisionerSandbox(t, sandboxID))
 	materializerStarted := make(chan string, 1)
 	releaseMaterializer := make(chan struct{})
 	materializer := &concurrentProvisionerMaterializer{
@@ -221,6 +222,8 @@ type concurrentProvisionerStore struct {
 	readyUpdates map[string]int
 }
 
+var _ SandboxPathResolver = (*concurrentProvisionerStore)(nil)
+
 var _ SandboxStore = (*concurrentProvisionerStore)(nil)
 
 func newConcurrentProvisionerStore(sandboxes ...*domain.Sandbox) *concurrentProvisionerStore {
@@ -242,6 +245,15 @@ func (s *concurrentProvisionerStore) GetSandbox(_ context.Context, id string) (*
 		return nil, fmt.Errorf("sandbox %q not found", id)
 	}
 	return cloneConcurrentProvisionerSandbox(sandbox), nil
+}
+
+func (s *concurrentProvisionerStore) SandboxDir(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sandbox := s.sandboxes[id]; sandbox != nil {
+		return filepath.Dir(sandbox.Summary.WorkspacePath)
+	}
+	return ""
 }
 
 func (s *concurrentProvisionerStore) UpdateSandbox(_ context.Context, sandbox *domain.Sandbox) error {
@@ -305,12 +317,13 @@ func (m *concurrentProvisionerMaterializer) callCount(id string) int {
 	return m.calls[id]
 }
 
-func newConcurrentProvisionerSandbox(id string) *domain.Sandbox {
+func newConcurrentProvisionerSandbox(t *testing.T, id string) *domain.Sandbox {
+	t.Helper()
 	return &domain.Sandbox{
 		Summary: domain.SandboxSummary{
 			ID:            id,
 			Title:         "initial-title",
-			WorkspacePath: "/tmp/" + id + "/workspace",
+			WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
 		},
 		WorkspaceID: "workspace-" + id,
 		Workspace: &domain.SandboxWorkspace{

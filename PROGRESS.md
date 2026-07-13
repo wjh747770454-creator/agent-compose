@@ -20,8 +20,8 @@
 
 - 已确认：resume 严格保持 sandbox workspace；旧 sandbox 原样迁移；首版无 reset API；真实 runtime 使用 Docker E2E。
 - 已完成文档：技术规格、实施计划。
-- 代码任务：3/20 完成。
-- 当前下一目标：2.2 实现 staging、提升和失败重试。
+- 代码任务：4/20 完成。
+- 当前下一目标：2.3 收紧 file/Git materializer 边界并完成 Provisioner 单元收口。
 
 ## 执行规则
 
@@ -145,7 +145,7 @@
       - 未修改 proto、SQLite、公开 CLI、环境变量、compose、runtime mount 或现有生命周期调用点。
     - 下一目标：2.2 实现 staging、提升和失败重试。
 
-- [ ] 2.2 实现 staging、提升和失败重试
+- [x] 2.2 实现 staging、提升和失败重试
   - 依赖：2.1。
   - 工作内容：
     - 在 `<sandbox>/state/workspace-provisioning/attempt-<id>` 创建同文件系统 staging。
@@ -154,16 +154,35 @@
     - materialize/提升失败写 failed；failed 重试先持久化 pending；双重错误使用 `errors.Join`。
     - ready 保存失败时阻止 runtime 后续启动，并保留可重试状态。
   - 可并行子任务：
-    - [ ] 可并行：staging path/cleanup/promotion focused tests。
-    - [ ] 可并行：failed/pending/ready 持久化失败和 `errors.Join` 测试。
+    - [x] 可并行：staging path/cleanup/promotion focused tests。
+    - [x] 可并行：failed/pending/ready 持久化失败和 `errors.Join` 测试。
   - 测试方案：`./scripts/with-go-toolchain.sh go test ./pkg/workspaces ./pkg/storage/sessionstore -run 'Test.*(Staging|Retry|Failure|Promotion)' -count=1`。
   - 验收标准：provider 永远只写 staging；pending/failed 半成品可重试；ready workspace 不参与 staging 清理；错误不被清理错误覆盖。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：2.3。
+    - 状态：已完成。
+    - 变更：
+      - pending/failed provisioning 在 `<sandbox>/state/workspace-provisioning/attempt-*` 创建同 sandbox staging，materializer 只接收深拷贝 sandbox 的 staging path。
+      - 每次 attempt 前仅清理遗留 `attempt-*`；materialize 成功后删除未 ready 的正式半成品并以同文件系统 `rename` 提升，不提供跨文件系统 copy fallback。
+      - failed 重试先持久化 pending；attempt/materialize/promotion 失败转为 failed；cleanup、failed 保存和 post-reload 次级错误通过 `errors.Join` 与原始错误共同保留。
+      - ready 保存失败时返回错误，authoritative metadata 保持 pending，可在下一次 Ensure 重新 materialize；尚未接入 runtime，因此失败后不存在 driver start。
+      - 增加 `SandboxPathResolver`，使用 sessionstore 权威 `SandboxDir(id)` 校验正式路径严格为 `<sandbox>/workspace`，并拒绝 sandbox/state/provisioning-root symlink，防止损坏 metadata 或 staging 链接越界删除。
+      - sessionstore 的 sandbox `metadata.json` 改为同目录临时文件 write/sync/close/rename 原子替换，保存失败不再先截断旧状态。
+      - 增加 staging/promotion、ready 零触碰、路径越界/symlink、attempt 清理隔离、失败重试、持久化失败、错误合并和原子 metadata 写测试。
+    - 验证：
+      - `./scripts/with-go-toolchain.sh go test ./pkg/workspaces ./pkg/storage/sessionstore -run 'Test.*(Staging|Retry|Failure|Promotion)' -count=1`：通过。
+      - `./scripts/with-go-toolchain.sh go test -race ./pkg/workspaces -run 'Test.*(Provisioner|Staging|Retry|Failure|Promotion)' -count=1`：通过。
+      - `./scripts/with-go-toolchain.sh go test -race ./pkg/workspaces -run 'Test.*Provisioner.*Concurrent' -count=20`：通过。
+      - `./scripts/with-go-toolchain.sh go test ./pkg/workspaces ./pkg/storage/sessionstore ./pkg/model -count=1`：通过。
+      - `./scripts/with-go-toolchain.sh golangci-lint fmt --no-config --diff ./pkg/workspaces ./pkg/storage/sessionstore ./pkg/model`：通过。
+      - `./scripts/with-go-toolchain.sh golangci-lint run --no-config --allow-parallel-runners ./pkg/workspaces ./pkg/storage/sessionstore ./pkg/model`：通过，`0 issues`。
+      - `git diff --check`：通过。
+    - 审计与例外：
+      - ready 分支以 filesystem 全方法 panic、materializer panic、目录树内容/mode/mtime 对比和 store update 计数证明不 stat、不清理、不 materialize、不改写。
+      - stale attempt symlink 只删除链接且外部 target 保持；非 `attempt-*` sibling 保持；损坏 workspace path 和 state symlink 均 fail closed、materializer 零调用。
+      - promotion 的正式目录删除失败时 rename 为零次；rename、cleanup、failed 持久化错误均可由 `errors.Is` 独立识别。
+      - 现有 lifecycle/adapters/runs 直接 preparation 调用点未在本任务修改，Provisioner 仍未注册到生产图；materializer 边界和 provider 行为由依赖任务 2.3 收口后再进入 3.x 生命周期接入。
+      - 未修改 proto、SQLite schema、公开 CLI、环境变量、compose 或 runtime mount；无未运行的任务内门禁。
+    - 下一目标：2.3 收紧 file/Git materializer 边界并完成 Provisioner 单元收口。
 
 - [ ] 2.3 收紧 file/Git materializer 边界并完成 Provisioner 单元收口
   - 依赖：2.2。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -192,7 +193,11 @@ func TestProvisionerPendingAndFailedMaterializeToReady(t *testing.T) {
 		t.Run(initialStatus, func(t *testing.T) {
 			t.Parallel()
 
-			stored := provisionerStateSandbox("materialize-"+initialStatus, "/tmp/materialize-"+initialStatus, initialStatus)
+			stored := provisionerStateSandbox(
+				"materialize-"+initialStatus,
+				filepath.Join(t.TempDir(), "workspace"),
+				initialStatus,
+			)
 			store := newProvisionerStateStore(stored)
 			store.persistedTitleOnUpdate = "title injected by persistent store"
 			materializer := &provisionerStateMaterializer{}
@@ -221,7 +226,11 @@ func TestProvisionerMaterializerErrorStillReloadsCaller(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("materialize failed")
-	stored := provisionerStateSandbox("materializer-error", "/tmp/materializer-error", domain.SandboxWorkspaceProvisioningStatusPending)
+	stored := provisionerStateSandbox(
+		"materializer-error",
+		filepath.Join(t.TempDir(), "workspace"),
+		domain.SandboxWorkspaceProvisioningStatusPending,
+	)
 	stored.Summary.Title = "persisted after failure"
 	store := newProvisionerStateStore(stored)
 	materializer := &provisionerStateMaterializer{err: wantErr}
@@ -238,7 +247,7 @@ func TestProvisionerMaterializerErrorStillReloadsCaller(t *testing.T) {
 	if caller.Summary.Title != stored.Summary.Title {
 		t.Fatalf("caller title = %q, want reloaded %q", caller.Summary.Title, stored.Summary.Title)
 	}
-	assertProvisionerState(t, caller, domain.SandboxWorkspaceProvisioningStatusPending)
+	assertProvisionerState(t, caller, domain.SandboxWorkspaceProvisioningStatusFailed)
 	assertProvisionerTransientEnv(t, caller)
 }
 
@@ -307,6 +316,7 @@ type provisionerStateStore struct {
 
 var _ WorkspaceConfigStore = (*provisionerStateStore)(nil)
 var _ SandboxStore = (*provisionerStateStore)(nil)
+var _ SandboxPathResolver = (*provisionerStateStore)(nil)
 
 func newProvisionerStateStore(sandboxes ...*domain.Sandbox) *provisionerStateStore {
 	store := &provisionerStateStore{sandboxes: make(map[string]*domain.Sandbox)}
@@ -334,6 +344,15 @@ func (s *provisionerStateStore) GetSandbox(_ context.Context, id string) (*domai
 		return nil, fmt.Errorf("sandbox %q not found", id)
 	}
 	return cloneProvisionerStateSandbox(sandbox), nil
+}
+
+func (s *provisionerStateStore) SandboxDir(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sandbox := s.sandboxes[id]; sandbox != nil {
+		return filepath.Dir(sandbox.Summary.WorkspacePath)
+	}
+	return ""
 }
 
 func (s *provisionerStateStore) UpdateSandbox(_ context.Context, sandbox *domain.Sandbox) error {

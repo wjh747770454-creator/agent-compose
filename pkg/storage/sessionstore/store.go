@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -506,8 +507,48 @@ func (s *Store) saveSandbox(session *Sandbox) error {
 	if err != nil {
 		return fmt.Errorf("encode session metadata: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(s.sandboxDir(session.Summary.ID), "metadata.json"), append(data, '\n'), 0o644); err != nil {
+	if err := writeFileAtomically(
+		filepath.Join(s.sandboxDir(session.Summary.ID), "metadata.json"),
+		append(data, '\n'),
+		0o644,
+	); err != nil {
 		return fmt.Errorf("write session metadata: %w", err)
+	}
+	return nil
+}
+
+func writeFileAtomically(path string, data []byte, perm fs.FileMode) (returnErr error) {
+	dir := filepath.Dir(path)
+	temporary, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary file for %s: %w", path, err)
+	}
+	temporaryPath := temporary.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = temporary.Close()
+		}
+		if err := os.Remove(temporaryPath); err != nil && !os.IsNotExist(err) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary file %s: %w", temporaryPath, err))
+		}
+	}()
+
+	if err := temporary.Chmod(perm); err != nil {
+		return fmt.Errorf("set temporary file mode for %s: %w", path, err)
+	}
+	if _, err := temporary.Write(data); err != nil {
+		return fmt.Errorf("write temporary file for %s: %w", path, err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return fmt.Errorf("sync temporary file for %s: %w", path, err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close temporary file for %s: %w", path, err)
+	}
+	closed = true
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace %s with temporary file: %w", path, err)
 	}
 	return nil
 }

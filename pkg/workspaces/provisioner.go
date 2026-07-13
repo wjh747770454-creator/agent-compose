@@ -18,13 +18,19 @@ type SandboxStore interface {
 	UpdateSandbox(context.Context, *domain.Sandbox) error
 }
 
+type SandboxPathResolver interface {
+	SandboxDir(string) string
+}
+
 type WorkspaceMaterializer interface {
 	Materialize(context.Context, *domain.Sandbox) error
 }
 
 type Provisioner struct {
 	sandboxes    SandboxStore
+	paths        SandboxPathResolver
 	materializer WorkspaceMaterializer
+	filesystem   provisioningFileSystem
 	group        singleflight.Group
 }
 
@@ -36,7 +42,13 @@ func NewProvisioner(config *appconfig.Config, workspaces WorkspaceConfigStore, s
 }
 
 func NewProvisionerWithMaterializer(sandboxes SandboxStore, materializer WorkspaceMaterializer) *Provisioner {
-	return &Provisioner{sandboxes: sandboxes, materializer: materializer}
+	paths, _ := sandboxes.(SandboxPathResolver)
+	return &Provisioner{
+		sandboxes:    sandboxes,
+		paths:        paths,
+		materializer: materializer,
+		filesystem:   osProvisioningFileSystem{},
+	}
 }
 
 func (p *Provisioner) Ensure(ctx context.Context, sandbox *domain.Sandbox) error {
@@ -130,19 +142,7 @@ func (p *Provisioner) ensureLoaded(ctx context.Context, sandbox *domain.Sandbox)
 	if p.materializer == nil {
 		return fmt.Errorf("%w: workspace materializer is required", domain.ErrRequired)
 	}
-	if err := p.materializer.Materialize(ctx, sandbox); err != nil {
-		return err
-	}
-	if err := domain.TransitionSandboxWorkspaceProvisioning(
-		sandbox,
-		domain.SandboxWorkspaceProvisioningStatusReady,
-	); err != nil {
-		return err
-	}
-	if err := p.sandboxes.UpdateSandbox(ctx, sandbox); err != nil {
-		return fmt.Errorf("persist ready workspace provisioning for sandbox %s: %w", sandbox.Summary.ID, err)
-	}
-	return nil
+	return p.provisionPending(ctx, sandbox)
 }
 
 func validateProvisioningSandbox(sandbox *domain.Sandbox, expectedID string) error {
