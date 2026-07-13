@@ -334,7 +334,7 @@ func (h *ExecHandler) prepareExecAttach(ctx context.Context, start *agentcompose
 	}
 	runtime, err := h.runtime(sandbox)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, ConnectErrorForDomain(err)
 	}
 	env := ExecEnvMap(req.GetEnv())
 	execID := uuid.NewString()
@@ -552,7 +552,7 @@ func (h *ExecHandler) executeProjectCommand(ctx context.Context, req *agentcompo
 	}
 	runtime, err := h.runtime(sandbox)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, ConnectErrorForDomain(err)
 	}
 	hostExecDir := filepath.Join(execution.HostSandboxDir(sandbox), "state", "exec", execID)
 	if err := os.MkdirAll(hostExecDir, 0o755); err != nil {

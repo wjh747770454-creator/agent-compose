@@ -74,6 +74,7 @@ func TestIntegrationAPIHandlerRuntimeWorkflows(t *testing.T) {
 	t.Run("sandbox legacy history", TestV2ListSandboxHistoryReturnsLegacyCellsAndEvents)
 	t.Run("sandbox watch projection", TestV2SandboxWatchEventProjection)
 	t.Run("domain connect error", TestConnectErrorForDomainClassifiesReusableSentinels)
+	t.Run("compiled runtime connect boundaries", TestRuntimeDriverNotCompiledConnectBoundaries)
 	t.Run("image pull inspect and skip", TestImagePullInspectAndSkip)
 	t.Run("exec sandbox target", TestExecHandlerSandboxTargetWorkflow)
 	t.Run("exec run selector and stream sender", TestExecHandlerRunSelectorAndStreamSenderWorkflow)

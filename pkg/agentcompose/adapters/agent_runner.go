@@ -44,12 +44,21 @@ func NewAgentRunner(config *appconfig.Config, store *sessionstore.Store, configD
 	return &AgentRunner{config: config, store: store, configDB: configDB, agents: agents, runtimes: runtimes}
 }
 
+func (r *AgentRunner) ValidateSessionRuntime(session *domain.Sandbox) error {
+	_, err := r.runtimes.ForSession(session)
+	return err
+}
+
 func (r *AgentRunner) ExecuteAgentRun(ctx context.Context, session *domain.Sandbox, agent, agentDefinitionID, model, runID, message, outputSchemaJSON string, stream domain.ExecStreamWriter) (domain.ExecResult, domain.AgentRunResult, error) {
 	if session.Summary.VMStatus != domain.VMStatusRunning {
 		return domain.ExecResult{}, domain.AgentRunResult{}, fmt.Errorf("session is not running")
 	}
 	appconfig.ApplyDefaultGuestPaths(r.config)
 	vmState, err := r.store.GetVMState(session.Summary.ID)
+	if err != nil {
+		return domain.ExecResult{}, domain.AgentRunResult{}, err
+	}
+	runtime, err := r.runtimes.ForSession(session)
 	if err != nil {
 		return domain.ExecResult{}, domain.AgentRunResult{}, err
 	}
@@ -93,10 +102,6 @@ func (r *AgentRunner) ExecuteAgentRun(ctx context.Context, session *domain.Sandb
 		if _, err := execution.WriteAgentSkills(session, nil); err != nil {
 			return domain.ExecResult{}, domain.AgentRunResult{}, err
 		}
-	}
-	runtime, err := r.runtimes.ForSession(session)
-	if err != nil {
-		return domain.ExecResult{}, domain.AgentRunResult{}, err
 	}
 	spec := BuildAgentExecSpec(r.config, session, agent, effectiveModel, promptPath, schemaPath, skillNames)
 	managedEnv, err := runtimefacade.EnsureSessionLLMFacadeConfig(ctx, r.config, facadeStoreFor(r.configDB), session, agent, effectiveModel, runtimefacade.TokenSourceAgent, runID)

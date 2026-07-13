@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	appconfig "agent-compose/pkg/config"
@@ -37,6 +38,13 @@ type driverRuntimeAdapter struct {
 }
 
 func NewRuntimeProvider(config *appconfig.Config) (RuntimeProvider, error) {
+	if config == nil {
+		return nil, fmt.Errorf("runtime provider config is required")
+	}
+	if err := driverpkg.ValidateCompiledRuntimeDriver(config.RuntimeDriver); err != nil {
+		return nil, classifyRuntimeProviderError(err)
+	}
+
 	boxliteRuntime, err := driverpkg.NewBoxliteRuntime(config)
 	if err != nil {
 		return nil, err
@@ -64,11 +72,21 @@ func (p *runtimeProvider) ForDriver(driver string) (SandboxRuntime, error) {
 	if err := driverpkg.ValidateRuntimeDriver(driver); err != nil {
 		return nil, err
 	}
+	if err := driverpkg.ValidateCompiledRuntimeDriver(driver); err != nil {
+		return nil, classifyRuntimeProviderError(err)
+	}
 	runtime, ok := p.runtimes[driver]
 	if !ok {
 		return nil, fmt.Errorf("agent-compose runtime %q is not configured", driver)
 	}
 	return runtime, nil
+}
+
+func classifyRuntimeProviderError(err error) error {
+	if errors.Is(err, driverpkg.ErrRuntimeDriverNotCompiled) {
+		return domain.ClassifyError(domain.ErrUnsupported, "", err)
+	}
+	return err
 }
 
 func (p *runtimeProvider) ForSession(session *domain.Sandbox) (SandboxRuntime, error) {

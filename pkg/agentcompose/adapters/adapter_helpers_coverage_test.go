@@ -65,7 +65,7 @@ func TestAdapterHelperCoverage(t *testing.T) {
 	t.Run("runtime provider driver resolution", func(t *testing.T) {
 		runtime := &fakeAgentRuntime{}
 		provider := &runtimeProvider{
-			config: &appconfig.Config{RuntimeDriver: driverpkg.RuntimeDriverBoxlite},
+			config: &appconfig.Config{RuntimeDriver: driverpkg.RuntimeDriverDocker},
 			runtimes: map[string]SandboxRuntime{
 				driverpkg.RuntimeDriverDocker:  runtime,
 				driverpkg.RuntimeDriverBoxlite: runtime,
@@ -80,8 +80,13 @@ func TestAdapterHelperCoverage(t *testing.T) {
 		if _, err := provider.ForDriver("bad-driver"); err == nil {
 			t.Fatalf("ForDriver bad-driver returned nil error")
 		}
-		if _, err := provider.ForDriver(driverpkg.RuntimeDriverMicrosandbox); err == nil || !strings.Contains(err.Error(), "not configured") {
-			t.Fatalf("ForDriver missing runtime error = %v", err)
+		_, err := provider.ForDriver(driverpkg.RuntimeDriverMicrosandbox)
+		if driverpkg.IsRuntimeDriverCompiled(driverpkg.RuntimeDriverMicrosandbox) {
+			if err == nil || !strings.Contains(err.Error(), "not configured") {
+				t.Fatalf("ForDriver compiled but unconfigured runtime error = %v", err)
+			}
+		} else if err == nil || !errors.Is(err, driverpkg.ErrRuntimeDriverNotCompiled) || !errors.Is(err, domain.ErrUnsupported) {
+			t.Fatalf("ForDriver uncompiled runtime error = %v", err)
 		}
 		if _, err := provider.ForSession(nil); err == nil || !strings.Contains(err.Error(), "session is required") {
 			t.Fatalf("ForSession nil error = %v", err)

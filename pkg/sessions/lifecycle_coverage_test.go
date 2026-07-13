@@ -137,7 +137,7 @@ func TestLifecycleEnsureProxyReadyBranches(t *testing.T) {
 			Config:           &appconfig.Config{SandboxStartTimeout: time.Second},
 			Store:            store,
 			WorkspaceEnsurer: &recordingWorkspaceEnsurer{},
-			Driver:           fakeSandboxDriver{startErr: errors.New("start failed")},
+			Driver:           &fakeSandboxDriver{startErr: errors.New("start failed")},
 		}
 		_, _, err := lifecycle.EnsureProxyReady(context.Background(), session.Summary.ID)
 		if err == nil || !stringsContains(err.Error(), "start failed") || store.session.Summary.VMStatus != domain.VMStatusFailed {
@@ -225,6 +225,52 @@ func TestLifecycleMissingWorkspaceEnsurerReturnsError(t *testing.T) {
 		_, err := lifecycle.ResumeLoaded(context.Background(), session, nil)
 		if err == nil || !stringsContains(err.Error(), "workspace ensurer is not configured") {
 			t.Fatalf("ResumeLoaded error = %v, want missing workspace ensurer error", err)
+		}
+	})
+}
+
+func TestLifecycleRejectsUnsupportedRuntimeBeforeResumeSideEffects(t *testing.T) {
+	unsupported := domain.ClassifyError(domain.ErrUnsupported, "", driverpkg.ErrRuntimeDriverNotCompiled)
+
+	t.Run("proxy start", func(t *testing.T) {
+		session := lifecycleTestSession("session-proxy-unsupported", driverpkg.RuntimeDriverMicrosandbox, domain.VMStatusStopped)
+		store := &fakeLifecycleStore{session: session, proxyState: domain.ProxyState{Enabled: true, HostPort: unusedTCPPort(t), GuestPort: 8888}}
+		driver := &fakeSandboxDriver{validateErr: unsupported}
+		lifecycle := Lifecycle{
+			Config: &appconfig.Config{SandboxStartTimeout: time.Second},
+			Store:  store,
+			Driver: driver,
+		}
+
+		_, _, err := lifecycle.EnsureProxyReady(context.Background(), session.Summary.ID)
+		if !errors.Is(err, domain.ErrUnsupported) || !errors.Is(err, driverpkg.ErrRuntimeDriverNotCompiled) {
+			t.Fatalf("EnsureProxyReady error = %v, want unsupported runtime", err)
+		}
+		if driver.started || store.updated != 0 || store.events != 0 || session.Summary.VMStatus != domain.VMStatusStopped {
+			t.Fatalf("unsupported proxy resume mutated state: driver=%#v store=%#v session=%#v", driver, store, session)
+		}
+	})
+
+	t.Run("explicit resume", func(t *testing.T) {
+		session := lifecycleTestSession("session-resume-unsupported", driverpkg.RuntimeDriverMicrosandbox, domain.VMStatusStopped)
+		store := &fakeLifecycleStore{session: session}
+		driver := &fakeSandboxDriver{validateErr: unsupported}
+		guideWrites := 0
+		lifecycle := Lifecycle{
+			Config: &appconfig.Config{},
+			Store:  store,
+			Driver: driver,
+			GuideWriter: func(context.Context, *domain.Sandbox, []string) {
+				guideWrites++
+			},
+		}
+
+		_, err := lifecycle.ResumeLoaded(context.Background(), session, []string{"dev"})
+		if !errors.Is(err, domain.ErrUnsupported) || !errors.Is(err, driverpkg.ErrRuntimeDriverNotCompiled) {
+			t.Fatalf("ResumeLoaded error = %v, want unsupported runtime", err)
+		}
+		if driver.started || guideWrites != 0 || store.updated != 0 || store.events != 0 || session.Summary.VMStatus != domain.VMStatusStopped {
+			t.Fatalf("unsupported explicit resume mutated state: driver=%#v guide=%d store=%#v session=%#v", driver, guideWrites, store, session)
 		}
 	})
 }
@@ -380,6 +426,14 @@ func TestLifecycleResumeLoadedRuntimeFailurePreservesReadyProvisioning(t *testin
 	}
 }
 
+func TestIntegrationLifecycleRejectsUnsupportedRuntimeBeforeResumeSideEffects(t *testing.T) {
+	TestLifecycleRejectsUnsupportedRuntimeBeforeResumeSideEffects(t)
+}
+
+func TestE2ELifecycleRejectsUnsupportedRuntimeBeforeResumeSideEffects(t *testing.T) {
+	TestLifecycleRejectsUnsupportedRuntimeBeforeResumeSideEffects(t)
+}
+
 func TestJupyterTargetReachableCoverage(t *testing.T) {
 	if JupyterTargetReachable(domain.ProxyState{}, 10*time.Millisecond) {
 		t.Fatalf("empty proxy state should not be reachable")
@@ -526,15 +580,22 @@ func (e *recordingWorkspaceEnsurer) Ensure(_ context.Context, session *domain.Sa
 }
 
 type fakeSandboxDriver struct {
-	startErr error
-	stopErr  error
+	validateErr error
+	startErr    error
+	stopErr     error
+	started     bool
 }
 
-func (d fakeSandboxDriver) StartSandboxVM(context.Context, *domain.Sandbox) error {
+func (d *fakeSandboxDriver) ValidateSandboxRuntime(*domain.Sandbox) error {
+	return d.validateErr
+}
+
+func (d *fakeSandboxDriver) StartSandboxVM(context.Context, *domain.Sandbox) error {
+	d.started = true
 	return d.startErr
 }
 
-func (d fakeSandboxDriver) StopSandboxVM(context.Context, *domain.Sandbox) error {
+func (d *fakeSandboxDriver) StopSandboxVM(context.Context, *domain.Sandbox) error {
 	return d.stopErr
 }
 

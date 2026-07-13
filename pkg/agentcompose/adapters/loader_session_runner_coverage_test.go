@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -82,6 +83,41 @@ func TestLoaderSandboxRunnerLoadResumeAndShutdownCoverage(t *testing.T) {
 	}
 	if image := runner.guestImage(domain.LoaderAgentRequest{GuestImage: "request:latest"}, domain.Loader{Summary: domain.LoaderSummary{GuestImage: "loader:latest"}}, &domain.AgentDefinition{GuestImage: "agent:latest"}, driverpkg.RuntimeDriverDocker); image != "request:latest" {
 		t.Fatalf("guestImage = %q", image)
+	}
+}
+
+func TestLoaderSandboxRunnerRejectsUnsupportedStickyResumeBeforeSideEffects(t *testing.T) {
+	ctx := context.Background()
+	bridge, driver := newTestSandboxRPCBridge(t)
+	runner := NewLoaderSandboxRunner(bridge.config, bridge.store, bridge.configDB, bridge.workspaceEnsurer, driver, nil, nil, bridge.streams, nil, nil)
+	session, err := bridge.store.CreateSandbox(ctx, "historical sticky", "", driverpkg.RuntimeDriverMicrosandbox, "", "", "loader", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSandbox returned error: %v", err)
+	}
+	session.Summary.VMStatus = domain.VMStatusStopped
+	session.Summary.RuntimeRef = "original-runtime-ref"
+	if err := bridge.store.UpdateSandbox(ctx, session); err != nil {
+		t.Fatalf("UpdateSandbox returned error: %v", err)
+	}
+	driver.validateErr = domain.ClassifyError(domain.ErrUnsupported, "", driverpkg.ErrRuntimeDriverNotCompiled)
+
+	_, _, err = runner.LoadOrResume(ctx, session.Summary.ID)
+	if !errors.Is(err, domain.ErrUnsupported) || !errors.Is(err, driverpkg.ErrRuntimeDriverNotCompiled) {
+		t.Fatalf("LoadOrResume error = %v, want unsupported runtime", err)
+	}
+	loaded, err := bridge.store.GetSandbox(ctx, session.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetSandbox returned error: %v", err)
+	}
+	if loaded.Summary.VMStatus != domain.VMStatusStopped || loaded.Summary.Driver != driverpkg.RuntimeDriverMicrosandbox || loaded.Summary.RuntimeRef != "original-runtime-ref" {
+		t.Fatalf("unsupported sticky resume changed summary: %#v", loaded.Summary)
+	}
+	if len(driver.startCalls) != 0 {
+		t.Fatalf("unsupported sticky resume called StartSandboxVM: %#v", driver.startCalls)
+	}
+	events, err := bridge.store.ListEvents(ctx, session.Summary.ID)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("events after unsupported sticky resume = %#v, %v", events, err)
 	}
 }
 

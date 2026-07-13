@@ -9,8 +9,8 @@
 - 当前变更：platform-runtime-build。
 - 已确认产物：macOS Docker-only binary、Linux 三 Driver binary、Linux 三 Driver multi-arch Docker image。
 - 发布边界：binary 只用于本地和 CI 验证，不进入 GitHub Release。
-- 当前进度：3/18 个父任务完成。
-- 当前下一目标：2.1 在 Runtime Provider 和执行路径接入 compiled capability。
+- 当前进度：4/18 个父任务完成。
+- 当前下一目标：2.2 在所有持久化入口提前拒绝未编译 Driver。
 
 ## 文档索引
 
@@ -167,7 +167,7 @@
 
 参考：[实施计划阶段 2](docs/plan/platform-runtime-build-implementation-plan.md#阶段-2接入提前校验与可观察-build-信息)
 
-- [ ] 2.1 在 Runtime Provider 和执行路径接入 compiled capability
+- [x] 2.1 在 Runtime Provider 和执行路径接入 compiled capability
   - 依赖：1.3。
   - 工作内容：
     - NewRuntimeProvider验证默认RUNTIME_DRIVER已编译；ForDriver区分非法名称、未编译和未配置。
@@ -175,19 +175,32 @@
     - start/resume/exec/remove通过provider对历史session返回unsupported，不修改原driver、VM state或runtime reference。
     - 在adapter/app边界把ErrRuntimeDriverNotCompiled分类为domain.ErrUnsupported和Connect CodeUnimplemented。
   - 可并行子任务：
-    - [ ] 可并行：provider实现和constructor tests。
-    - [ ] 可并行：历史session runtime操作与不修改状态测试。
-    - [ ] 可并行：domain/Connect/CLI错误映射测试。
+    - [x] 可并行：provider实现和constructor tests。
+    - [x] 可并行：历史session runtime操作与不修改状态测试。
+    - [x] 可并行：domain/Connect/CLI错误映射测试。
   - 测试方案：
     - CGO_ENABLED=0 ./scripts/with-go-toolchain.sh go test ./pkg/driver ./pkg/agentcompose/adapters ./pkg/agentcompose/api -run 'Test.*(RuntimeProvider|Compiled|Unsupported|SessionDriver)' -count=1
     - task lint
   - 验收标准：默认未编译driver在service graph构造时失败；历史对象可读取；需要runtime的操作返回typed unsupported；Docker-only启动不触碰KVM。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：2.2与2.3可并行。
+    - 状态：已完成。
+    - 变更：
+      - `NewRuntimeProvider` 在构造三个 lazy wrapper 前验证默认 `RUNTIME_DRIVER` 的 compiled capability；`ForDriver` 固定按名称合法性、compiled capability、configured runtime 顺序校验。未编译错误同时保留 `ErrRuntimeDriverNotCompiled`/具体 typed error，并分类为 `domain.ErrUnsupported`。
+      - `SandboxDriver` 增加只读 runtime preflight；session proxy start、显式 resume、loader sticky resume、agent exec 和 loader command exec 在 workspace、guide、cell、event、token 或 artifact 副作用前拒绝历史未编译 Driver。start/stop/remove/exec 失败不覆盖原 Driver、VM/proxy state、VM status 或 runtime reference，list/inspect 仍可读取历史对象。
+      - session bridge、v2 sandbox remove、unary/attach exec、kernel 和 agent API 统一复用 `ConnectErrorForDomain`，把 unsupported 映射为 `CodeUnimplemented`，同时保持普通错误的既有 `Internal` 语义；CLI 继续把 `CodeUnimplemented` 映射为 `exitCodeUnsupported=4`。
+      - 增加 provider 顺序/lazy、历史状态与副作用、lifecycle/loader preflight、Connect endpoint 和 coverage-shape 回归测试。
+    - 验证：
+      - `CGO_ENABLED=0 ./scripts/with-go-toolchain.sh go test ./pkg/driver ./pkg/agentcompose/adapters ./pkg/agentcompose/api -run 'Test.*(RuntimeProvider|Compiled|Unsupported|SessionDriver)' -count=1` 及扩展的 `pkg/sessions`、remove/exec/kernel/agent focused tests：通过。
+      - `CGO_ENABLED=0 ./scripts/with-go-toolchain.sh go test ./pkg/... ./cmd/... -count=1`：通过；Docker-only service graph、全部 package 和 CLI 编译/测试成功。
+      - `LD_LIBRARY_PATH="$PWD/build/boxlite/lib:$PWD/build/microsandbox/lib:${LD_LIBRARY_PATH:-}" CGO_ENABLED=1 ./scripts/with-go-toolchain.sh go test -tags 'boxlitecgo,microsandboxcgo' ./pkg/sessions ./pkg/agentcompose/adapters ./pkg/agentcompose/api -count=1`：通过；完整 full-tag provider 构造和 API 路径未访问 KVM。
+      - `task lint`：通过，`0 issues`；`task build`：通过，CGO-off daemon binary、v2 proto package compile、runtime SDK build/packaging 全部成功。
+      - `task test`：最终通过；`CGO_ENABLED=0`，Unit `77.08%`、Integration `64.93%`、E2E `60.55%`、Combined `79.40%`，满足 `60%/60%/60%/70%` 门禁。
+    - 审计与例外：
+      - 首次 `task test` 的所有测试均通过，但新增生产 statements 只有 unit 名称覆盖，E2E coverage 降至 `58.71%`；随后把同一组确定性测试接入现有 integration/E2E coverage wrapper，未修改 baseline、exclusion 或测试语义，最终门禁通过。
+      - full-tag lazy 构造在 native artifact 配置路径故意不存在且当前进程不可直接访问 `/dev/kvm` 时仍通过，证明 provider 构造只创建 wrapper，不初始化 BoxLite/Microsandbox 或探测 KVM；full build 中没有“未编译” Driver，负向 fixture按能力合同跳过。
+      - 未把 compiled validation 加入 `ResolveSandboxRuntimeDriver` 或纯 compose parse；也未提前实施 2.2 的 create/apply/scheduler 持久化入口校验。当前默认 Docker daemon 对新请求的写入前拒绝仍由下一父任务完成。
+      - 未修改 proto、SQLite schema、guest protocol、默认 Docker driver、coverage 配置或暂停的 Workspace Resume 账本；按计划尚未检查远端 CI。
+    - 下一目标：2.2 在所有持久化入口提前拒绝未编译 Driver。
 
 - [ ] 2.2 在所有持久化入口提前拒绝未编译 Driver
   - 依赖：2.1。

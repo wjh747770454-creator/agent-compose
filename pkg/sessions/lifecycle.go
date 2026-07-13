@@ -28,6 +28,10 @@ type SandboxDriver interface {
 	StopSandboxVM(context.Context, *domain.Sandbox) error
 }
 
+type SandboxRuntimeValidator interface {
+	ValidateSandboxRuntime(*domain.Sandbox) error
+}
+
 type RuntimeLivenessProvider interface {
 	IsSandboxAlive(context.Context, string, *domain.Sandbox, domain.VMState) (bool, bool, error)
 }
@@ -54,6 +58,14 @@ type Lifecycle struct {
 	TokenRevoker     FacadeTokenRevoker
 	Notifier         LifecycleNotifier
 	GuideWriter      CapabilityGuideWriter
+}
+
+func (l Lifecycle) validateSandboxRuntime(session *domain.Sandbox) error {
+	validator, ok := l.Driver.(SandboxRuntimeValidator)
+	if !ok {
+		return nil
+	}
+	return validator.ValidateSandboxRuntime(session)
 }
 
 func (l Lifecycle) ReconcileRuntimeState(ctx context.Context, session *domain.Sandbox) (*domain.Sandbox, error) {
@@ -132,6 +144,9 @@ func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*dom
 	if session.Summary.VMStatus == domain.VMStatusRunning && JupyterTargetReachable(proxyState, 1500*time.Millisecond) {
 		return session, proxyState, nil
 	}
+	if err := l.validateSandboxRuntime(session); err != nil {
+		return nil, domain.ProxyState{}, err
+	}
 	startCtx, cancel := context.WithTimeout(ctx, l.Config.SandboxStartTimeout)
 	defer cancel()
 	if err := l.ensureWorkspace(startCtx, session); err != nil {
@@ -160,6 +175,9 @@ func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*dom
 }
 
 func (l Lifecycle) ResumeLoaded(ctx context.Context, session *domain.Sandbox, capsetIDs []string) (*domain.Sandbox, error) {
+	if err := l.validateSandboxRuntime(session); err != nil {
+		return nil, err
+	}
 	if err := l.ensureWorkspace(ctx, session); err != nil {
 		return nil, err
 	}

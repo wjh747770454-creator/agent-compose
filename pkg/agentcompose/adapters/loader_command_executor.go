@@ -42,6 +42,14 @@ func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, sessio
 	if err := loaders.ValidateCommandRequest(request); err != nil {
 		return domain.LoaderCommandResult{}, err
 	}
+	vmState, err := e.Store.GetVMState(session.Summary.ID)
+	if err != nil {
+		return domain.LoaderCommandResult{}, err
+	}
+	runtime, err := e.Runtimes.ForSession(session)
+	if err != nil {
+		return domain.LoaderCommandResult{}, err
+	}
 
 	ctx, cancel := loaders.CommandContext(ctx, request.TimeoutMs)
 	defer cancel()
@@ -153,14 +161,6 @@ func (e *LoaderCommandExecutor) ExecuteLoaderCommand(ctx context.Context, sessio
 		return domain.LoaderCommandResult{}, fmt.Errorf("write loader command request artifact: %w", err)
 	}
 
-	vmState, err := e.Store.GetVMState(session.Summary.ID)
-	if err != nil {
-		return domain.LoaderCommandResult{}, err
-	}
-	runtime, err := e.Runtimes.ForSession(session)
-	if err != nil {
-		return domain.LoaderCommandResult{}, err
-	}
 	streamWriter := func(chunk domain.ExecChunk) {
 		filtered, visible := execution.FilterCommandStreamChunk(chunk)
 		if !visible {

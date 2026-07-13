@@ -448,7 +448,7 @@ func (h *SandboxHandler) RemoveSandbox(ctx context.Context, req *connect.Request
 		reconciled, recErr := h.reconciler.ReconcileRuntimeState(ctx, session)
 		if recErr != nil {
 			slog.Warn("failed to reconcile sandbox runtime state before remove", "sandbox_id", sandboxID, "error", recErr)
-			return nil, connect.NewError(connect.CodeInternal, recErr)
+			return nil, ConnectErrorForDomain(recErr)
 		}
 		session = reconciled
 	}
@@ -466,7 +466,7 @@ func (h *SandboxHandler) RemoveSandbox(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("sandbox runtime remover is required"))
 	}
 	if err := h.remover.RemoveSandboxVM(ctx, session); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, ConnectErrorForDomain(err)
 	}
 	if err := h.store.RemoveSandbox(ctx, sandboxID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)

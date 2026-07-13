@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"agent-compose/pkg/capabilities"
 	"agent-compose/pkg/capability"
 	appconfig "agent-compose/pkg/config"
@@ -28,8 +30,14 @@ type fakeRPCSandboxDriver struct {
 	startCalls    []string
 	startSessions []*domain.Sandbox
 	onStart       func(*domain.Sandbox)
-	startErr      error
 	stopCalls     []string
+	validateErr   error
+	startErr      error
+	stopErr       error
+}
+
+func (d *fakeRPCSandboxDriver) ValidateSandboxRuntime(*domain.Sandbox) error {
+	return d.validateErr
 }
 
 func (d *fakeRPCSandboxDriver) StartSandboxVM(_ context.Context, session *domain.Sandbox) error {
@@ -43,7 +51,7 @@ func (d *fakeRPCSandboxDriver) StartSandboxVM(_ context.Context, session *domain
 
 func (d *fakeRPCSandboxDriver) StopSandboxVM(_ context.Context, session *domain.Sandbox) error {
 	d.stopCalls = append(d.stopCalls, session.Summary.ID)
-	return nil
+	return d.stopErr
 }
 
 type testCapabilityProvider struct {
@@ -233,6 +241,49 @@ func TestSandboxRPCBridgeCapabilityGuideLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(string(guide), "refreshed") {
 		t.Fatalf("capability guide content was not refreshed: %s", guide)
+	}
+}
+
+func TestSandboxRPCBridgeHistoricalUnsupportedRuntimeIsUnimplementedAndPreservesSummary(t *testing.T) {
+	ctx := context.Background()
+	bridge, driver := newTestSandboxRPCBridge(t)
+	unsupported := domain.ClassifyError(domain.ErrUnsupported, "", driverpkg.ErrRuntimeDriverNotCompiled)
+	session, err := bridge.store.CreateSandbox(ctx, "historical", "", driverpkg.RuntimeDriverMicrosandbox, "guest:latest", "", domain.SandboxTypeManual, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSandbox returned error: %v", err)
+	}
+	session.Summary.VMStatus = domain.VMStatusStopped
+	session.Summary.RuntimeRef = "original-runtime-ref"
+	if err := bridge.store.UpdateSandbox(ctx, session); err != nil {
+		t.Fatalf("UpdateSandbox returned error: %v", err)
+	}
+	driver.validateErr = unsupported
+
+	_, err = bridge.ResumeSandbox(ctx, session.Summary.ID)
+	if connect.CodeOf(err) != connect.CodeUnimplemented || !errors.Is(err, driverpkg.ErrRuntimeDriverNotCompiled) {
+		t.Fatalf("ResumeSandbox error = %v, code=%v; want unimplemented typed error", err, connect.CodeOf(err))
+	}
+	loaded, err := bridge.store.GetSandbox(ctx, session.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetSandbox after resume returned error: %v", err)
+	}
+	if loaded.Summary.VMStatus != domain.VMStatusStopped || loaded.Summary.Driver != driverpkg.RuntimeDriverMicrosandbox || loaded.Summary.RuntimeRef != "original-runtime-ref" {
+		t.Fatalf("unsupported resume changed summary: %#v", loaded.Summary)
+	}
+
+	driver.validateErr = nil
+	driver.stopErr = unsupported
+	loaded.Summary.VMStatus = domain.VMStatusRunning
+	if err := bridge.store.UpdateSandbox(ctx, loaded); err != nil {
+		t.Fatalf("UpdateSandbox running returned error: %v", err)
+	}
+	_, err = bridge.StopSandbox(ctx, session.Summary.ID)
+	if connect.CodeOf(err) != connect.CodeUnimplemented || !errors.Is(err, driverpkg.ErrRuntimeDriverNotCompiled) {
+		t.Fatalf("StopSandbox error = %v, code=%v; want unimplemented typed error", err, connect.CodeOf(err))
+	}
+	loaded, err = bridge.store.GetSandbox(ctx, session.Summary.ID)
+	if err != nil || loaded.Summary.VMStatus != domain.VMStatusRunning || loaded.Summary.RuntimeRef != "original-runtime-ref" {
+		t.Fatalf("unsupported stop changed summary: %#v, %v", loaded, err)
 	}
 }
 

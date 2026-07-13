@@ -213,6 +213,11 @@ func (r *LoaderSandboxRunner) LoadOrResume(ctx context.Context, sessionID string
 	if session.Summary.VMStatus == domain.VMStatusRunning {
 		return session, "", nil
 	}
+	if validator, ok := r.Driver.(sessions.SandboxRuntimeValidator); ok {
+		if err := validator.ValidateSandboxRuntime(session); err != nil {
+			return nil, "", err
+		}
+	}
 	if err := r.workspaceEnsurer.Ensure(ctx, session); err != nil {
 		return nil, "", err
 	}

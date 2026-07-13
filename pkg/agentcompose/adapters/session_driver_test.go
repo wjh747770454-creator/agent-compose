@@ -109,13 +109,20 @@ func (r fakeDriverRuntime) IsSandboxAlive(context.Context, *driverpkg.Sandbox, d
 
 type fakeRuntimeProvider struct {
 	runtime SandboxRuntime
+	err     error
 }
 
 func (p fakeRuntimeProvider) ForDriver(string) (SandboxRuntime, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
 	return p.runtime, nil
 }
 
 func (p fakeRuntimeProvider) ForSession(*domain.Sandbox) (SandboxRuntime, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
 	return p.runtime, nil
 }
 

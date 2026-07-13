@@ -29,15 +29,28 @@ func NewSandboxDriver(config *appconfig.Config, store *sessionstore.Store, confi
 	return &SandboxDriver{Config: config, Store: store, ConfigDB: configDB, Runtimes: runtimes}
 }
 
+func (d *SandboxDriver) runtimeForSession(session *domain.Sandbox) (string, SandboxRuntime, error) {
+	driver, err := driverpkg.ResolveSandboxRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
+	if err != nil {
+		return "", nil, err
+	}
+	runtime, err := d.Runtimes.ForDriver(driver)
+	if err != nil {
+		return "", nil, err
+	}
+	return driver, runtime, nil
+}
+
+func (d *SandboxDriver) ValidateSandboxRuntime(session *domain.Sandbox) error {
+	_, _, err := d.runtimeForSession(session)
+	return err
+}
+
 func (d *SandboxDriver) StartSandboxVM(ctx context.Context, session *domain.Sandbox) error {
 	ctx, cancel := context.WithTimeout(ctx, d.Config.SandboxStartTimeout)
 	defer cancel()
 
-	driver, err := driverpkg.ResolveSandboxRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
-	if err != nil {
-		return err
-	}
-	runtime, err := d.Runtimes.ForDriver(driver)
+	driver, runtime, err := d.runtimeForSession(session)
 	if err != nil {
 		return err
 	}
@@ -80,17 +93,12 @@ func (d *SandboxDriver) saveSandboxStartInfo(session *domain.Sandbox, vmState do
 }
 
 func (d *SandboxDriver) StopSandboxVM(ctx context.Context, session *domain.Sandbox) error {
-	driver, err := driverpkg.ResolveSandboxRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
+	driver, runtime, err := d.runtimeForSession(session)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, driverpkg.SandboxStopContextTimeout(driver, d.Config.SandboxStopTimeout))
 	defer cancel()
-
-	runtime, err := d.Runtimes.ForDriver(driver)
-	if err != nil {
-		return err
-	}
 
 	vmState, err := d.Store.GetVMState(session.Summary.ID)
 	if err != nil {
@@ -112,17 +120,12 @@ func (d *SandboxDriver) StopSandboxVM(ctx context.Context, session *domain.Sandb
 }
 
 func (d *SandboxDriver) RemoveSandboxVM(ctx context.Context, session *domain.Sandbox) error {
-	driver, err := driverpkg.ResolveSandboxRuntimeDriver(session.Summary.Driver, d.Config.RuntimeDriver)
+	driver, runtime, err := d.runtimeForSession(session)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, driverpkg.SandboxStopContextTimeout(driver, d.Config.SandboxStopTimeout))
 	defer cancel()
-
-	runtime, err := d.Runtimes.ForDriver(driver)
-	if err != nil {
-		return err
-	}
 	vmState, err := d.Store.GetVMState(session.Summary.ID)
 	if err != nil {
 		return err

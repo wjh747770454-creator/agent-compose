@@ -40,6 +40,9 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 	if message == "" {
 		return domain.NotebookCell{}, domain.SandboxEvent{}, domain.SandboxEvent{}, fmt.Errorf("message is required")
 	}
+	if err := e.runner.ValidateSessionRuntime(session); err != nil {
+		return domain.NotebookCell{}, domain.SandboxEvent{}, domain.SandboxEvent{}, err
+	}
 
 	agentTimeout := e.config.AgentTimeout
 	if request.Timeout > 0 {
