@@ -9,8 +9,8 @@
 - 当前变更：platform-runtime-build。
 - 已确认产物：macOS Docker-only binary、Linux 三 Driver binary、Linux 三 Driver multi-arch Docker image。
 - 发布边界：binary 只用于本地和 CI 验证，不进入 GitHub Release。
-- 当前进度：15/18 个父任务完成。
-- 当前下一目标：6.2 增加完整Image CI Smoke并保持发布合同。
+- 当前进度：16/18 个父任务完成。
+- 当前下一目标：7.1 同步英文/中文文档与Harness。
 
 ## 文档索引
 
@@ -638,7 +638,7 @@
       - focused/gate验证未创建Docker资源，label审计无container、network或volume残留；host smoke无残留进程/临时目录。系统中已有`/app/agent-compose daemon`容器进程保持不动，未纳入或改动用户状态。
     - 下一目标：6.2 增加完整Image CI Smoke并保持发布合同。
 
-- [ ] 6.2 增加完整 Image CI Smoke 并保持发布合同
+- [x] 6.2 增加完整 Image CI Smoke 并保持发布合同
   - 依赖：6.1。
   - 工作内容：
     - images workflow path filter加入docker-compose.kvm.yml。
@@ -647,9 +647,9 @@
     - 无KVM挂载Docker socket运行公开API sandbox lifecycle。
     - main/tag inspect manifest双arch；release只上传installer assets。
   - 可并行子任务：
-    - [ ] 可并行：image smoke job。
-    - [ ] 可并行：manifest/digest merge非回归。
-    - [ ] 可并行：release assets和installer payload审计。
+    - [x] 可并行：image smoke job。
+    - [x] 可并行：manifest/digest merge非回归。
+    - [x] 可并行：release assets和installer payload审计。
   - 测试方案：
     - task image:agent-compose
     - task test:e2e:image-docker
@@ -657,11 +657,25 @@
     - CI PR与main/tag workflow结果审计。
   - 验收标准：PR证明无KVM Docker路径；main/tag发布双arch full image；镜像metadata为三driver；Release无binary。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：7.1。
+    - 状态：已完成。
+    - 变更：
+      - `.github/workflows/images.yml`保留PR amd64、main/tag native amd64+arm64的push-by-digest矩阵、architecture-scoped GHA cache和1天digest handoff；非PR每个native `agent-compose` digest在对应runner pull后执行精确image verifier。
+      - 新增`image-smoke`：等待native build完成后以相同amd64 cache scopes和两个`docker/build-push-action@v6 load:true`步骤加载发布daemon/guest Dockerfile，先验证full image，再运行既有无KVM startup及公开API Docker sandbox create/exec/stop/resume/remove lifecycle；未请求privileged、device或KVM。
+      - manifest merge等待native build及image smoke，继续合并daemon与guest digest；新增`scripts/verify-image-manifest.sh`，在create后通过`imagetools inspect --raw`严格验证`linux/amd64`、`linux/arm64`精确集合，并只忽略标准`unknown/unknown` Buildx attestation descriptor。
+      - 新增`scripts/verify-agent-compose-image.sh`，验证image OS/arch、默认`RUNTIME_DRIVER=docker`、runtime path环境、精确三Driver JSON metadata、BoxLite/Microsandbox binaries/libs及默认container无privileged/device/`/dev/kvm`；容器名称/label隔离且仅在成功create后进入cleanup ownership。
+      - 为两个verifier增加完整fake-Docker失败矩阵；新增`scripts/test-image-ci-contract.sh`，真实dry-run setup matrix并审计native runner、digest、cache、loadable smoke、E2E输入、merge依赖、双arch manifest、KVM overlay path filter及tag-only installer Release无binary。setup job在生成matrix前执行该合同。
+    - 验证：
+      - `bash -n`覆盖五个新增image CI脚本及既有image E2E入口：通过；`test-verify-agent-compose-image.sh`、`test-verify-image-manifest.sh`、`test-image-ci-contract.sh`：通过。
+      - PyYAML解析`.github/workflows/images.yml`：通过；contract实际执行workflow setup shell，PR精确输出linux/amd64，push精确输出linux/amd64+linux/arm64 native runners。
+      - `REGISTRY_MIRROR=docker.m.daocloud.io task image:agent-compose`与`REGISTRY_MIRROR=docker.m.daocloud.io task image:agent-compose-guest`：通过；`verify-agent-compose-image.sh --image agent-compose:latest --arch amd64`通过，证明Linux amd64、Docker默认、三Driver、完整runtime artifact及无KVM。
+      - `task test:e2e:image-docker`：通过；`TestE2EImageDockerNoKVMStartup`和`TestE2EImageDockerSandboxLifecycle`真实运行，公开API lifecycle及资源清理均通过。
+      - `task lint`：通过，`0 issues`；`task build`：通过；`task test`：通过，coverage为unit `77.25%`、integration `65.96%`、E2E `61.84%`、combined `79.54%`；`git diff --check`：通过。
+    - 审计与例外：
+      - 三个read-only subagent分别复核full-image/no-KVM E2E、digest/manifest拓扑和matrix/cache/release/scope边界，Buildx cache调整后最终均PASS；digest artifact只含digest文件，Release继续精确发布standalone installer、installer tar和checksum，不含binary。
+      - 默认Docker Hub metadata请求两次在anonymous token阶段timeout；未改source默认，使用项目支持的`REGISTRY_MIRROR=docker.m.daocloud.io`完成两项image build。额外发布Dockerfile构造到GitHub Release artifact下载阶段后因github.com timeout停止，未关闭checksum、重写URL或留下partial image。
+      - 按用户要求本轮不检查远端CI/registry，因此真实`imagetools inspect`双arch证据留待18项完成后的最终CI审计；本地使用完整fake manifest矩阵证明parser及失败语义，workflow在main/tag create后直接运行同一verifier。
+      - 未修改Dockerfile、Taskfile、proto、SQLite schema、guest protocol、默认Docker driver、coverage baseline/exclusion、文档或暂停的Workspace Resume账本。最终label审计无verifier/E2E container、network或volume残留，无build进程或partial release-smoke image；已有用户Docker状态保持不动。
+    - 下一目标：7.1 同步英文/中文文档与Harness。
 
 ## 7. 文档、Harness 与最终验收
 
