@@ -9,8 +9,8 @@
 - 当前变更：platform-runtime-build。
 - 已确认产物：macOS Docker-only binary、Linux 三 Driver binary、Linux 三 Driver multi-arch Docker image。
 - 发布边界：binary 只用于本地和 CI 验证，不进入 GitHub Release。
-- 当前进度：9/18 个父任务完成。
-- 当前下一目标：4.1 让两个Dockerfile复用Linux full helper。
+- 当前进度：10/18 个父任务完成。
+- 当前下一目标：4.2 建立无KVM启动与Docker Sandbox image smoke。
 
 ## 文档索引
 
@@ -405,7 +405,7 @@
 
 参考：[实施计划阶段 4](docs/plan/platform-runtime-build-implementation-plan.md#阶段-4让本地与发布-dockerfile-使用同一-linux-full-profile)
 
-- [ ] 4.1 统一两个 Dockerfile 的 Linux Full Build
+- [x] 4.1 统一两个 Dockerfile 的 Linux Full Build
   - 依赖：3.3。
   - 工作内容：
     - Dockerfile的go-build stage复制统一helper/wrapper及BoxLite、Microsandbox preflight目录。
@@ -414,9 +414,9 @@
     - 保持agent-compose-artifact target、/out/agent-compose、最终runtime路径和RUNTIME_DRIVER=docker。
     - 增加镜像artifact存在性和权限构建断言。
   - 可并行子任务：
-    - [ ] 可并行：发布Dockerfile改造。
-    - [ ] 可并行：本地Dockerfile改造。
-    - [ ] 可并行：artifact target/path兼容审计。
+    - [x] 可并行：发布Dockerfile改造。
+    - [x] 可并行：本地Dockerfile改造。
+    - [x] 可并行：artifact target/path兼容审计。
   - 测试方案：
     - docker build --target agent-compose-artifact -f Dockerfile .
     - task image:agent-compose
@@ -424,11 +424,22 @@
     - 镜像内test检查BoxLite/Microsandbox binaries和libraries。
   - 验收标准：两个Dockerfile无内联profile参数；镜像报告Linux/目标arch/三driver；artifact target和最终路径兼容。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：4.2。
+    - 状态：已完成。
+    - 变更：
+      - 发布`Dockerfile`的`go-build` stage现在同时复制BoxLite与Microsandbox完整artifact到统一helper预期的`/app/build/{boxlite,microsandbox}`，并复制`build-agent-compose-binary.sh`与`with-go-toolchain.sh`；原内联CGO、GOOS/GOARCH、tags和BuildVersion ldflags组装替换为`--profile linux-full`调用。
+      - `Dockerfile.agent-compose-local`从`boxlite-local`、`microsandbox-local`两个build context复制同样目录形态，调用同一Linux full helper；保留`agent-compose-artifact`、`/out/agent-compose`与最终`/app/agent-compose`路径。
+      - 两个最终镜像stage都增加构建期断言：daemon、BoxLite guest/shim、Microsandbox msb/agentd必须可执行，FFI与libkrunfw必须非空；最终runtime复制路径、symlink语义、`RUNTIME_DRIVER=docker`、runtime环境路径和`LD_LIBRARY_PATH`保持不变。
+    - 验证：
+      - 使用已验证的本地amd64 artifact执行`docker build --target agent-compose-artifact -f Dockerfile.agent-compose-local --build-context boxlite-local=./build/boxlite --build-context microsandbox-local=./build/microsandbox .`（通过内部registry mirror解析基础镜像）：通过；helper完整preflight及Linux full CGO链接成功，兼容artifact target产出`/out/agent-compose`。
+      - `REGISTRY_MIRROR=registry-mirrors.dev.in.chaitin.net task image:agent-compose`：通过；构建日志确认同一`linux-full` helper与七项最终镜像断言全部执行成功。
+      - `docker run --rm agent-compose:latest --json version`：通过，精确报告`linux/amd64`及`docker,boxlite,microsandbox`；镜像内daemon、两个BoxLite binary、两个Microsandbox binary和两个library的独立`test`检查通过。
+      - 镜像config审计确认entrypoint、CMD、`RUNTIME_DRIVER=docker`、`BOXLITE_RUNTIME_DIR`、Microsandbox路径及`LD_LIBRARY_PATH`保持合同；`rg -n 'CGO_ENABLED|boxlitecgo|microsandboxcgo|-ldflags|go build' Dockerfile Dockerfile.agent-compose-local`无匹配，两个Dockerfile不再组装profile参数。
+      - 三个独立只读subagent分别审计发布Dockerfile、本地Dockerfile和artifact/runtime路径，均无阻塞发现；`task lint`通过且`0 issues`，`task build`通过，`task test`通过，Unit `77.25%`、Integration `65.96%`、E2E `61.84%`、Combined `79.54%`，`git diff --check`通过。
+    - 审计与例外：
+      - 原样执行发布`docker build --target agent-compose-artifact -f Dockerfile .`时，Docker Hub匿名token请求在30.8秒后以`dial tcp 69.171.247.71:443: i/o timeout`失败；改用可达内部registry mirror后已进入固定版本BoxLite与Microsandbox GitHub release下载stage，但两个`curl`持续超过120秒无进展，主动取消并保留具体stage与URL。发布下载链未被本地证据伪装为成功。
+      - 4.1修改release Dockerfile会按3.3合同使两套artifact stamp失配；确认artifact生产stage未修改、现有文件的amd64架构/非空/权限与libkrunfw symlink chain后，显式adopt新stamp，再由Task status与本地image build独立复验。clean环境无stamp仍必须真实export。
+      - 本任务没有实现4.2的无KVM daemon/API或Docker lifecycle E2E；未修改proto、SQLite schema、guest protocol、coverage baseline/exclusion、默认Driver、Compose、CI或暂停的Workspace Resume账本，按计划未检查远端CI。
+    - 下一目标：4.2 建立无KVM启动与Docker Sandbox image smoke。
 
 - [ ] 4.2 建立无 KVM 启动与 Docker Sandbox Image Smoke
   - 依赖：4.1。

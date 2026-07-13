@@ -20,6 +20,9 @@ COPY --from=golang-toolchain /usr/local/go /usr/local/go
 ENV PATH=/usr/local/go/bin:${PATH}
 WORKDIR /app
 COPY --from=boxlite-local / /app/build/boxlite
+COPY --from=microsandbox-local / /app/build/microsandbox
+COPY scripts/build-agent-compose-binary.sh scripts/build-agent-compose-binary.sh
+COPY scripts/with-go-toolchain.sh scripts/with-go-toolchain.sh
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go env -w GOPROXY="${GOPROXY}" && go mod download
@@ -31,7 +34,12 @@ ARG VERSION=0
 ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    target_arch="${TARGETARCH:-$(dpkg --print-architecture)}" && CGO_ENABLED=1 GOOS=linux GOARCH=${target_arch} go build -ldflags "-X agent-compose/pkg/config.BuildVersion=${VERSION}" -tags 'netgo,osusergo,boxlitecgo' -o /out/agent-compose ./cmd/agent-compose
+    target_arch="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+    ./scripts/build-agent-compose-binary.sh \
+      --profile linux-full \
+      --goarch "${target_arch}" \
+      --output /out/agent-compose \
+      --version "${VERSION}"
 
 FROM scratch AS agent-compose-artifact
 COPY --from=go-build /out/agent-compose /out/agent-compose
@@ -45,6 +53,13 @@ COPY --from=go-build /out/agent-compose /app/agent-compose
 RUN ln -sf /app/agent-compose /usr/local/bin/agent-compose
 COPY --from=boxlite-local /runtime /app/boxlite/runtime
 COPY --from=microsandbox-local / /app/microsandbox
+RUN test -x /app/agent-compose && \
+    test -x /app/boxlite/runtime/boxlite-guest && \
+    test -x /app/boxlite/runtime/boxlite-shim && \
+    test -x /app/microsandbox/bin/msb && \
+    test -x /app/microsandbox/bin/agentd && \
+    test -s /app/microsandbox/lib/libmicrosandbox_go_ffi.so && \
+    test -s /app/microsandbox/lib/libkrunfw.so
 ENV RUNTIME_DRIVER=docker
 ENV DATA_ROOT=/data
 ENV SANDBOX_ROOT=/data/sessions
