@@ -20,8 +20,8 @@
 
 - 已确认：resume 严格保持 sandbox workspace；旧 sandbox 原样迁移；首版无 reset API；真实 runtime 使用 Docker E2E。
 - 已完成文档：技术规格、实施计划。
-- 代码任务：17/20 完成。
-- 当前下一目标：6.1 审计依赖、调用点和范围边界。
+- 代码任务：18/20 完成。
+- 当前下一目标：6.2 执行完整 harness 质量门禁。
 
 ## 执行规则
 
@@ -671,7 +671,7 @@
 
 参考：[实施计划阶段 6](docs/plan/workspace-resume-preservation-implementation-plan.md#阶段-6全量门禁和交付收口)
 
-- [ ] 6.1 审计依赖、调用点和范围边界
+- [x] 6.1 审计依赖、调用点和范围边界
   - 依赖：5.4。
   - 工作内容：
     - 运行 `go mod tidy` 并审计 go.mod/go.sum，只接受 singleflight 所需的直接依赖排序变化。
@@ -679,17 +679,27 @@
     - 审计 diff 不含 proto/generated client、SQLite、compose、公开 CLI、环境变量、runtime mount 或三 driver E2E 扩张。
     - 对所有已审阅但保留的命中写入完成总结“审计与例外”。
   - 可并行子任务：
-    - [ ] 可并行：依赖 diff 审计。
-    - [ ] 可并行：生产调用点审计。
-    - [ ] 可并行：公开接口/部署范围审计。
+    - [x] 可并行：依赖 diff 审计。
+    - [x] 可并行：生产调用点审计。
+    - [x] 可并行：公开接口/部署范围审计。
   - 测试方案：`go mod tidy` 后运行 `git diff --check`、相关 `rg` 查询和 `./scripts/with-go-toolchain.sh go test ./pkg/workspaces ./pkg/agentcompose/app -count=1`。
   - 验收标准：无双轨 materialization、无范围外文件、无无法解释的依赖变化；所有例外有证据和理由。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：6.2。
+    - 状态：已完成，代码任务 18/20。
+    - 变更：本任务仅完成依赖、production workspace preparation/resume、constructor/DI 和公开接口/部署范围审计；无产品代码变更。
+    - 验证：
+      - 在 detached clean worktree 对 `51b900e` 运行 `go mod tidy`：通过，`go.mod`/`go.sum` 与运行前字节一致；主工作区运行前后模块文件 SHA-256 也保持 `c8f19d61b74184a8a579394c900db016d916e3f2685e677ef49102e4c4f7264b` 和 `e891e7714f925d6009989afd049b5d5d288c0cb85e70c6b6dc80eb2be79cfcee`。
+      - `./scripts/with-go-toolchain.sh go mod verify`、`GOFLAGS=-mod=readonly` 的 module listing 和 `./pkg/workspaces ./pkg/agentcompose/app` dependency listing：通过。
+      - `./scripts/with-go-toolchain.sh go test ./pkg/workspaces ./pkg/agentcompose/app -count=1`：通过；额外的 Session/Adapter/Run WorkspaceEnsurer focused tests 同样通过。
+      - `rg` 确认 `PrepareSessionWorkspace(`、`HostWorkspaceInitialized(` 零命中，private `materializeSessionWorkspace` 仅由 Provisioner adapter 调用；`git diff --check` 和 workspace 实现范围 `git diff --check 8c59a9d..HEAD` 通过。
+    - 审计与例外：
+      - `x/sync v0.20.0` 因 `singleflight` 从 indirect 规范化为 direct；`x/net v0.55.0` 因既有 `http2/h2c` direct imports 同样规范化为 direct；`x/text` 仅词法排序，陈旧 `x/sys v0.45.0` sums 被删除而选中版本仍为 `v0.47.0`，无版本变化或新增 module。
+      - 主工作区 plain `go mod tidy` 仅因两个 ignored、root-owned、mode-0700 的 `data/skills/*` 目录无法遍历而失败；未改动部署数据，改用无 ignored data 的 clean worktree 取得真实 tidy 通过和模块文件 byte-identical 证据。
+      - 唯一 production materialization 经 Provisioner 的 attempt staging 执行；v1 create/resume、Jupyter、Loader create/sticky resume 和 Project Run 均由同一 singleton Ensurer 在 driver start 前把关。保留的 run source snapshot、managed home/skills copy、runtime mount source validation 和 focused provider test 直接调用均不写既有 sandbox workspace，不构成双轨入口。
+      - restricted artifact 审计确认未修改 proto/generated client、SQLite schema、公开 CLI/产品环境变量、compose/image、runtime driver/mount、proxy、CI，且未增加 BoxLite/Microsandbox provisioning E2E；唯一 `cmd` 变更是 5.4 已审计的 Docker scheduler E2E cleanup。
+      - `docs/spec/dynamic-workflow-spec.md` 来自 workspace 实现前的独立用户提交 `8c59a9d`，不属于本实现范围并保持原样；其 EOF 空行导致 branch-wide `git diff --check f7a7b611...HEAD` 唯一 retained hit，而 workspace 实现范围及本任务 diff 无 whitespace finding。
+      - 三项并行审计和独立只读最终审计均为 PASS，无其他例外或未运行的 6.1 门禁。
+    - 下一目标：6.2 执行完整 harness 质量门禁。
 
 - [ ] 6.2 执行完整 harness 质量门禁
   - 依赖：6.1。
