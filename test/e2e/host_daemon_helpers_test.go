@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -142,7 +143,7 @@ func newE2EHTTPClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second, Transport: transport}
 }
 
-func newE2EDockerClient(t *testing.T, ctx context.Context, image string) *client.Client {
+func newE2EDockerClient(t *testing.T, ctx context.Context, images ...string) *client.Client {
 	t.Helper()
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -152,9 +153,11 @@ func newE2EDockerClient(t *testing.T, ctx context.Context, image string) *client
 		_ = dockerClient.Close()
 		t.Fatalf("Docker daemon is required: %v", err)
 	}
-	if _, err := dockerClient.ImageInspect(ctx, image); err != nil {
-		_ = dockerClient.Close()
-		t.Fatalf("Docker E2E image %q is required: %v", image, err)
+	for _, image := range images {
+		if _, err := dockerClient.ImageInspect(ctx, image); err != nil {
+			_ = dockerClient.Close()
+			t.Fatalf("Docker image %q is required: %v", image, err)
+		}
 	}
 	t.Cleanup(func() {
 		if err := dockerClient.Close(); err != nil {
@@ -162,6 +165,34 @@ func newE2EDockerClient(t *testing.T, ctx context.Context, image string) *client
 		}
 	})
 	return dockerClient
+}
+
+func inspectE2EDockerSandboxContainer(t *testing.T, ctx context.Context, dockerClient *client.Client, sandboxID string) containerapi.InspectResponse {
+	t.Helper()
+	containerInfo, err := findE2EDockerSandboxContainer(ctx, dockerClient, sandboxID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return containerInfo
+}
+
+func findE2EDockerSandboxContainer(ctx context.Context, dockerClient *client.Client, sandboxID string) (containerapi.InspectResponse, error) {
+	args := filters.NewArgs(
+		filters.Arg("label", "agent-compose.sandbox_id="+sandboxID),
+		filters.Arg("label", "agent-compose.driver=docker"),
+	)
+	containers, err := dockerClient.ContainerList(ctx, containerapi.ListOptions{All: true, Filters: args})
+	if err != nil {
+		return containerapi.InspectResponse{}, fmt.Errorf("list Docker sandbox containers: %w", err)
+	}
+	if len(containers) != 1 {
+		return containerapi.InspectResponse{}, fmt.Errorf("Docker sandbox container count = %d, want 1", len(containers))
+	}
+	containerInfo, err := dockerClient.ContainerInspect(ctx, containers[0].ID)
+	if err != nil {
+		return containerapi.InspectResponse{}, fmt.Errorf("inspect Docker sandbox container: %w", err)
+	}
+	return containerInfo, nil
 }
 
 func removeE2EDockerSandboxFallback(t *testing.T, ctx context.Context, dockerClient *client.Client, sandboxID string) {

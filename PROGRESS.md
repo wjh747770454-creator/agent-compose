@@ -9,8 +9,8 @@
 - 当前变更：platform-runtime-build。
 - 已确认产物：macOS Docker-only binary、Linux 三 Driver binary、Linux 三 Driver multi-arch Docker image。
 - 发布边界：binary 只用于本地和 CI 验证，不进入 GitHub Release。
-- 当前进度：10/18 个父任务完成。
-- 当前下一目标：4.2 建立无KVM启动与Docker Sandbox image smoke。
+- 当前进度：11/18 个父任务完成。
+- 当前下一目标：5.1 拆分基础Compose与KVM overlay。
 
 ## 文档索引
 
@@ -441,7 +441,7 @@
       - 本任务没有实现4.2的无KVM daemon/API或Docker lifecycle E2E；未修改proto、SQLite schema、guest protocol、coverage baseline/exclusion、默认Driver、Compose、CI或暂停的Workspace Resume账本，按计划未检查远端CI。
     - 下一目标：4.2 建立无KVM启动与Docker Sandbox image smoke。
 
-- [ ] 4.2 建立无 KVM 启动与 Docker Sandbox Image Smoke
+- [x] 4.2 建立无 KVM 启动与 Docker Sandbox Image Smoke
   - 依赖：4.1。
   - 工作内容：
     - 新增无/dev/kvm的daemon startup和/api/version smoke。
@@ -449,9 +449,9 @@
     - 复用test/e2e公共断言，不复制产品实现。
     - 注册task test:e2e:image-docker，明确guest image和Docker前置检查。
   - 可并行子任务：
-    - [ ] 可并行：无KVM daemon/version smoke。
-    - [ ] 可并行：Docker sandbox lifecycle E2E。
-    - [ ] 可并行：Task入口、清理和泄漏审计。
+    - [x] 可并行：无KVM daemon/version smoke。
+    - [x] 可并行：Docker sandbox lifecycle E2E。
+    - [x] 可并行：Task入口、清理和泄漏审计。
   - 测试方案：
     - task image:agent-compose
     - task test:e2e:image-docker
@@ -459,11 +459,24 @@
     - 有KVM时追加task test:runtime-smoke。
   - 验收标准：full image不映射KVM即可启动和使用Docker；未调用BoxLite/Microsandbox初始化；E2E失败保留诊断且清理资源。
   - 完成总结：
-    - 状态：待完成。
-    - 变更：待完成。
-    - 验证：待完成。
-    - 审计与例外：待完成。
-    - 下一目标：5.1。
+    - 状态：已完成。
+    - 变更：
+      - 用真实`TestE2EImageDockerNoKVMStartup`替换原伪造Echo version smoke：先通过未改entrypoint的一次性`--json version`断言四字段build metadata，再以镜像默认CMD和唯一`RUNTIME_DRIVER=docker`启动daemon；fresh `/data` tmpfs不挂Docker socket、不启用privileged、不映射device/KVM，外部轮询`/api/version`并断言Linux、目标arch、三Driver及原时间字段。
+      - 新增`TestE2EImageDockerSandboxLifecycle`：containerized daemon只挂可配置本地Docker socket和测试专属data volume，接入唯一bridge network；通过公开v1 `CreateSession`、v2 `Exec`、v1 `StopSession`/`ResumeSession`、v2 `RemoveSandbox(force=true)`完成create/exec/stop/resume/exec/remove，断言同一Docker container恢复、workspace marker持久、force remove同时stopped/removed且历史API返回not found。
+      - 两个case都检查daemon非privileged、无device/KVM挂载且`/dev/kvm`不存在；startup额外确认无Docker socket，lifecycle确认socket精确bind。fresh BoxLite/Microsandbox home在startup和完整Docker lifecycle后均保持空，结合既有lazy-construction unit回归证明未调用native初始化。
+      - 新增`scripts/test-image-docker-e2e.sh`和`task test:e2e:image-docker`：显式preflight本地Unix socket、Docker daemon及daemon/guest镜像，不隐式pull；以task-run label隔离资源，失败保留daemon/sandbox inspect+logs及network/volume诊断，EXIT/INT/TERM清理专属network上的未继承label guest，并在前后审计container/network/volume泄漏。
+      - `TESTING.md`记录opt-in入口、默认镜像/socket、override和普通coverage隔离；静态Task合同进入unit shape。共享Docker E2E helper提取可返回错误的sandbox container查找及多镜像preflight，原host Jupyter case继续复用。
+    - 验证：
+      - `task test:e2e:image-docker`：通过；`TestE2EImageDockerNoKVMStartup`包含一次性JSON version、默认Docker daemon/API、无socket/KVM/native-init断言，`TestE2EImageDockerSandboxLifecycle`完成公开API全生命周期、同container resume与workspace持久性断言；最终container/network/volume label审计全部为空。
+      - `bash -n scripts/test-image-docker-e2e.sh`、`task --dry test:e2e:image-docker`、env未设置时两个real case compile/skip、`TestImageDockerTaskContract` unit回归和`git diff --check`：通过。
+      - 三个独立subagent分别审计startup/version、公开API lifecycle和Task/cleanup，提出的RPC timeout、JSON/default-driver证据、诊断、test-shape、interrupt cleanup与并发label问题全部修复；最终三方复审均通过且无阻塞项。
+      - `task lint`：通过，`0 issues`；`task build`：通过；`task test`：通过，Unit `77.23%`、Integration `65.96%`、E2E `61.84%`、Combined `79.54%`，满足原门禁且普通coverage未接触Docker。
+      - `/dev/kvm`存在时通过`sg kvm`验证：Microsandbox stop/resume和directory-only mount smoke通过，OCI消费case因未设置`SMOKE_OCI_IMAGE_REF`按合同明确skip；测试资源清理后无4.2 label container、network或volume遗留。
+    - 审计与例外：
+      - 完成代码后执行`REGISTRY_MIRROR=registry-mirrors.dev.in.chaitin.net task image:agent-compose`，两套artifact均up to date，但BuildKit在`load metadata for .../golang:1-alpine`持续超过120秒无进展后主动取消，退出130。4.2未修改Dockerfile或production Go源码；本任务focused E2E使用4.1已成功构建并逐项验证的`agent-compose:latest` full image，未把本次外部metadata阻塞伪装为成功rebuild。
+      - KVM full smoke在BoxLite已完成本地OCI materialization并启动box后，SDK内部访问`https://index.docker.io/v2/library/debian/manifests/bookworm-slim`失败；任务在首个BoxLite case退出，随后独立Microsandbox三case验证如上。没有改写pull、skip、coverage或fallback语义规避外部网络。
+      - 删除的`api_smoke_test.go`只注册临时Echo handler，核心E2E规格已明确其不代表production daemon；真实image/API smoke取代该间接证据。未修改proto、SQLite schema、guest protocol、coverage baseline/exclusion、默认Driver、Compose、CI或暂停的Workspace Resume账本，按计划未检查远端CI。
+    - 下一目标：5.1 拆分基础Compose与KVM overlay。
 
 ## 5. Compose 与 Installer KVM 部署能力
 

@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	containerapi "github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 
@@ -153,21 +151,7 @@ func TestE2EDockerJupyterHostDaemonStopResume(t *testing.T) {
 
 func inspectE2EDockerJupyterPort(t *testing.T, ctx context.Context, dockerClient *client.Client, sandboxID string, guestPort int) (string, int) {
 	t.Helper()
-	args := filters.NewArgs(
-		filters.Arg("label", "agent-compose.sandbox_id="+sandboxID),
-		filters.Arg("label", "agent-compose.driver=docker"),
-	)
-	containers, err := dockerClient.ContainerList(ctx, containerapi.ListOptions{All: true, Filters: args})
-	if err != nil {
-		t.Fatalf("list Docker sandbox containers: %v", err)
-	}
-	if len(containers) != 1 {
-		t.Fatalf("Docker sandbox container count = %d, want 1", len(containers))
-	}
-	containerInfo, err := dockerClient.ContainerInspect(ctx, containers[0].ID)
-	if err != nil {
-		t.Fatalf("inspect Docker sandbox container: %v", err)
-	}
+	containerInfo := inspectE2EDockerSandboxContainer(t, ctx, dockerClient, sandboxID)
 	if containerInfo.NetworkSettings == nil {
 		t.Fatal("Docker sandbox has no network settings")
 	}

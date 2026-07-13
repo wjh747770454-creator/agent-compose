@@ -157,6 +157,12 @@ tasks:
           GOCACHE={{.GO_BUILD_CACHE_DIR}} \
           {{.GO_TOOLCHAIN_ENV}} go test -tags docker_e2e ./cmd/agent-compose -run '^TestE2EDockerSchedulerScriptHelloWorldFlow$' -count=1 -v
 
+  test:e2e:image-docker:
+    desc: Run the full daemon image without KVM and exercise a Docker sandbox lifecycle
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - GOCACHE={{.GO_BUILD_CACHE_DIR}} ./scripts/test-image-docker-e2e.sh
+
   test:runtime-smoke:
     desc: Run opt-in real BoxLite/Microsandbox runtime smoke tests
     dir: '{{.TASKFILE_DIR}}'
