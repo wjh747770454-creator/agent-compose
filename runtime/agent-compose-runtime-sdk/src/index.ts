@@ -1,5 +1,7 @@
 export { agent } from "./agent.js";
 export type { RuntimeAgentOptions, RuntimeAgentOutputSchema, RuntimeAgentResult } from "./agent.js";
+export { delegate, reportDelegationTakeover } from "./delegate.js";
+export type { RuntimeDelegateOptions, RuntimeDelegateOutputSchema, RuntimeDelegateResult, RuntimeDelegationError } from "./delegate.js";
 export { env, paths } from "./env.js";
 export type { RuntimePaths } from "./env.js";
 export { CommandError, exec, shell } from "./exec.js";
@@ -14,6 +16,7 @@ export { ssh } from "./ssh.js";
 export type { RuntimeSshConfig, RuntimeSshPrepareOptions } from "./ssh.js";
 
 import { agent } from "./agent.js";
+import { delegate, reportDelegationTakeover } from "./delegate.js";
 import { env, paths } from "./env.js";
 import { exec, shell } from "./exec.js";
 import { llm } from "./llm.js";
@@ -25,6 +28,8 @@ export const runtime = {
   exec,
   shell,
   agent,
+  delegate,
+  reportDelegationTakeover,
   llm,
   env,
   paths,

@@ -73,6 +73,11 @@ func (s *projectStore) ensureProjectSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_project_scheduler_managed_loader ON project_scheduler(managed_loader_id);`,
 		`CREATE TABLE IF NOT EXISTS project_run (
 			run_id TEXT PRIMARY KEY,
+			parent_run_id TEXT NOT NULL DEFAULT '',
+			root_run_id TEXT NOT NULL DEFAULT '',
+			delegation_id TEXT NOT NULL DEFAULT '',
+			delegation_attempt INTEGER NOT NULL DEFAULT 0,
+			delegation_reason TEXT NOT NULL DEFAULT '',
 			project_id TEXT NOT NULL,
 			project_name TEXT NOT NULL DEFAULT '',
 			project_revision INTEGER NOT NULL DEFAULT 0,
@@ -88,6 +93,7 @@ func (s *projectStore) ensureProjectSchema(ctx context.Context) error {
 			prompt TEXT NOT NULL DEFAULT '',
 			output TEXT NOT NULL DEFAULT '',
 			result_json TEXT NOT NULL DEFAULT '',
+			structured_result_json TEXT NOT NULL DEFAULT '',
 			logs_path TEXT NOT NULL DEFAULT '',
 			artifacts_dir TEXT NOT NULL DEFAULT '',
 			cleanup_error TEXT NOT NULL DEFAULT '',
@@ -133,6 +139,9 @@ func (s *projectStore) ensureProjectSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_project_agent_id ON project_agent(id);`,
 		`CREATE INDEX IF NOT EXISTS idx_project_scheduler_id ON project_scheduler(id);`,
 		`CREATE INDEX IF NOT EXISTS idx_project_run_sandbox ON project_run(sandbox_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_project_run_parent ON project_run(parent_run_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_project_run_root ON project_run(root_run_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_project_run_delegation ON project_run(delegation_id, delegation_attempt);`,
 		`CREATE INDEX IF NOT EXISTS idx_project_run_event_sequence ON project_run_event(run_id, seq);`,
 	}
 	for _, stmt := range indexStatements {
@@ -195,6 +204,12 @@ func (s *projectStore) ensureProjectColumns(ctx context.Context) error {
 		definition string
 	}{
 		{name: "sandbox_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "parent_run_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "root_run_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "delegation_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "delegation_attempt", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "delegation_reason", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "structured_result_json", definition: "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, column := range runColumns {
 		if err := ensureColumn(ctx, s.db, "project_run", column.name, column.definition); err != nil {

@@ -14,14 +14,19 @@ import (
 )
 
 type StartRequest struct {
-	ProjectID       string
-	AgentName       string
-	Source          string
-	SchedulerID     string
-	TriggerID       string
-	Prompt          string
-	Driver          string
-	ClientRequestID string
+	ProjectID         string
+	AgentName         string
+	ParentRunID       string
+	RootRunID         string
+	DelegationID      string
+	DelegationAttempt int
+	DelegationReason  string
+	Source            string
+	SchedulerID       string
+	TriggerID         string
+	Prompt            string
+	Driver            string
+	ClientRequestID   string
 }
 
 type TransitionRequest struct {
@@ -32,6 +37,7 @@ type TransitionRequest struct {
 	Error                  string
 	Output                 string
 	ResultJSON             string
+	StructuredResultJSON   string
 	LogsPath               string
 	ArtifactsDir           string
 	CleanupError           string
@@ -98,6 +104,10 @@ func (c *Coordinator) BeginRun(ctx context.Context, req StartRequest) (domain.Pr
 	}
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	req.AgentName = strings.TrimSpace(req.AgentName)
+	req.ParentRunID = strings.TrimSpace(req.ParentRunID)
+	req.RootRunID = strings.TrimSpace(req.RootRunID)
+	req.DelegationID = strings.TrimSpace(req.DelegationID)
+	req.DelegationReason = strings.TrimSpace(req.DelegationReason)
 	req.Source = NormalizeSource(req.Source)
 	req.SchedulerID = strings.TrimSpace(req.SchedulerID)
 	req.TriggerID = strings.TrimSpace(req.TriggerID)
@@ -139,20 +149,28 @@ func (c *Coordinator) BeginRun(ctx context.Context, req StartRequest) (domain.Pr
 		return domain.ProjectRunRecord{}, err
 	}
 	run := domain.ProjectRunRecord{
-		RunID:           runID,
-		ProjectID:       project.ID,
-		ProjectName:     project.Name,
-		ProjectRevision: project.CurrentRevision,
-		AgentName:       projectAgent.AgentName,
-		ManagedAgentID:  agent.ID,
-		Source:          req.Source,
-		SchedulerID:     req.SchedulerID,
-		TriggerID:       req.TriggerID,
-		Status:          domain.ProjectRunStatusPending,
-		Prompt:          req.Prompt,
-		Driver:          driver,
-		ImageRef:        firstNonEmpty(agent.GuestImage, projectAgent.Image),
-		ResultJSON:      "{}",
+		RunID:             runID,
+		ParentRunID:       req.ParentRunID,
+		RootRunID:         req.RootRunID,
+		DelegationID:      req.DelegationID,
+		DelegationAttempt: req.DelegationAttempt,
+		DelegationReason:  req.DelegationReason,
+		ProjectID:         project.ID,
+		ProjectName:       project.Name,
+		ProjectRevision:   project.CurrentRevision,
+		AgentName:         projectAgent.AgentName,
+		ManagedAgentID:    agent.ID,
+		Source:            req.Source,
+		SchedulerID:       req.SchedulerID,
+		TriggerID:         req.TriggerID,
+		Status:            domain.ProjectRunStatusPending,
+		Prompt:            req.Prompt,
+		Driver:            driver,
+		ImageRef:          firstNonEmpty(agent.GuestImage, projectAgent.Image),
+		ResultJSON:        "{}",
+	}
+	if run.ParentRunID == "" {
+		run.RootRunID = run.RunID
 	}
 	var initialEvents []domain.ProjectRunEventRecord
 	if strings.TrimSpace(run.Prompt) != "" {
@@ -261,6 +279,9 @@ func applyProjectRunTransitionFields(run *domain.ProjectRunRecord, req Transitio
 	}
 	if value := strings.TrimSpace(req.ResultJSON); value != "" {
 		run.ResultJSON = value
+	}
+	if value := strings.TrimSpace(req.StructuredResultJSON); value != "" {
+		run.StructuredResultJSON = value
 	}
 	if value := strings.TrimSpace(req.LogsPath); value != "" {
 		run.LogsPath = value

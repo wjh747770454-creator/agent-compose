@@ -57,6 +57,19 @@ func TestRunsCoordinatorAndHelperWorkflows(t *testing.T) {
 	if run.Status != domain.ProjectRunStatusPending || run.Driver != "docker" || run.ImageRef != "guest:latest" {
 		t.Fatalf("run = %#v", run)
 	}
+	if run.RootRunID != run.RunID || run.ParentRunID != "" {
+		t.Fatalf("top-level run lineage = %#v", run)
+	}
+	child, err := coord.BeginRun(ctx, StartRequest{
+		ProjectID: "project-1", AgentName: "worker", Source: domain.ProjectRunSourceAPI, ClientRequestID: "request-child",
+		ParentRunID: run.RunID, RootRunID: run.RootRunID, DelegationID: "delegation-1", DelegationAttempt: 1, DelegationReason: "analyze project intelligence",
+	})
+	if err != nil {
+		t.Fatalf("BeginRun child returned error: %v", err)
+	}
+	if child.ParentRunID != run.RunID || child.RootRunID != run.RunID || child.DelegationID != "delegation-1" || child.DelegationAttempt != 1 {
+		t.Fatalf("child run lineage = %#v", child)
+	}
 	if existing, err := coord.BeginRun(ctx, StartRequest{ProjectID: "project-1", AgentName: "worker", Source: domain.ProjectRunSourceAPI, ClientRequestID: "request-1"}); err != nil || existing.RunID != run.RunID {
 		t.Fatalf("idempotent BeginRun existing=%#v err=%v", existing, err)
 	}
@@ -357,6 +370,16 @@ func TestTransitionFromAgentCellShapesSuccessfulAgentOutput(t *testing.T) {
 	}
 	if !strings.Contains(transition.Output, "只读确认：dev capset 可用") {
 		t.Fatalf("transition output lost final answer: %q", transition.Output)
+	}
+}
+
+func TestPromoteStructuredResult(t *testing.T) {
+	transition, err := promoteStructuredResult(TransitionRequest{RunID: "run-1", Output: `{"project":"mobile"}`}, `{"type":"object"}`)
+	if err != nil || transition.StructuredResultJSON != `{"project":"mobile"}` {
+		t.Fatalf("promote structured result transition=%#v err=%v", transition, err)
+	}
+	if _, err := promoteStructuredResult(TransitionRequest{RunID: "run-1", Output: "not-json"}, `{"type":"object"}`); err == nil {
+		t.Fatalf("expected invalid structured output error")
 	}
 }
 
