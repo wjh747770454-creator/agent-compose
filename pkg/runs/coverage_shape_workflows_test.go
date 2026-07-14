@@ -1601,7 +1601,23 @@ type controllerRunFixture struct {
 	driver     *fakeControllerDriver
 	executor   *fakeControllerExecutor
 	dashboard  *fakeControllerDashboard
+	capTokens  *fakeControllerCapabilityTokens
 	controller *Controller
+}
+
+type fakeControllerCapabilityTokens struct {
+	indexed []*domain.Sandbox
+	revoked []string
+}
+
+func (f *fakeControllerCapabilityTokens) IndexSandbox(sandbox *domain.Sandbox) {
+	if sandbox != nil {
+		f.indexed = append(f.indexed, sandbox)
+	}
+}
+
+func (f *fakeControllerCapabilityTokens) RevokeSandbox(sandboxID string) {
+	f.revoked = append(f.revoked, sandboxID)
 }
 
 func newControllerRunFixture(t *testing.T) *controllerRunFixture {
@@ -1634,6 +1650,7 @@ func newControllerRunFixture(t *testing.T) *controllerRunFixture {
 	driver := &fakeControllerDriver{store: store}
 	executor := &fakeControllerExecutor{}
 	dashboard := &fakeControllerDashboard{}
+	capTokens := &fakeControllerCapabilityTokens{}
 	controller := NewController(ControllerDependencies{
 		Config:           config,
 		Store:            store,
@@ -1644,6 +1661,7 @@ func newControllerRunFixture(t *testing.T) *controllerRunFixture {
 		Images:           fakeControllerImages{},
 		LoaderEngine:     &loaders.QJSLoaderEngine{},
 		Dashboard:        dashboard,
+		CapTokens:        capTokens,
 	})
 	return &controllerRunFixture{
 		ctx:        ctx,
@@ -1653,7 +1671,36 @@ func newControllerRunFixture(t *testing.T) *controllerRunFixture {
 		driver:     driver,
 		executor:   executor,
 		dashboard:  dashboard,
+		capTokens:  capTokens,
 		controller: controller,
+	}
+}
+
+func TestRunsControllerIndexesCapabilityTokenForProjectRunSandbox(t *testing.T) {
+	fixture := newControllerRunFixture(t)
+	run, execErr, err := fixture.controller.RunProjectAgent(fixture.ctx, RunAgentRequest{
+		ProjectID:       "project-1",
+		AgentName:       "worker",
+		Prompt:          "do work",
+		Source:          domain.ProjectRunSourceAPI,
+		ClientRequestID: uuidForTest(t.Name()),
+		CleanupPolicy:   agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_KEEP_RUNNING,
+	}, nil)
+	if err != nil || execErr != nil {
+		t.Fatalf("RunProjectAgent err=%v execErr=%v run=%#v", err, execErr, run)
+	}
+	if len(fixture.capTokens.indexed) != 1 {
+		t.Fatalf("indexed sandboxes = %d, want 1", len(fixture.capTokens.indexed))
+	}
+	indexed := fixture.capTokens.indexed[0]
+	if indexed.Summary.ID != run.SandboxID || indexed.Summary.VMStatus != domain.VMStatusRunning {
+		t.Fatalf("indexed sandbox = %#v, run sandbox = %q", indexed.Summary, run.SandboxID)
+	}
+	if err := fixture.controller.stopProjectRunSandbox(fixture.ctx, indexed); err != nil {
+		t.Fatalf("stopProjectRunSandbox returned error: %v", err)
+	}
+	if len(fixture.capTokens.revoked) != 1 || fixture.capTokens.revoked[0] != run.SandboxID {
+		t.Fatalf("revoked sandboxes = %#v, want %q", fixture.capTokens.revoked, run.SandboxID)
 	}
 }
 
