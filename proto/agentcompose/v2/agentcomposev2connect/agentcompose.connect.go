@@ -41,6 +41,8 @@ const (
 	SettingsServiceName = "agentcompose.v2.SettingsService"
 	// CapabilityServiceName is the fully-qualified name of the CapabilityService service.
 	CapabilityServiceName = "agentcompose.v2.CapabilityService"
+	// LLMServiceName is the fully-qualified name of the LLMService service.
+	LLMServiceName = "agentcompose.v2.LLMService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -215,6 +217,8 @@ const (
 	// CapabilityServiceGetCapabilityCatalogProcedure is the fully-qualified name of the
 	// CapabilityService's GetCapabilityCatalog RPC.
 	CapabilityServiceGetCapabilityCatalogProcedure = "/agentcompose.v2.CapabilityService/GetCapabilityCatalog"
+	// LLMServiceGenerateProcedure is the fully-qualified name of the LLMService's Generate RPC.
+	LLMServiceGenerateProcedure = "/agentcompose.v2.LLMService/Generate"
 )
 
 // ProjectServiceClient is a client for the agentcompose.v2.ProjectService service.
@@ -2202,4 +2206,74 @@ func (UnimplementedCapabilityServiceHandler) ListCapabilitySets(context.Context,
 
 func (UnimplementedCapabilityServiceHandler) GetCapabilityCatalog(context.Context, *connect.Request[v2.GetCapabilityCatalogRequest]) (*connect.Response[v2.GetCapabilityCatalogResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.CapabilityService.GetCapabilityCatalog is not implemented"))
+}
+
+// LLMServiceClient is a client for the agentcompose.v2.LLMService service.
+type LLMServiceClient interface {
+	Generate(context.Context, *connect.Request[v2.GenerateLLMRequest]) (*connect.Response[v2.GenerateLLMResponse], error)
+}
+
+// NewLLMServiceClient constructs a client for the agentcompose.v2.LLMService service. By default,
+// it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and
+// sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC()
+// or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewLLMServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) LLMServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	lLMServiceMethods := v2.File_agentcompose_v2_agentcompose_proto.Services().ByName("LLMService").Methods()
+	return &lLMServiceClient{
+		generate: connect.NewClient[v2.GenerateLLMRequest, v2.GenerateLLMResponse](
+			httpClient,
+			baseURL+LLMServiceGenerateProcedure,
+			connect.WithSchema(lLMServiceMethods.ByName("Generate")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// lLMServiceClient implements LLMServiceClient.
+type lLMServiceClient struct {
+	generate *connect.Client[v2.GenerateLLMRequest, v2.GenerateLLMResponse]
+}
+
+// Generate calls agentcompose.v2.LLMService.Generate.
+func (c *lLMServiceClient) Generate(ctx context.Context, req *connect.Request[v2.GenerateLLMRequest]) (*connect.Response[v2.GenerateLLMResponse], error) {
+	return c.generate.CallUnary(ctx, req)
+}
+
+// LLMServiceHandler is an implementation of the agentcompose.v2.LLMService service.
+type LLMServiceHandler interface {
+	Generate(context.Context, *connect.Request[v2.GenerateLLMRequest]) (*connect.Response[v2.GenerateLLMResponse], error)
+}
+
+// NewLLMServiceHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewLLMServiceHandler(svc LLMServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	lLMServiceMethods := v2.File_agentcompose_v2_agentcompose_proto.Services().ByName("LLMService").Methods()
+	lLMServiceGenerateHandler := connect.NewUnaryHandler(
+		LLMServiceGenerateProcedure,
+		svc.Generate,
+		connect.WithSchema(lLMServiceMethods.ByName("Generate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/agentcompose.v2.LLMService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case LLMServiceGenerateProcedure:
+			lLMServiceGenerateHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedLLMServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedLLMServiceHandler struct{}
+
+func (UnimplementedLLMServiceHandler) Generate(context.Context, *connect.Request[v2.GenerateLLMRequest]) (*connect.Response[v2.GenerateLLMResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.LLMService.Generate is not implemented"))
 }

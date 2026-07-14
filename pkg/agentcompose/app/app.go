@@ -139,6 +139,8 @@ func RegisterRoutes(di do.Injector) {
 	app.Any(path+"*", echo.WrapHandler(handler))
 	path, handler = agentcomposev2connect.NewCapabilityServiceHandler(api.NewCapabilityV2Handler(do.MustInvoke[capabilities.Provider](di), capabilityRuntimeConfig{config: do.MustInvoke[*appconfig.Config](di)}))
 	app.Any(path+"*", echo.WrapHandler(handler))
+	path, handler = agentcomposev2connect.NewLLMServiceHandler(api.NewLLMHandler(do.MustInvoke[*adapters.LLMClient](di)))
+	app.Any(path+"*", echo.WrapHandler(handler))
 
 	registerProxyRoutes(app, di)
 	registerWorkspaceRoutes(app, di)

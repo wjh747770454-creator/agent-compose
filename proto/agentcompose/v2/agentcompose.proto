@@ -101,6 +101,10 @@ service CapabilityService {
   rpc GetCapabilityCatalog(GetCapabilityCatalogRequest) returns (GetCapabilityCatalogResponse);
 }
 
+service LLMService {
+  rpc Generate(GenerateLLMRequest) returns (GenerateLLMResponse);
+}
+
 enum ProjectValidationSeverity {
   PROJECT_VALIDATION_SEVERITY_UNSPECIFIED = 0;
   PROJECT_VALIDATION_SEVERITY_WARNING = 1;
@@ -1623,4 +1627,18 @@ message WatchSandboxResponse {
   string cell_id = 5;
   string chunk = 6;
   StdioStream stream = 7;
+}
+
+message GenerateLLMRequest {
+  string prompt = 1;
+  string model = 2;
+  string output_schema = 3;
+}
+
+message GenerateLLMResponse {
+  string text = 1;
+  string model = 2;
+  string response_id = 3;
+  string finish_reason = 4;
+  string json = 5;
 }
