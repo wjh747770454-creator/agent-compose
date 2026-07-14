@@ -107,10 +107,7 @@ func (h runtimeLLMHandler) handle(c echo.Context, inboundProtocol protocolbridge
 	if model == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "llm model is required"})
 	}
-	if token.Model != "" && model != "" && token.Model != model {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "llm facade token model mismatch"})
-	}
-	target, err := h.opts.ResolveTarget(c.Request().Context(), firstNonEmpty(token.Model, model), token.ProviderID)
+	target, err := h.opts.ResolveTarget(c.Request().Context(), model, token.ProviderID)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}

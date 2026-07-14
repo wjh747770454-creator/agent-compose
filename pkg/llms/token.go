@@ -4,11 +4,16 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 )
 
 func NewFacadeToken(sandboxID, model, providerID, wireAPI, source, runID string) (string, FacadeToken, error) {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return "", FacadeToken{}, fmt.Errorf("llm facade token provider is required")
+	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", FacadeToken{}, err
@@ -21,7 +26,7 @@ func NewFacadeToken(sandboxID, model, providerID, wireAPI, source, runID string)
 		TokenHash:        hash,
 		TokenFingerprint: fingerprint,
 		Model:            strings.TrimSpace(model),
-		ProviderID:       strings.TrimSpace(providerID),
+		ProviderID:       providerID,
 		WireAPI:          NormalizeWireAPI(wireAPI),
 		Source:           strings.TrimSpace(source),
 		RunID:            strings.TrimSpace(runID),

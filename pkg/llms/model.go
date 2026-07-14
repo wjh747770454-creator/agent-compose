@@ -62,12 +62,14 @@ type FacadeToken struct {
 	SandboxID        string
 	TokenHash        string
 	TokenFingerprint string
-	Model            string
-	ProviderID       string
-	WireAPI          string
-	Source           string
-	RunID            string
-	IssuedAt         time.Time
-	ExpiresAt        time.Time
-	RevokedAt        time.Time
+	// Model records the default selected when the token was issued. Runtime
+	// facade requests may use any model supported by the token's provider.
+	Model      string
+	ProviderID string
+	WireAPI    string
+	Source     string
+	RunID      string
+	IssuedAt   time.Time
+	ExpiresAt  time.Time
+	RevokedAt  time.Time
 }

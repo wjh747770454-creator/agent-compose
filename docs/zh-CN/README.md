@@ -177,7 +177,7 @@ agents:
 | `gemini` | Gemini CLI |
 | `opencode` | OpenCode CLI |
 
-LLM 凭据只在 daemon（`.env`）配置一次，而不是每个 guest 各配。对 Codex、Claude 和 OpenCode，daemon 的 **Runtime LLM Facade** 给每个 sandbox 一个受限的 scoped token，而不是你的真实 API key，因此 provider key 不会进入 guest。
+LLM 凭据只在 daemon（`.env`）配置一次，而不是每个 guest 各配。对 Codex、Claude 和 OpenCode，daemon 的 **Runtime LLM Facade** 给每个 sandbox 一个受限的 scoped token，而不是你的真实 API key，因此 provider key 不会进入 guest。token 固定上游 provider 和 facade 协议，但 runtime 每次请求中的模型会透传给该 provider，无需预先登记到 agent-compose；provider 不支持模型时返回其上游错误。
 
 按你的 agent 使用的后端家族设置变量。**OpenAI 家族**（Codex，以及 daemon 自身的 `LLMService` 和 scheduler LLM 调用）：
 

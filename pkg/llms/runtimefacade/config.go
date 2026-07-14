@@ -3,7 +3,6 @@ package runtimefacade
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 
 	appconfig "agent-compose/pkg/config"
@@ -101,17 +100,12 @@ func ensureSessionClaudeConfig(ctx context.Context, config *appconfig.Config, st
 	}
 	providerEnv := sessionProviderEnvItems(session)
 	target, err := llms.ResolveRuntimeLLMTargetWithEnv(ctx, config, store, session.Summary.ID, llms.ProviderFamilyAnthropic, model, "", providerEnv)
-	tokenModel := ""
-	tokenProvider := ""
 	if err != nil {
-		if !isOptionalConfigError(err) || !HasAnthropicProviderKey(ctx, config, store) {
-			return nil, err
-		}
-	} else {
-		tokenModel = target.Model.Name
-		tokenProvider = target.Provider.ID
+		// A facade token must never fall back to dynamic provider selection. The
+		// sandbox startup path treats missing optional Claude config as skippable.
+		return nil, err
 	}
-	tokenValue, token, err := llms.NewFacadeToken(session.Summary.ID, tokenModel, tokenProvider, llms.APIProtocolMessages, source, runID)
+	tokenValue, token, err := llms.NewFacadeToken(session.Summary.ID, target.Model.Name, target.Provider.ID, llms.APIProtocolMessages, source, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -128,10 +122,8 @@ func ensureSessionClaudeConfig(ctx context.Context, config *appconfig.Config, st
 		"ANTHROPIC_AUTH_TOKEN":        tokenValue,
 		"ANTHROPIC_BASE_URL":          anthropicBaseURL,
 	}
-	if tokenModel != "" {
-		env["ANTHROPIC_MODEL"] = tokenModel
-		env["CLAUDE_MODEL"] = tokenModel
-	}
+	env["ANTHROPIC_MODEL"] = target.Model.Name
+	env["CLAUDE_MODEL"] = target.Model.Name
 	return env, nil
 }
 
@@ -283,22 +275,6 @@ func isOptionalConfigError(err error) bool {
 
 func IsOptionalConfigError(err error) bool {
 	return isOptionalConfigError(err)
-}
-
-func HasAnthropicProviderKey(ctx context.Context, config *appconfig.Config, store FacadeStore) bool {
-	configKey := ""
-	if config != nil {
-		configKey = config.LLMAPIKey
-	}
-	return strings.TrimSpace(firstNonEmpty(
-		llms.LookupEnvValue(ctx, store, "ANTHROPIC_API_KEY"),
-		llms.LookupEnvValue(ctx, store, "ANTHROPIC_AUTH_TOKEN"),
-		llms.LookupEnvValue(ctx, store, "LLM_API_KEY"),
-		os.Getenv("ANTHROPIC_API_KEY"),
-		os.Getenv("ANTHROPIC_AUTH_TOKEN"),
-		os.Getenv("LLM_API_KEY"),
-		configKey,
-	)) != ""
 }
 
 func sessionProviderEnvItems(session *domain.Sandbox) []domain.SandboxEnvVar {
