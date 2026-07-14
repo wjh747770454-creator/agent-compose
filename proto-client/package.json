@@ -23,7 +23,7 @@
   },
   "scripts": {
     "clean": "rm -rf src dist",
-    "gen": "rm -rf src && mkdir -p src && protoc --plugin=./node_modules/.bin/protoc-gen-es --plugin=./node_modules/.bin/protoc-gen-connect-es -I ../proto --es_out src --es_opt target=ts,import_extension=.js --connect-es_out src --connect-es_opt target=ts,import_extension=.js health/v1/health.proto agentcompose/v1/agentcompose.proto agentcompose/v2/agentcompose.proto",
+    "gen": "rm -rf src && mkdir -p src && protoc --plugin=./node_modules/.bin/protoc-gen-es --plugin=./node_modules/.bin/protoc-gen-connect-es -I ../proto --es_out src --es_opt target=ts,import_extension=.js --connect-es_out src --connect-es_opt target=ts,import_extension=.js health/v1/health.proto agentcompose/v2/agentcompose.proto",
     "build": "tsc -p tsconfig.json",
     "prepublishOnly": "npm run gen && npm run build"
   },
