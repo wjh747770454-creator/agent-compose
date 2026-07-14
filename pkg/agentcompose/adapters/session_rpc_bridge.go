@@ -39,10 +39,11 @@ type SandboxRPCBridge struct {
 	cap              capabilities.Provider
 	capTokens        *CapabilitySandboxResolver
 	dashboard        *dashboard.Hub
+	lifecycleLocks   *sessions.LifecycleLocks
 }
 
-func NewSandboxRPCBridge(config *appconfig.Config, store *sessionstore.Store, configDB *configstore.ConfigStore, workspaceEnsurer workspaces.WorkspaceEnsurer, driver sessions.SandboxDriver, runtimes RuntimeProvider, bus *loaders.Bus, streams *sessions.StreamBroker, cap capabilities.Provider, capTokens *CapabilitySandboxResolver, dashboard *dashboard.Hub) *SandboxRPCBridge {
-	return &SandboxRPCBridge{
+func NewSandboxRPCBridge(config *appconfig.Config, store *sessionstore.Store, configDB *configstore.ConfigStore, workspaceEnsurer workspaces.WorkspaceEnsurer, driver sessions.SandboxDriver, runtimes RuntimeProvider, bus *loaders.Bus, streams *sessions.StreamBroker, cap capabilities.Provider, capTokens *CapabilitySandboxResolver, dashboard *dashboard.Hub, locks ...*sessions.LifecycleLocks) *SandboxRPCBridge {
+	bridge := &SandboxRPCBridge{
 		config:           config,
 		store:            store,
 		configDB:         configDB,
@@ -55,6 +56,10 @@ func NewSandboxRPCBridge(config *appconfig.Config, store *sessionstore.Store, co
 		capTokens:        capTokens,
 		dashboard:        dashboard,
 	}
+	if len(locks) > 0 {
+		bridge.lifecycleLocks = locks[0]
+	}
+	return bridge
 }
 
 func (b *SandboxRPCBridge) SubscribeSandbox(sandboxID string) (<-chan sessions.WatchEvent, func()) {
@@ -366,6 +371,7 @@ func (b *SandboxRPCBridge) sessionLifecycle() sessions.Lifecycle {
 		GuideWriter: func(ctx context.Context, session *domain.Sandbox, capsetIDs []string) {
 			writeCapabilityGuide(ctx, b.cap, b.store, b.streams, session, capsetIDs)
 		},
+		Locks: b.lifecycleLocks,
 	}
 }
 

@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"errors"

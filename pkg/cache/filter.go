@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"errors"
@@ -36,8 +36,8 @@ func NormalizeDomain(domain Domain) (Domain, bool) {
 		return DomainMaterializedImageCache, true
 	case DomainRuntimeDerivedCache:
 		return DomainRuntimeDerivedCache, true
-	case DomainSandboxEphemeralState:
-		return DomainSandboxEphemeralState, true
+	case DomainSkillArtifactCache:
+		return DomainSkillArtifactCache, true
 	default:
 		return "", false
 	}
@@ -53,8 +53,8 @@ func NormalizeType(cacheType CacheType) (CacheType, bool) {
 		return CacheTypeMaterialized, true
 	case CacheTypeRuntime:
 		return CacheTypeRuntime, true
-	case CacheTypeSandbox:
-		return CacheTypeSandbox, true
+	case CacheTypeSkill:
+		return CacheTypeSkill, true
 	default:
 		return "", false
 	}
@@ -89,8 +89,8 @@ func DomainType(domain Domain) (CacheType, bool) {
 		return CacheTypeMaterialized, true
 	case DomainRuntimeDerivedCache:
 		return CacheTypeRuntime, true
-	case DomainSandboxEphemeralState:
-		return CacheTypeSandbox, true
+	case DomainSkillArtifactCache:
+		return CacheTypeSkill, true
 	default:
 		return "", false
 	}
@@ -104,8 +104,8 @@ func TypeDomain(cacheType CacheType) (Domain, bool) {
 		return DomainMaterializedImageCache, true
 	case CacheTypeRuntime:
 		return DomainRuntimeDerivedCache, true
-	case CacheTypeSandbox:
-		return DomainSandboxEphemeralState, true
+	case CacheTypeSkill:
+		return DomainSkillArtifactCache, true
 	default:
 		return "", false
 	}

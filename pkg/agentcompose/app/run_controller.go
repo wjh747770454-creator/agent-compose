@@ -42,15 +42,17 @@ func NewRunController(di do.Injector) (*runs.Controller, error) {
 		Runtime: func(session *domain.Sandbox) (runs.Runtime, error) {
 			return runtimeProvider.ForSession(session)
 		},
-		Images:       imageBackends.Auto,
-		LoaderEngine: do.MustInvoke[loaders.LoaderEngine](di),
-		Cap:          do.MustInvoke[capabilities.Provider](di),
-		Volumes:      do.MustInvoke[*volumes.Manager](di),
-		Streams:      do.MustInvoke[*sessions.StreamBroker](di),
-		Bus:          do.MustInvoke[*loaders.Bus](di),
-		Dashboard:    dashboardHub,
-		CapTokens:    do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
-		RunLogs:      do.MustInvoke[*runs.RunLogHub](di),
+		Images:         imageBackends.Auto,
+		LoaderEngine:   do.MustInvoke[loaders.LoaderEngine](di),
+		Cap:            do.MustInvoke[capabilities.Provider](di),
+		Volumes:        do.MustInvoke[*volumes.Manager](di),
+		Streams:        do.MustInvoke[*sessions.StreamBroker](di),
+		Bus:            do.MustInvoke[*loaders.Bus](di),
+		Dashboard:      dashboardHub,
+		CapTokens:      do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
+		RunLogs:        do.MustInvoke[*runs.RunLogHub](di),
+		LifecycleLocks: do.MustInvoke[*sessions.LifecycleLocks](di),
+		Removal:        do.MustInvoke[*sessions.RemovalCoordinator](di),
 	}), nil
 }
 

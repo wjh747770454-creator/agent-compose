@@ -320,8 +320,9 @@ The v2 API is for project/run/image/exec workflows:
 default `down` semantics preserve history. `ImageService` supports both Docker
 daemon store and OCI cache store; when request store is `UNSPECIFIED`, the
 daemon image store mode selects the backend. `CacheService` is the explicit
-runtime cache lifecycle boundary for materialized image cache, runtime-derived
-driver cache, and sandbox-ephemeral state.
+cross-sandbox cache lifecycle boundary for OCI physical storage, materialized
+images, runtime-derived shared images, and skill artifacts. Sandbox-owned
+runtime state belongs to `SandboxService`.
 
 v2 `ProjectSpec` is the wire shape used by CLI and API clients to pass the
 current compose state. `AgentSpec.scheduler` contains:
@@ -512,32 +513,55 @@ Docker backend, but status comes from cache metadata:
   `sha256:` prefix form.
 - `RemoveImage` deletes only the matched metadata ref by default. When the same
   image identity has multiple refs, `force` is required. `prune_children` does
-  not remove blobs in OCI cache and returns a warning. Blob cleanup is left to a
-  dedicated future mechanism; current deletion is conservative metadata deletion.
-  `RemoveImage` and CLI `rmi` do not delete materialized image cache,
-  runtime-derived driver cache, or sandbox-ephemeral state.
+  not remove blobs in OCI cache and returns a warning. The OCI cache inventory
+  treats remaining metadata manifests as required references; explicit cache
+  prune can reclaim an unreferenced manifest and then mark/sweep unreachable
+  blobs while preserving shared layers. `RemoveImage` and CLI `rmi` do not
+  delete materialized or runtime-derived caches.
 - Not found, invalid reference, conflict, internal, and unavailable errors map
   to stable Connect codes. Error messages retain operation, image ref, and cache
   endpoint.
 
-## Runtime Cache Lifecycle
+## Sandbox and Cache Lifecycle
 
-Runtime cache lifecycle is explicit and daemon-authoritative. `CacheService`
-builds inventory from daemon-owned facts and driver adapters, returns warnings
-for incomplete scans, and performs deletion only through inventory-generated
-safe paths. `pkg/runtimecache` owns the cache model, filters, path safety, and
-dry-run/remove rules, and it does not import Connect.
+The ownership boundary is whether an artifact can outlive and be reused by a
+sandbox. `SandboxService` owns runtime instances and sandbox-local state;
+`CacheService` owns only cross-sandbox reusable artifacts. Volumes, external
+workspace sources, run artifacts, and logical image refs remain in their own
+domains.
 
-The current daemon controller is composed from `runtimecache.Source`
-implementations. The always-registered source scans materialized image cache via
-`pkg/imagecache` metadata and `<DATA_ROOT>/image-cache`. Driver sources are
-added by `pkg/driver.NewRuntimeCacheSources` only when the corresponding driver
-is compiled into the current binary. Ordinary CGO does not implicitly add a
-native driver capability. BoxLite contributes runtime-derived cache items, and
-Microsandbox contributes sandbox-ephemeral items. The
-Microsandbox app-level source marks references as unknown until full sandbox or
-SDK state is resolved, so those items are listed but protected from removal by
-default.
+Sandbox ownership is journaled atomically in
+`<SANDBOX_ROOT>/.lifecycle/<sandbox-id>.json` before external runtime creation.
+The record contains only driver/runtime identity, sandbox-owned paths/resources,
+shared cache dependencies, lifecycle state, and completed deletion stages; it
+does not persist environment values, tokens, or credentials. Startup safely
+backfills missing records for valid historical sandboxes and resumes only
+journals already marked `deleting`. Corrupt, unsupported, or path-escaping
+ownership is never replaced or guessed during removal.
+
+Removal is serialized with resume, proxy-start, existing-sandbox run binding,
+and exec work. It persists deletion intent and the `DELETING` state, optionally
+stops a running runtime when force was requested, uses the driver's official
+remove API, releases accessories, removes sandbox data/metadata, and finally
+removes the journal. Every completed stage is durable and retry-safe. `stop`
+preserves resumable state; `rm` removes all sandbox-owned state. Daemon-wide
+orphan inventory is opt-in through `sandbox prune --include-orphans`, and any
+resource associated with a sandbox record in any project is excluded. Unsafe
+or incomplete ownership is display-only even when forced.
+
+Cache lifecycle is explicit and daemon-authoritative. `pkg/cache` owns the
+inventory model, filters, reference policy, TTL classification, path safety,
+and dry-run/remove rules without importing Connect. Every remover re-inventories
+by cache ID under its source lock and validates root containment/symlinks instead
+of trusting a request path.
+
+The daemon composes `cache.Source` implementations for OCI physical storage,
+materialized images, skill artifacts, and compiled runtime drivers. Ordinary
+CGO does not implicitly add a native driver capability. Microsandbox shared
+images are inventoried and removed through the SDK. BoxLite v0.9.7 image cache
+is inventory-only and `unknown`, because the ABI does not expose a safe image
+remove/prune operation; agent-compose never deletes BoxLite internal image
+directories directly.
 
 Cache domains:
 
@@ -546,30 +570,35 @@ Cache domains:
   BoxLite OCI layouts and Microsandbox rootfs directories under
   `<DATA_ROOT>/image-cache`.
 - `runtime-derived-cache`: runtime-driver artifacts under driver homes, such as
-  BoxLite image artifacts.
-- `sandbox-ephemeral-state`: per-sandbox runtime state, such as Microsandbox
-  docker disks and sandbox state.
+  shared runtime images.
+- `skill-artifact-cache`: completed content-addressed skill artifacts and
+  interrupted temporary/lock entries.
 
-`oci-image-store` exists in the shared model for domain filtering and future
-inventory expansion, but the current deletion owner for OCI image metadata and
-refs is still `ImageService`. `CacheService` currently manages materialized
-image cache, driver runtime-derived cache, and sandbox-ephemeral state; `rmi`
-continues to leave those domains untouched.
+OCI inventory walks the manifest graph, including nested indexes and shared
+config/layer blobs. Image metadata is a `REQUIRED` manifest reference. Manifest
+removal updates the OCI index first, then mark/sweeps unreachable blobs under
+the image-cache lock, so an interrupted sweep leaves discoverable orphan blobs
+rather than a dangling index. Materialized image metadata and configured skill
+specs are `ADVISORY`; actual dependencies recorded by running or stopped
+sandbox journals are `REQUIRED`. Skill resolve uses a root shared lock and
+per-artifact lock, while prune uses the root exclusive lock and artifact lock.
+Artifact manifests contain source type, content/commit identity, created time,
+and last-used time but no source credentials.
 
 Protection is conservative:
 
-- `active` and `unknown` items are never removed.
-- `referenced` items are skipped by default; `cache prune --include-referenced
-  --force` can remove them when they are not active or unknown.
+- `active`, `referenced`, and `unknown` items are never removed. An unspecified
+  reference policy is conservatively `REQUIRED`; `ADVISORY` references do not
+  block removal.
 - `unused`, `expired`, and `orphaned` items are removed only when the request is
   forced.
 - `cache prune` and `cache rm` default to dry-run. Real deletion requires
-  `--force`.
+  `--force`, which authorizes execution but cannot bypass reference protection.
 
-`BOX_CACHE_TTL` no longer drives hidden BoxLite startup-path garbage
-collection. If TTL-based cleanup is needed, operators should use explicit cache
-commands such as `cache prune --older-than 7d --force`; future scheduled
-maintenance must use the same cache inventory and protection rules.
+`CACHE_TTL` defaults to `168h`; `0` disables expiration classification and a
+negative or invalid value fails startup validation. TTL changes inventory state
+only and never causes background/startup deletion. Operators explicitly run
+`cache prune --expired --force`; `--older-than` remains an independent filter.
 
 For `up/run`, the `docker` driver ensures the required image is available.
 `boxlite` and `microsandbox` project/run preparation does not fail just because
@@ -596,6 +625,7 @@ Image store configuration:
 | --- | --- | --- |
 | `IMAGE_STORE_MODE` | `auto` | Default store selection mode for `UNSPECIFIED` ImageService requests. Valid values: `auto`, `docker`, `oci`. |
 | `IMAGE_CACHE_ROOT` | `<DATA_ROOT>/images` | Daemonless OCI cache root. Stores metadata and OCI Image Layout. Runtime materialization directories live beside this root under `image-cache/`. |
+| `CACHE_TTL` | `168h` | Shared cache expiration classification threshold. `0` disables expiration; invalid or negative values fail startup. It never triggers automatic deletion. |
 | `IMAGE_INSECURE_REGISTRIES` | empty | Insecure registry host list for OCI cache pulls. Supports comma, semicolon, or newline separators and trims each item. |
 | `IMAGE_REGISTRY` | `docker.io` | Default registry for unqualified image references. Also used by runtime smoke default image resolution. |
 
@@ -610,22 +640,25 @@ data/agent-compose/
 ├── image-cache/<image-id>/
 │   ├── oci/
 │   └── rootfs/
-└── sandboxes/<sandbox_id>/
-    ├── metadata.json
-    ├── workspace/
-    ├── context/
-    ├── home/
-    ├── runtime/
-    ├── state/
-    │   ├── cells.json
-    │   ├── events.jsonl
-    │   └── workspace-provisioning/
-    │       └── attempt-<id>/
-    ├── logs/
-    ├── vm/
-    │   └── runtime.json
-    └── proxy/
-        └── jupyter.json
+├── skills/<content-id>/
+└── sandboxes/
+    ├── .lifecycle/<sandbox-id>.json
+    └── <sandbox_id>/
+        ├── metadata.json
+        ├── workspace/
+        ├── context/
+        ├── home/
+        ├── runtime/
+        ├── state/
+        │   ├── cells.json
+        │   ├── events.jsonl
+        │   └── workspace-provisioning/
+        │       └── attempt-<id>/
+        ├── logs/
+        ├── vm/
+        │   └── runtime.json
+        └── proxy/
+            └── jupyter.json
 ```
 
 The sandbox directory stores sandbox metadata, workspace, home backing, runtime

@@ -822,7 +822,7 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 	}
 	cacheItem := &agentcomposev2.CacheItem{
 		CacheId:        "cache-1",
-		Domain:         agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE,
+		Domain:         agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE,
 		Driver:         "docker",
 		Kind:           "sandbox-dir",
 		Path:           "/tmp/sandbox",
@@ -830,13 +830,13 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 		ImageId:        "sha256:image",
 		ImageRef:       "guest:latest",
 		ResolvedRef:    "guest@sha256:abc",
-		SandboxId:      "sandbox-1",
 		Status:         agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED,
 		Removable:      false,
 		BlockedReasons: []string{"cache is referenced"},
 		LastUsedAt:     "used",
 		LastUsedSource: "metadata",
 		References: []*agentcomposev2.CacheReference{{
+			Policy:      agentcomposev2.CacheReferencePolicy_CACHE_REFERENCE_POLICY_REQUIRED,
 			Type:        "sandbox",
 			Id:          "sandbox-1",
 			Name:        "Sandbox",
@@ -847,7 +847,7 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 		Warnings: []string{"cache warn"},
 	}
 	cacheList := composeCacheListOutputFromResponse(&agentcomposev2.ListCachesResponse{Caches: []*agentcomposev2.CacheItem{cacheItem}, Warnings: []string{"list warn"}})
-	if len(cacheList.Caches) != 1 || cacheList.Caches[0].Domain != "sandbox-ephemeral-state" || cacheList.Caches[0].Type != "sandbox" || len(cacheList.Caches[0].References) != 1 {
+	if len(cacheList.Caches) != 1 || cacheList.Caches[0].Domain != "skill-artifact-cache" || cacheList.Caches[0].Type != "skill" || len(cacheList.Caches[0].References) != 1 {
 		t.Fatalf("composeCacheListOutputFromResponse = %#v", cacheList)
 	}
 	cacheInspect := composeCacheInspectOutputFromResponse(&agentcomposev2.InspectCacheResponse{Cache: cacheItem, Warnings: []string{"inspect warn"}})
@@ -931,7 +931,7 @@ func testComposeImageStatsAndSessionHelpers(t *testing.T) {
 		imageAvailabilityStatusText(agentcomposev2.ImageAvailabilityStatus_IMAGE_AVAILABILITY_STATUS_UNSPECIFIED) != "unspecified" ||
 		imageOperationStatusText(agentcomposev2.ImageOperationStatus_IMAGE_OPERATION_STATUS_SUCCEEDED) != "succeeded" ||
 		imageOperationStatusText(agentcomposev2.ImageOperationStatus_IMAGE_OPERATION_STATUS_UNSPECIFIED) != "unspecified" ||
-		cacheRefText(composeCacheOutput{SandboxID: "sandbox-only"}) != "sandbox-only" ||
+		cacheRefText(composeCacheOutput{ImageID: "sandbox-only"}) != "sandbox-only" ||
 		cacheRefText(composeCacheOutput{ResolvedRef: "resolved-only"}) != "resolved-only" ||
 		firstNonEmptyString("", " ", "fallback") != "fallback" ||
 		runStatusText(agentcomposev2.RunStatus_RUN_STATUS_CANCELED) != "canceled" ||

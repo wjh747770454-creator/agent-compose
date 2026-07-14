@@ -40,10 +40,15 @@ type LoaderSandboxRunner struct {
 	Streams          *sessions.StreamBroker
 	Publisher        loaders.ControllerPublisher
 	CapTokens        *CapabilitySandboxResolver
+	LifecycleLocks   *sessions.LifecycleLocks
 }
 
-func NewLoaderSandboxRunner(config *appconfig.Config, store *sessionstore.Store, configDB *configstore.ConfigStore, workspaceEnsurer workspaces.WorkspaceEnsurer, driver sessions.SandboxDriver, cap capabilities.Provider, volumeResolver LoaderVolumeResolver, streams *sessions.StreamBroker, publisher loaders.ControllerPublisher, capTokens *CapabilitySandboxResolver) *LoaderSandboxRunner {
-	return &LoaderSandboxRunner{Config: config, Store: store, ConfigDB: configDB, workspaceEnsurer: workspaceEnsurer, Driver: driver, Cap: cap, Volumes: volumeResolver, Streams: streams, Publisher: publisher, CapTokens: capTokens}
+func NewLoaderSandboxRunner(config *appconfig.Config, store *sessionstore.Store, configDB *configstore.ConfigStore, workspaceEnsurer workspaces.WorkspaceEnsurer, driver sessions.SandboxDriver, cap capabilities.Provider, volumeResolver LoaderVolumeResolver, streams *sessions.StreamBroker, publisher loaders.ControllerPublisher, capTokens *CapabilitySandboxResolver, locks ...*sessions.LifecycleLocks) *LoaderSandboxRunner {
+	runner := &LoaderSandboxRunner{Config: config, Store: store, ConfigDB: configDB, workspaceEnsurer: workspaceEnsurer, Driver: driver, Cap: cap, Volumes: volumeResolver, Streams: streams, Publisher: publisher, CapTokens: capTokens}
+	if len(locks) > 0 {
+		runner.LifecycleLocks = locks[0]
+	}
+	return runner
 }
 
 func (r *LoaderSandboxRunner) Shutdown(ctx context.Context, sessionID string) error {
@@ -51,6 +56,8 @@ func (r *LoaderSandboxRunner) Shutdown(ctx context.Context, sessionID string) er
 	if sessionID == "" {
 		return nil
 	}
+	unlock := r.LifecycleLocks.Lock(sessionID)
+	defer unlock()
 	stopCtx := context.WithoutCancel(ctx)
 	session, err := r.Store.GetSandbox(stopCtx, sessionID)
 	if err != nil {
@@ -210,12 +217,17 @@ func (r *LoaderSandboxRunner) Load(ctx context.Context, sessionID string) (*doma
 }
 
 func (r *LoaderSandboxRunner) LoadOrResume(ctx context.Context, sessionID string) (*domain.Sandbox, string, error) {
+	unlock := r.LifecycleLocks.Lock(sessionID)
+	defer unlock()
 	session, err := r.Store.GetSandbox(ctx, sessionID)
 	if err != nil {
 		return nil, "", err
 	}
 	if session.Summary.VMStatus == domain.VMStatusRunning {
 		return session, "", nil
+	}
+	if session.Summary.VMStatus == domain.VMStatusDeleting {
+		return nil, "", fmt.Errorf("sandbox %s is being deleted", sessionID)
 	}
 	if validator, ok := r.Driver.(sessions.SandboxRuntimeValidator); ok {
 		if err := validator.ValidateSandboxRuntime(session); err != nil {

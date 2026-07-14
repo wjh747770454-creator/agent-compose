@@ -108,7 +108,7 @@ func newRuntimeSmokeConfig(t *testing.T, driver string) *appconfig.Config {
 		ImageRegistry:            firstNonEmpty(os.Getenv("IMAGE_REGISTRY"), "docker.io"),
 		BoxRootfsPath:            strings.TrimSpace(os.Getenv("SMOKE_BOX_ROOTFS_PATH")),
 		BoxDiskSizeGB:            boxDiskSizeGB,
-		BoxCacheTTL:              time.Hour,
+		CacheTTL:                 time.Hour,
 		BoxliteRuntimeDir:        firstNonEmpty(os.Getenv("BOXLITE_RUNTIME_DIR"), filepath.Join(repoRoot, "build", "boxlite", "runtime")),
 		MicrosandboxMSBPath:      firstNonEmpty(os.Getenv("MICROSANDBOX_MSB_PATH"), filepath.Join(repoRoot, "build", "microsandbox", "bin", "msb")),
 		MicrosandboxLibPath:      firstNonEmpty(os.Getenv("MICROSANDBOX_LIB_PATH"), filepath.Join(repoRoot, "build", "microsandbox", "lib", "libmicrosandbox_go_ffi.so")),

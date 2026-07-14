@@ -20,6 +20,7 @@ import (
 	"agent-compose/pkg/execution"
 	domain "agent-compose/pkg/model"
 	"agent-compose/pkg/runs"
+	"agent-compose/pkg/sessions"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 )
 
@@ -55,6 +56,12 @@ type ExecHandler struct {
 	projects  ExecProjectStore
 	runtime   ExecRuntimeResolver
 	runAttach ExecRunAttachDelegate
+	locks     *sessions.LifecycleLocks
+}
+
+func (h *ExecHandler) WithLifecycleLocks(locks *sessions.LifecycleLocks) *ExecHandler {
+	h.locks = locks
+	return h
 }
 
 func NewExecHandler(config *appconfig.Config, store ExecSandboxStore, projects ExecProjectStore, runtime ExecRuntimeResolver, runAttach ...ExecRunAttachDelegate) *ExecHandler {
@@ -126,6 +133,12 @@ func (h *ExecHandler) execAttach(ctx context.Context, receive execAttachReceiver
 		return h.execPromptAttach(ctx, start, receive, send)
 	}
 	state, err := h.prepareExecAttach(ctx, start)
+	if err != nil {
+		return err
+	}
+	unlock := h.locks.Lock(state.sandbox.Summary.ID)
+	defer unlock()
+	state, err = h.prepareExecAttach(ctx, start)
 	if err != nil {
 		return err
 	}
@@ -523,6 +536,12 @@ func (h *ExecHandler) executeProjectCommand(ctx context.Context, req *agentcompo
 	if h.store == nil || h.projects == nil || h.runtime == nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("exec runtime dependencies are required"))
 	}
+	sandbox, _, err := h.resolveExecTargetSandbox(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	unlock := h.locks.Lock(sandbox.Summary.ID)
+	defer unlock()
 	sandbox, runID, err := h.resolveExecTargetSandbox(ctx, req)
 	if err != nil {
 		return nil, err

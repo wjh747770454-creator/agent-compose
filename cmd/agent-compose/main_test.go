@@ -6255,7 +6255,7 @@ func TestIntegrationCLICacheListFilterValuesAndUsageErrors(t *testing.T) {
 		{
 			name:   "type",
 			flag:   "--type",
-			values: []string{"oci", "materialized", "runtime", "sandbox"},
+			values: []string{"oci", "materialized", "runtime", "skill"},
 			assert: func(t *testing.T, filter *agentcomposev2.CacheFilter, value string) {
 				t.Helper()
 				if filter.GetType() != value {
@@ -6531,8 +6531,8 @@ func TestIntegrationCLICachePruneDryRunForceAndJSON(t *testing.T) {
 				calls++
 				switch calls {
 				case 1:
-					if req.Msg.GetForce() || req.Msg.GetIncludeReferenced() {
-						t.Fatalf("PruneCaches dry-run flags = force:%t include:%t", req.Msg.GetForce(), req.Msg.GetIncludeReferenced())
+					if req.Msg.GetForce() {
+						t.Fatalf("PruneCaches dry-run force = true")
 					}
 					filter := req.Msg.GetFilter()
 					if filter.GetDriver() != "boxlite" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_UNUSED {
@@ -6545,8 +6545,8 @@ func TestIntegrationCLICachePruneDryRunForceAndJSON(t *testing.T) {
 						Warnings: []string{"scan warning"},
 					}), nil
 				case 2:
-					if !req.Msg.GetForce() || !req.Msg.GetIncludeReferenced() {
-						t.Fatalf("PruneCaches force flags = force:%t include:%t", req.Msg.GetForce(), req.Msg.GetIncludeReferenced())
+					if !req.Msg.GetForce() {
+						t.Fatalf("PruneCaches force = false")
 					}
 					filter := req.Msg.GetFilter()
 					if filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED || filter.GetOlderThanSeconds() != 7*24*3600 {
@@ -6576,7 +6576,7 @@ func TestIntegrationCLICachePruneDryRunForceAndJSON(t *testing.T) {
 		}
 	}
 
-	jsonOut, jsonErr, _, jsonCode := executeCLICommand("cache", "prune", "--host", server.URL, "--json", "--force", "--include-referenced", "--orphaned", "--older-than", "7d")
+	jsonOut, jsonErr, _, jsonCode := executeCLICommand("cache", "prune", "--host", server.URL, "--json", "--force", "--orphaned", "--older-than", "7d")
 	if jsonCode != 0 || jsonErr != "" {
 		t.Fatalf("cache prune force JSON code/stderr = %d / %q", jsonCode, jsonErr)
 	}
@@ -6639,22 +6639,22 @@ func TestIntegrationCLICachePruneFilterMappings(t *testing.T) {
 			},
 		},
 		{
-			name: "older than hours and include referenced",
-			args: []string{"--older-than", "168h", "--include-referenced"},
+			name: "older than hours",
+			args: []string{"--older-than", "168h"},
 			assert: func(t *testing.T, req *agentcomposev2.PruneCachesRequest) {
 				t.Helper()
-				if req.GetFilter().GetOlderThanSeconds() != 7*24*3600 || !req.GetIncludeReferenced() {
+				if req.GetFilter().GetOlderThanSeconds() != 7*24*3600 {
 					t.Fatalf("request = %#v", req)
 				}
 			},
 		},
 		{
 			name: "common filters",
-			args: []string{"--driver", "microsandbox", "--type", "sandbox", "--status", "unknown"},
+			args: []string{"--driver", "microsandbox", "--type", "skill", "--status", "unknown"},
 			assert: func(t *testing.T, req *agentcomposev2.PruneCachesRequest) {
 				t.Helper()
 				filter := req.GetFilter()
-				if filter.GetDriver() != "microsandbox" || filter.GetType() != "sandbox" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_UNKNOWN {
+				if filter.GetDriver() != "microsandbox" || filter.GetType() != "skill" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_UNKNOWN {
 					t.Fatalf("filter = %#v", filter)
 				}
 			},
@@ -6944,8 +6944,8 @@ func TestIntegrationCLICacheLifecycleWithInProcessDaemon(t *testing.T) {
 	}
 	referenced := requireCLICacheByPath(t, listed.Caches, referencedRootFS)
 	orphan := requireCLICacheByPath(t, listed.Caches, orphanRootFS)
-	if referenced.Status != "referenced" || referenced.Removable {
-		t.Fatalf("referenced cache = %#v", referenced)
+	if referenced.Status != "unused" || !referenced.Removable || len(referenced.References) != 1 || referenced.References[0].Policy != "advisory" {
+		t.Fatalf("advisory metadata cache = %#v", referenced)
 	}
 	if orphan.Status != "orphaned" || !orphan.Removable {
 		t.Fatalf("orphan cache = %#v", orphan)
@@ -6985,25 +6985,12 @@ func TestIntegrationCLICacheLifecycleWithInProcessDaemon(t *testing.T) {
 	assertLocalPathMissing(t, orphanRootFS)
 	assertLocalPathExists(t, referencedRootFS)
 
-	protectedOut, protectedErr, _, protectedCode := executeCLICommand("cache", "rm", "--host", server.URL, "--force", referenced.ID)
-	if protectedCode != exitCodeUsage {
-		t.Fatalf("cache rm referenced exit code = %d, want usage; stderr=%q", protectedCode, protectedErr)
+	removedOut, removedErr, _, removedCode := executeCLICommand("cache", "rm", "--host", server.URL, "--force", referenced.ID)
+	if removedCode != 0 || removedErr != "" {
+		t.Fatalf("cache rm advisory exit code = %d; stderr=%q", removedCode, removedErr)
 	}
-	if !strings.Contains(protectedOut, "Skipped") || !strings.Contains(protectedOut, referenced.ID) {
-		t.Fatalf("cache rm referenced stdout = %q", protectedOut)
-	}
-	assertLocalPathExists(t, referencedRootFS)
-
-	includeOut, includeErr, _, includeCode := executeCLICommand("cache", "prune", "--host", server.URL, "--json", "--type", "materialized", "--status", "referenced", "--include-referenced", "--force")
-	if includeCode != 0 || includeErr != "" {
-		t.Fatalf("cache prune include referenced code/stderr = %d / %q", includeCode, includeErr)
-	}
-	var includeResult composeCacheOperationOutput
-	if err := json.Unmarshal([]byte(includeOut), &includeResult); err != nil {
-		t.Fatalf("cache prune include referenced JSON decode failed: %v\n%s", err, includeOut)
-	}
-	if includeResult.DryRun || len(includeResult.Removed) == 0 {
-		t.Fatalf("cache prune include referenced result = %#v", includeResult)
+	if !strings.Contains(removedOut, "Removed") || !strings.Contains(removedOut, referenced.ID) {
+		t.Fatalf("cache rm advisory stdout = %q", removedOut)
 	}
 	assertLocalPathMissing(t, referencedRootFS)
 	assertLocalPathMissing(t, referencedReady)
@@ -8081,7 +8068,7 @@ func TestCLIImageCacheAndFilterHelpersCoverEdgeBranches(t *testing.T) {
 	if filter, err := cacheFilterFromOptions(composeCacheFilterOptions{}); err != nil || filter != nil {
 		t.Fatalf("empty cache filter = %#v err=%v", filter, err)
 	}
-	if filter, err := cacheFilterFromOptions(composeCacheFilterOptions{Driver: "all", Type: "sandbox", Status: "referenced"}); err != nil || filter.GetDriver() != "all" || filter.GetType() != "sandbox" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED {
+	if filter, err := cacheFilterFromOptions(composeCacheFilterOptions{Driver: "all", Type: "skill", Status: "referenced"}); err != nil || filter.GetDriver() != "all" || filter.GetType() != "skill" || filter.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED {
 		t.Fatalf("cache filter = %#v err=%v", filter, err)
 	}
 	if filter, err := cacheFilterFromPruneOptions(composeCachePruneOptions{OlderThan: "2h"}); err != nil || filter.GetOlderThanSeconds() != 7200 {
@@ -8129,7 +8116,7 @@ func TestCLIImageCacheAndFilterHelpersCoverEdgeBranches(t *testing.T) {
 	if cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_UNSPECIFIED) != "unspecified" ||
 		cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_OCI_IMAGE_STORE) != "oci-image-store" ||
 		cacheDomainText(agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE) != "runtime-derived-cache" ||
-		cacheTypeText(agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE) != "sandbox" ||
+		cacheTypeText(agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE) != "skill" ||
 		cacheTypeText(agentcomposev2.CacheDomain_CACHE_DOMAIN_OCI_IMAGE_STORE) != "oci" ||
 		cacheStatusText(agentcomposev2.CacheStatus_CACHE_STATUS_ACTIVE) != "active" ||
 		cacheStatusText(agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED) != "referenced" ||

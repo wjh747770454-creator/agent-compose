@@ -15,6 +15,7 @@ import (
 	"agent-compose/pkg/agentcompose/adapters"
 	"agent-compose/pkg/agentcompose/api"
 	"agent-compose/pkg/agentcompose/proxy"
+	"agent-compose/pkg/cache"
 	"agent-compose/pkg/capabilities"
 	"agent-compose/pkg/capproxy"
 	appconfig "agent-compose/pkg/config"
@@ -29,7 +30,6 @@ import (
 	"agent-compose/pkg/projects"
 	"agent-compose/pkg/resources"
 	"agent-compose/pkg/runs"
-	"agent-compose/pkg/runtimecache"
 	"agent-compose/pkg/sessions"
 	"agent-compose/pkg/storage/configstore"
 	"agent-compose/pkg/storage/sessionstore"
@@ -51,6 +51,7 @@ func Register(di do.Injector) {
 }
 
 func RegisterDependencies(di do.Injector) {
+	do.Provide(di, func(do.Injector) (*sessions.LifecycleLocks, error) { return sessions.NewLifecycleLocks(), nil })
 	do.Provide(di, sessionstore.NewStore)
 	do.Provide(di, NewConfigStore)
 	do.Provide(di, NewWorkspaceProvisioner)
@@ -81,6 +82,7 @@ func RegisterDependencies(di do.Injector) {
 	do.Provide(di, NewLoaderController)
 	do.Provide(di, NewRunController)
 	do.Provide(di, NewSandboxRunTargetResolver)
+	do.Provide(di, NewSandboxRemovalCoordinator)
 	do.Provide(di, NewRunSupervisor)
 	do.Provide(di, NewProjectController)
 }
@@ -106,13 +108,13 @@ func RegisterRoutes(di do.Injector) {
 			return do.MustInvoke[adapters.RuntimeProvider](di).ForSession(session)
 		},
 		runDelegate,
-	)
+	).WithLifecycleLocks(do.MustInvoke[*sessions.LifecycleLocks](di))
 	path, handler = agentcomposev2connect.NewExecServiceHandler(execHandler)
 	app.Any(path+"*", echo.WrapHandler(handler))
 	imageHandler := api.NewImageHandler(do.MustInvoke[*adapters.ImageBackends](di))
 	path, handler = agentcomposev2connect.NewImageServiceHandler(imageHandler)
 	app.Any(path+"*", echo.WrapHandler(handler))
-	cacheHandler := api.NewCacheHandler(do.MustInvoke[*runtimecache.Controller](di))
+	cacheHandler := api.NewCacheHandler(do.MustInvoke[*cache.Controller](di))
 	path, handler = agentcomposev2connect.NewCacheServiceHandler(cacheHandler)
 	app.Any(path+"*", echo.WrapHandler(handler))
 	volumeHandler := api.NewVolumeHandler(do.MustInvoke[*volumes.Manager](di))
@@ -134,7 +136,7 @@ func RegisterRoutes(di do.Injector) {
 			}
 			return statsRuntime, nil
 		},
-	).WithRunTargetResolver(do.MustInvoke[*runs.SandboxRunTargetResolver](di))
+	).WithRunTargetResolver(do.MustInvoke[*runs.SandboxRunTargetResolver](di)).WithRemovalCoordinator(do.MustInvoke[*sessions.RemovalCoordinator](di))
 	path, handler = agentcomposev2connect.NewSandboxServiceHandler(sandboxHandler)
 	app.Any(path+"*", echo.WrapHandler(handler))
 	path, handler = agentcomposev2connect.NewSettingsServiceHandler(api.NewSettingsV2Handler(do.MustInvoke[*appconfig.Config](di), do.MustInvoke[*configstore.ConfigStore](di)))
@@ -159,7 +161,40 @@ func NewSandboxRunTargetResolver(di do.Injector) (*runs.SandboxRunTargetResolver
 	return runs.NewSandboxRunTargetResolver(do.MustInvoke[*configstore.ConfigStore](di))
 }
 
+type sandboxRemovalTargetResolver struct {
+	resolver *runs.SandboxRunTargetResolver
+}
+
+func (r sandboxRemovalTargetResolver) ResolveSandboxTargets(ctx context.Context, sandboxes []*domain.Sandbox) (map[string]sessions.SandboxOwnershipTarget, error) {
+	resolved, err := r.resolver.ResolveBatch(ctx, sandboxes)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]sessions.SandboxOwnershipTarget, len(resolved))
+	for id, target := range resolved {
+		out[id] = sessions.SandboxOwnershipTarget{ProjectID: target.ProjectID, AgentName: target.AgentName}
+	}
+	return out, nil
+}
+
+func NewSandboxRemovalCoordinator(di do.Injector) (*sessions.RemovalCoordinator, error) {
+	config := do.MustInvoke[*appconfig.Config](di)
+	return &sessions.RemovalCoordinator{
+		SandboxRoot: config.SandboxRoot,
+		Store:       do.MustInvoke[*sessionstore.Store](di),
+		Runtime:     do.MustInvoke[*adapters.SandboxDriver](di),
+		Targets: sandboxRemovalTargetResolver{
+			resolver: do.MustInvoke[*runs.SandboxRunTargetResolver](di),
+		},
+		Residues: adapters.NewRuntimeResidueManager(config, do.MustInvoke[*adapters.SandboxDriver](di)),
+		Locks:    do.MustInvoke[*sessions.LifecycleLocks](di),
+	}, nil
+}
+
 func StartBackground(di do.Injector) error {
+	for _, warning := range do.MustInvoke[*sessions.RemovalCoordinator](di).Recover(do.MustInvoke[context.Context](di)) {
+		slog.Warn("failed to recover sandbox deletion", "warning", warning)
+	}
 	if err := syncLegacyDefaultProject(do.MustInvoke[context.Context](di), do.MustInvoke[*projects.Controller](di)); err != nil {
 		slog.Warn("failed to sync legacy v1 agents into the default project", "error", err)
 	}
@@ -187,7 +222,7 @@ func NewImageBackends(di do.Injector) (*adapters.ImageBackends, error) {
 	return adapters.NewImageBackends(do.MustInvoke[*appconfig.Config](di))
 }
 
-func NewCacheController(di do.Injector) (*runtimecache.Controller, error) {
+func NewCacheController(di do.Injector) (*cache.Controller, error) {
 	config := do.MustInvoke[*appconfig.Config](di)
 	_ = do.MustInvoke[*sessionstore.Store](di)
 	_ = do.MustInvoke[*configstore.ConfigStore](di)
@@ -197,7 +232,7 @@ func NewCacheController(di do.Injector) (*runtimecache.Controller, error) {
 		imageCacheRoot = filepath.Join(config.DataRoot, "images")
 		config.ImageCacheRoot = imageCacheRoot
 	}
-	cache, err := imagecache.New(imagecache.Config{
+	ociCache, err := imagecache.New(imagecache.Config{
 		Root:               imageCacheRoot,
 		DefaultRegistry:    config.ImageRegistry,
 		InsecureRegistries: config.ImageInsecureRegistries,
@@ -205,16 +240,36 @@ func NewCacheController(di do.Injector) (*runtimecache.Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	config.ImageCacheRoot = cache.Root()
+	config.ImageCacheRoot = ociCache.Root()
 
-	sources := []runtimecache.Source{
-		runtimecache.MaterializedSource{
-			Scanner: runtimecache.MaterializedScanner{Cache: cache},
-			Remover: runtimecache.MaterializedRemover{Cache: cache},
+	sources := []cache.Source{
+		cache.OCISource{Cache: ociCache},
+		cache.MaterializedSource{
+			Scanner: cache.MaterializedScanner{Cache: ociCache, Dependencies: ownershipMaterializedDependencies{sandboxRoot: config.SandboxRoot}},
+			Remover: cache.MaterializedRemover{Cache: ociCache},
 		},
+		cache.SkillSource{Root: filepath.Join(config.DataRoot, "skills")},
 	}
 	sources = append(sources, driver.NewRuntimeCacheSources(config)...)
-	return &runtimecache.Controller{Sources: sources}, nil
+	return &cache.Controller{Sources: sources, TTL: config.CacheTTL}, nil
+}
+
+type ownershipMaterializedDependencies struct {
+	sandboxRoot string
+}
+
+func (p ownershipMaterializedDependencies) MaterializedDependencies(_ context.Context) ([]cache.MaterializedDependency, []string, error) {
+	records, warnings := sessions.ListOwnershipRecords(p.sandboxRoot)
+	var dependencies []cache.MaterializedDependency
+	for _, record := range records {
+		for _, dependency := range record.CacheDependencies {
+			if dependency.Domain != "runtime-image" || strings.TrimSpace(dependency.Identity) == "" {
+				continue
+			}
+			dependencies = append(dependencies, cache.MaterializedDependency{SandboxID: record.SandboxID, Identity: dependency.Identity, Status: record.LifecycleState})
+		}
+	}
+	return dependencies, warnings, nil
 }
 
 func NewResourceLocator(di do.Injector) (*resources.Locator, error) {
@@ -223,7 +278,7 @@ func NewResourceLocator(di do.Injector) (*resources.Locator, error) {
 		do.MustInvoke[*configstore.ConfigStore](di),
 		do.MustInvoke[*sessionstore.Store](di),
 		backends.Auto,
-		do.MustInvoke[*runtimecache.Controller](di),
+		do.MustInvoke[*cache.Controller](di),
 	), nil
 }
 
@@ -302,6 +357,7 @@ func NewLoaderSandboxRunner(di do.Injector) (*adapters.LoaderSandboxRunner, erro
 		do.MustInvoke[*sessions.StreamBroker](di),
 		do.MustInvoke[*loaders.Bus](di),
 		do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
+		do.MustInvoke[*sessions.LifecycleLocks](di),
 	), nil
 }
 
@@ -319,6 +375,7 @@ func NewSandboxRPCBridge(di do.Injector) (*adapters.SandboxRPCBridge, error) {
 		do.MustInvoke[capabilities.Provider](di),
 		do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
 		dashboard,
+		do.MustInvoke[*sessions.LifecycleLocks](di),
 	), nil
 }
 

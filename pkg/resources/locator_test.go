@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"agent-compose/pkg/cache"
 	domain "agent-compose/pkg/model"
-	"agent-compose/pkg/runtimecache"
 )
 
 type storedIDSourceStub struct {
@@ -32,10 +32,10 @@ func (s sandboxIDSourceStub) ListSandboxes(context.Context, domain.SandboxListOp
 }
 
 type cacheIDSourceStub struct {
-	result runtimecache.ListResult
+	result cache.ListResult
 }
 
-func (s cacheIDSourceStub) ListCaches(context.Context, runtimecache.ListRequest) (runtimecache.ListResult, error) {
+func (s cacheIDSourceStub) ListCaches(context.Context, cache.ListRequest) (cache.ListResult, error) {
 	return s.result, nil
 }
 
@@ -84,7 +84,7 @@ func TestLocatorCombinesRuntimeIDCandidates(t *testing.T) {
 		&storedIDSourceStub{},
 		sandboxIDSourceStub{listed: domain.SandboxListResult{Sandboxes: []*domain.Sandbox{{Summary: domain.SandboxSummary{ID: sandboxID}}}}},
 		nil,
-		cacheIDSourceStub{result: runtimecache.ListResult{Items: []runtimecache.Item{{CacheID: cacheID}}}},
+		cacheIDSourceStub{result: cache.ListResult{Items: []cache.Item{{CacheID: cacheID}}}},
 	)
 	targets, warnings, err := locator.ResolveID(context.Background(), ResolveOptions{ID: prefix, Kinds: []Kind{KindSandbox, KindCache}})
 	if err != nil {

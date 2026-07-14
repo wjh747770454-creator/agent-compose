@@ -1082,11 +1082,12 @@ type composeSandboxRemoveOptions struct {
 }
 
 type composeSandboxPruneOptions struct {
-	Status    string
-	Agent     string
-	Driver    string
-	OlderThan string
-	Force     bool
+	Status         string
+	Agent          string
+	Driver         string
+	OlderThan      string
+	IncludeOrphans bool
+	Force          bool
 }
 
 type composeImageListOptions struct {
@@ -1122,12 +1123,11 @@ type composeCacheFilterOptions struct {
 
 type composeCachePruneOptions struct {
 	composeCacheFilterOptions
-	Unused            bool
-	Orphaned          bool
-	Expired           bool
-	OlderThan         string
-	IncludeReferenced bool
-	Force             bool
+	Unused    bool
+	Orphaned  bool
+	Expired   bool
+	OlderThan string
+	Force     bool
 }
 
 type composeCacheRemoveOptions struct {
@@ -1183,7 +1183,7 @@ func addImageRemoveFlags(cmd *cobra.Command, options *composeImageRemoveOptions)
 
 func addCacheFilterFlags(cmd *cobra.Command, options *composeCacheFilterOptions) {
 	cmd.Flags().StringVar(&options.Driver, "driver", "", "Filter caches by driver: docker, boxlite, microsandbox, or all")
-	cmd.Flags().StringVar(&options.Type, "type", "", "Filter caches by type: oci, materialized, runtime, or sandbox")
+	cmd.Flags().StringVar(&options.Type, "type", "", "Filter caches by type: oci, materialized, runtime, or skill")
 	cmd.Flags().StringVar(&options.Status, "status", "", "Filter caches by status: active, referenced, unused, expired, orphaned, or unknown")
 }
 
@@ -1193,7 +1193,6 @@ func addCachePruneFlags(cmd *cobra.Command, options *composeCachePruneOptions) {
 	cmd.Flags().BoolVar(&options.Orphaned, "orphaned", false, "Only match orphaned caches")
 	cmd.Flags().BoolVar(&options.Expired, "expired", false, "Only match expired caches")
 	cmd.Flags().StringVar(&options.OlderThan, "older-than", "", "Only match caches older than a duration such as 7d or 24h")
-	cmd.Flags().BoolVar(&options.IncludeReferenced, "include-referenced", false, "Allow referenced caches to be removed")
 	cmd.Flags().BoolVar(&options.Force, "force", false, "Actually remove matched caches")
 }
 
@@ -1202,6 +1201,7 @@ func addSandboxPruneFlags(cmd *cobra.Command, options *composeSandboxPruneOption
 	cmd.Flags().StringVar(&options.Agent, "agent", "", "Filter sandboxes by agent name")
 	cmd.Flags().StringVar(&options.Driver, "driver", "", "Filter sandboxes by driver: docker, boxlite, or microsandbox")
 	cmd.Flags().StringVar(&options.OlderThan, "older-than", "", "Only match sandboxes older than a duration such as 7d or 24h")
+	cmd.Flags().BoolVar(&options.IncludeOrphans, "include-orphans", false, "Include daemon-wide runtime residues without sandbox records")
 	cmd.Flags().BoolVar(&options.Force, "force", false, "Actually remove matched sandboxes")
 }
 
@@ -1548,9 +1548,36 @@ func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options c
 	if err != nil {
 		return err
 	}
-	project, err := clients.project.GetProject(cmd.Context(), connect.NewRequest(&agentcomposev2.GetProjectRequest{
-		Project: &agentcomposev2.ProjectRef{ProjectId: projectID},
+	statuses := make([]string, 0, len(statusFilter))
+	for status := range statusFilter {
+		statuses = append(statuses, strings.ToUpper(status))
+	}
+	sort.Strings(statuses)
+	resp, err := clients.sandbox.PruneSandboxes(cmd.Context(), connect.NewRequest(&agentcomposev2.PruneSandboxesRequest{
+		ProjectId: projectID, Status: statuses, AgentName: strings.TrimSpace(options.Agent), Driver: options.Driver,
+		OlderThanSeconds: olderThanSeconds, IncludeOrphans: options.IncludeOrphans, Force: options.Force,
 	}))
+	if err != nil {
+		if connect.CodeOf(err) == connect.CodeUnimplemented {
+			if options.IncludeOrphans {
+				return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("sandbox prune --include-orphans requires a daemon with PruneSandboxes support")}
+			}
+			return runLegacyComposeSandboxPrune(cmd, cli, options, clients, composePath, normalized, projectID, statusFilter, olderThanSeconds)
+		}
+		return commandExitErrorForConnect(fmt.Errorf("prune sandboxes: %w", err))
+	}
+	output := composeSandboxPruneOutputFromResponse(resp.Msg)
+	if err := writeSandboxPruneOutput(cmd.OutOrStdout(), cli.JSON, output); err != nil {
+		return err
+	}
+	if options.Force && len(output.Skipped) > 0 {
+		return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("sandbox prune skipped %d sandbox(es)", len(output.Skipped))}
+	}
+	return nil
+}
+
+func runLegacyComposeSandboxPrune(cmd *cobra.Command, cli cliOptions, options composeSandboxPruneOptions, clients cliServiceClients, composePath string, normalized *compose.NormalizedProjectSpec, projectID string, statusFilter map[string]bool, olderThanSeconds uint64) error {
+	project, err := clients.project.GetProject(cmd.Context(), connect.NewRequest(&agentcomposev2.GetProjectRequest{Project: &agentcomposev2.ProjectRef{ProjectId: projectID}}))
 	if err != nil {
 		return commandExitErrorForComposeProject(fmt.Errorf("get project %s: %w", normalized.Name, err), "sandbox prune", normalized.Name, composePath)
 	}
@@ -1564,14 +1591,7 @@ func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options c
 		for _, sandbox := range output.Matched {
 			removeID := firstNonEmptyString(sandbox.RawID, sandbox.SandboxID)
 			if err := removeSandbox(cmd.Context(), clients.sandbox, removeID, false); err != nil {
-				output.Skipped = append(output.Skipped, composeSandboxPruneSkipped{
-					SandboxID: sandbox.SandboxID,
-					Agent:     sandbox.Agent,
-					Status:    sandbox.Status,
-					Driver:    sandbox.Driver,
-					UpdatedAt: firstNonEmptyString(sandbox.UpdatedAt, sandbox.CreatedAt),
-					Reason:    fmt.Sprintf("remove failed: %s", err),
-				})
+				output.Skipped = append(output.Skipped, composeSandboxPruneSkipped{SandboxID: sandbox.SandboxID, Agent: sandbox.Agent, Status: sandbox.Status, Driver: sandbox.Driver, UpdatedAt: firstNonEmptyString(sandbox.UpdatedAt, sandbox.CreatedAt), Reason: fmt.Sprintf("remove failed: %s", err)})
 				continue
 			}
 			output.Removed = append(output.Removed, sandbox.SandboxID)
@@ -1580,10 +1600,37 @@ func runComposeSandboxPruneCommand(cmd *cobra.Command, cli cliOptions, options c
 	if err := writeSandboxPruneOutput(cmd.OutOrStdout(), cli.JSON, output); err != nil {
 		return err
 	}
-	if len(output.Skipped) > 0 {
+	if options.Force && len(output.Skipped) > 0 {
 		return commandExitError{Code: exitCodeGeneral, Err: fmt.Errorf("sandbox prune skipped %d sandbox(es)", len(output.Skipped))}
 	}
 	return nil
+}
+
+func composeSandboxPruneOutputFromResponse(resp *agentcomposev2.PruneSandboxesResponse) composeSandboxPruneOutput {
+	output := composeSandboxPruneOutput{DryRun: resp.GetDryRun(), Removed: displayOpaqueIDs(resp.GetRemoved()), Warnings: append([]string(nil), resp.GetWarnings()...)}
+	for _, item := range resp.GetMatched() {
+		output.Matched = append(output.Matched, composePSSandboxOutput{
+			SandboxID: displayOpaqueID(firstNonEmptyString(item.GetSandboxId(), item.GetRuntimeId())),
+			RawID:     item.GetSandboxId(), SandboxShortID: shortOpaqueID(firstNonEmptyString(item.GetSandboxId(), item.GetRuntimeId())),
+			Agent: item.GetAgentName(), Status: strings.ToLower(item.GetStatus()), Driver: item.GetDriver(),
+			UpdatedAt: formatProtoTimestamp(item.GetUpdatedAt()), Kind: sandboxPruneCandidateKindText(item.GetKind()), RuntimeID: item.GetRuntimeId(),
+		})
+	}
+	for _, item := range resp.GetSkipped() {
+		output.Skipped = append(output.Skipped, composeSandboxPruneSkipped{
+			SandboxID: displayOpaqueID(firstNonEmptyString(item.GetSandboxId(), item.GetRuntimeId())), Agent: item.GetAgentName(),
+			Status: strings.ToLower(item.GetStatus()), Driver: item.GetDriver(), UpdatedAt: formatProtoTimestamp(item.GetUpdatedAt()),
+			Kind: sandboxPruneCandidateKindText(item.GetKind()), RuntimeID: item.GetRuntimeId(), Reason: strings.Join(item.GetBlockedReasons(), "; "),
+		})
+	}
+	return output
+}
+
+func sandboxPruneCandidateKindText(kind agentcomposev2.SandboxPruneCandidateKind) string {
+	if kind == agentcomposev2.SandboxPruneCandidateKind_SANDBOX_PRUNE_CANDIDATE_KIND_RUNTIME_RESIDUE {
+		return "runtime-residue"
+	}
+	return "sandbox-record"
 }
 
 func composeSandboxPruneDryRunOutput(sandboxes []composePSSandboxOutput, statusFilter map[string]bool, options composeSandboxPruneOptions, olderThanSeconds uint64) composeSandboxPruneOutput {
@@ -3984,9 +4031,8 @@ func runComposeCachePruneCommand(cmd *cobra.Command, cli cliOptions, options com
 		return commandExitError{Code: exitCodeUsage, Err: err}
 	}
 	resp, err := clients.cache.PruneCaches(cmd.Context(), connect.NewRequest(&agentcomposev2.PruneCachesRequest{
-		Filter:            filter,
-		IncludeReferenced: options.IncludeReferenced,
-		Force:             options.Force,
+		Filter: filter,
+		Force:  options.Force,
 	}))
 	if err != nil {
 		return commandExitErrorForConnect(fmt.Errorf("prune caches: %w", err))
@@ -4856,6 +4902,8 @@ type composePSOutput struct {
 }
 
 type composePSSandboxOutput struct {
+	Kind           string `json:"kind,omitempty"`
+	RuntimeID      string `json:"runtime_id,omitempty"`
 	SandboxID      string `json:"sandbox_id"`
 	RawID          string `json:"-"`
 	SandboxShortID string `json:"sandbox_short_id"`
@@ -4879,6 +4927,8 @@ type composeSandboxPruneOutput struct {
 }
 
 type composeSandboxPruneSkipped struct {
+	Kind      string `json:"kind,omitempty"`
+	RuntimeID string `json:"runtime_id,omitempty"`
 	SandboxID string `json:"sandbox_id"`
 	Agent     string `json:"agent,omitempty"`
 	Status    string `json:"status,omitempty"`
@@ -5094,7 +5144,6 @@ type composeCacheOutput struct {
 	ImageID        string                        `json:"image_id,omitempty"`
 	ImageRef       string                        `json:"image_ref,omitempty"`
 	ResolvedRef    string                        `json:"resolved_ref,omitempty"`
-	SandboxID      string                        `json:"sandbox_id,omitempty"`
 	Status         string                        `json:"status"`
 	Removable      bool                          `json:"removable"`
 	BlockedReasons []string                      `json:"blocked_reasons,omitempty"`
@@ -5105,6 +5154,7 @@ type composeCacheOutput struct {
 }
 
 type composeCacheReferenceOutput struct {
+	Policy      string `json:"policy,omitempty"`
 	Type        string `json:"type,omitempty"`
 	ID          string `json:"id,omitempty"`
 	Name        string `json:"name,omitempty"`
@@ -6342,6 +6392,7 @@ func composeCacheOutputFromProto(cache *agentcomposev2.CacheItem) composeCacheOu
 	refs := make([]composeCacheReferenceOutput, 0, len(cache.GetReferences()))
 	for _, ref := range cache.GetReferences() {
 		refs = append(refs, composeCacheReferenceOutput{
+			Policy:      cacheReferencePolicyText(ref.GetPolicy()),
 			Type:        ref.GetType(),
 			ID:          displayOpaqueID(ref.GetId()),
 			Name:        ref.GetName(),
@@ -6362,7 +6413,6 @@ func composeCacheOutputFromProto(cache *agentcomposev2.CacheItem) composeCacheOu
 		ImageID:        displayOpaqueID(cache.GetImageId()),
 		ImageRef:       cache.GetImageRef(),
 		ResolvedRef:    cache.GetResolvedRef(),
-		SandboxID:      displayOpaqueID(cache.GetSandboxId()),
 		Status:         cacheStatusText(cache.GetStatus()),
 		Removable:      cache.GetRemovable(),
 		BlockedReasons: append([]string(nil), cache.GetBlockedReasons()...),
@@ -6580,13 +6630,6 @@ func writeCacheInspectText(out io.Writer, output composeCacheInspectOutput) erro
 			firstNonEmptyString(cache.ImageRef, "-"),
 			firstNonEmptyString(cache.ResolvedRef, "-"),
 			firstNonEmptyString(cache.ImageID, "-"),
-		); err != nil {
-			return err
-		}
-	}
-	if cache.SandboxID != "" {
-		if _, err := fmt.Fprintf(out, "Sandbox: %s\n",
-			cache.SandboxID,
 		); err != nil {
 			return err
 		}
@@ -7856,10 +7899,10 @@ func cacheTypeFilterValue(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "":
 		return "", nil
-	case "oci", "materialized", "runtime", "sandbox":
+	case "oci", "materialized", "runtime", "skill":
 		return strings.ToLower(strings.TrimSpace(value)), nil
 	default:
-		return "", fmt.Errorf("invalid --type %q: expected oci, materialized, runtime, or sandbox", value)
+		return "", fmt.Errorf("invalid --type %q: expected oci, materialized, runtime, or skill", value)
 	}
 }
 
@@ -7903,8 +7946,8 @@ func cacheDomainText(domain agentcomposev2.CacheDomain) string {
 		return "materialized-image-cache"
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE:
 		return "runtime-derived-cache"
-	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE:
-		return "sandbox-ephemeral-state"
+	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE:
+		return "skill-artifact-cache"
 	default:
 		return "unspecified"
 	}
@@ -7918,8 +7961,8 @@ func cacheTypeText(domain agentcomposev2.CacheDomain) string {
 		return "materialized"
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE:
 		return "runtime"
-	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE:
-		return "sandbox"
+	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE:
+		return "skill"
 	default:
 		return "unspecified"
 	}
@@ -7945,9 +7988,6 @@ func cacheStatusText(status agentcomposev2.CacheStatus) string {
 }
 
 func cacheRefText(cache composeCacheOutput) string {
-	if ref := cache.SandboxID; ref != "" {
-		return shortOpaqueID(ref)
-	}
 	if cache.ImageRef != "" || cache.ResolvedRef != "" {
 		return firstNonEmptyString(cache.ImageRef, cache.ResolvedRef)
 	}
@@ -7955,6 +7995,13 @@ func cacheRefText(cache composeCacheOutput) string {
 		return shortImageID(cache.ImageID)
 	}
 	return "-"
+}
+
+func cacheReferencePolicyText(policy agentcomposev2.CacheReferencePolicy) string {
+	if policy == agentcomposev2.CacheReferencePolicy_CACHE_REFERENCE_POLICY_ADVISORY {
+		return "advisory"
+	}
+	return "required"
 }
 
 func imageAvailabilityStatusText(status agentcomposev2.ImageAvailabilityStatus) string {

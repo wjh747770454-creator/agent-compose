@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -29,6 +30,33 @@ func TestResolverResolvesFileSkill(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(resolved[0].LocalDir, "SKILL.md")); err != nil {
 		t.Fatalf("resolved SKILL.md missing: %v", err)
+	}
+}
+
+func TestResolverArtifactManifestOmitsSourcePathAndCredentials(t *testing.T) {
+	root := t.TempDir()
+	const secret = "token-super-secret"
+	source := filepath.Join(root, "source-"+secret)
+	writeSkill(t, source, "pdf")
+	resolver := Resolver{CacheRoot: filepath.Join(root, "cache"), LocalSourceRoots: []string{root}, Env: map[string]string{"TOKEN": secret}}
+
+	resolved, err := resolver.Resolve(context.Background(), []domain.AgentSkill{{Name: "pdf", Source: "file", Path: source, Token: "${TOKEN}"}})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(resolved[0].LocalDir, artifactManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(secret)) || bytes.Contains(data, []byte(source)) {
+		t.Fatalf("artifact manifest contains source path or credential: %s", data)
+	}
+	var manifest artifactManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != 1 || manifest.Source != "file" || manifest.Identity == "" || manifest.CreatedAt.IsZero() || manifest.LastUsedAt.IsZero() {
+		t.Fatalf("artifact manifest = %#v", manifest)
 	}
 }
 

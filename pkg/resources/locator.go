@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strings"
 
+	"agent-compose/pkg/cache"
 	"agent-compose/pkg/identity"
 	"agent-compose/pkg/images"
 	domain "agent-compose/pkg/model"
-	"agent-compose/pkg/runtimecache"
 )
 
 type Kind string
@@ -54,7 +54,7 @@ type SandboxSource interface {
 }
 
 type CacheSource interface {
-	ListCaches(context.Context, runtimecache.ListRequest) (runtimecache.ListResult, error)
+	ListCaches(context.Context, cache.ListRequest) (cache.ListResult, error)
 }
 
 type Locator struct {
@@ -136,7 +136,7 @@ func (l *Locator) findCacheIDs(ctx context.Context, ref string) ([]Target, strin
 	if l.caches == nil {
 		return nil, "cache id source is unavailable"
 	}
-	result, err := l.caches.ListCaches(ctx, runtimecache.ListRequest{})
+	result, err := l.caches.ListCaches(ctx, cache.ListRequest{})
 	if err != nil {
 		return nil, fmt.Sprintf("find cache id %q: %v", ref, err)
 	}

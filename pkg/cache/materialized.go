@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"context"
@@ -14,7 +14,6 @@ import (
 const (
 	KindMaterializedOCILayout   = "materialized-oci-layout"
 	KindMaterializedRootFS      = "materialized-rootfs"
-	KindMaterializedReadyFlag   = "materialized-ready-flag"
 	KindMaterializedTempDir     = "materialized-temp-dir"
 	LastUsedSourceMTime         = "mtime"
 	LastUsedSourceMetadata      = "metadata"
@@ -27,7 +26,18 @@ const (
 )
 
 type MaterializedScanner struct {
-	Cache *imagecache.Cache
+	Cache        *imagecache.Cache
+	Dependencies MaterializedDependencyProvider
+}
+
+type MaterializedDependency struct {
+	SandboxID string
+	Identity  string
+	Status    string
+}
+
+type MaterializedDependencyProvider interface {
+	MaterializedDependencies(context.Context) ([]MaterializedDependency, []string, error)
 }
 
 func (s MaterializedScanner) List(ctx context.Context) (ListResult, error) {
@@ -41,6 +51,14 @@ func (s MaterializedScanner) List(ctx context.Context) (ListResult, error) {
 	metadata, warnings := s.loadMetadata()
 	refs, metadataWarnings := materializedMetadataRefs(s.Cache, metadata.Images)
 	result := ListResult{Warnings: AppendWarnings(warnings, metadataWarnings...)}
+	if s.Dependencies != nil {
+		dependencies, dependencyWarnings, err := s.Dependencies.MaterializedDependencies(ctx)
+		result.Warnings = AppendWarnings(result.Warnings, dependencyWarnings...)
+		if err != nil {
+			return ListResult{}, err
+		}
+		applyMaterializedDependencies(s.Cache, metadata.Images, refs, dependencies)
+	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -62,6 +80,37 @@ func (s MaterializedScanner) List(ctx context.Context) (ListResult, error) {
 	return result, nil
 }
 
+func applyMaterializedDependencies(imageCache *imagecache.Cache, images []imagecache.ImageMetadata, refs map[string][]Reference, dependencies []MaterializedDependency) {
+	for _, dependency := range dependencies {
+		identity := strings.TrimSpace(dependency.Identity)
+		if identity == "" {
+			continue
+		}
+		for _, image := range images {
+			if !materializedImageMatchesIdentity(image, identity) {
+				continue
+			}
+			imageID := firstMaterializedNonEmpty(image.ConfigDigest, image.CacheKey, image.ManifestDigest)
+			if imageID == "" {
+				continue
+			}
+			ref := Reference{Policy: ReferencePolicyRequired, Type: "sandbox", ID: dependency.SandboxID, Name: dependency.SandboxID, Status: dependency.Status, Description: "sandbox runtime materialization dependency"}
+			for _, path := range []string{imageCache.MaterializedOCILayoutPath(imageID), imageCache.MaterializedRootFSPath(imageID)} {
+				addMaterializedRef(refs, ref, path)
+			}
+		}
+	}
+}
+
+func materializedImageMatchesIdentity(image imagecache.ImageMetadata, identity string) bool {
+	for _, candidate := range []string{image.ConfigDigest, image.CacheKey, image.ManifestDigest, image.RequestedRef, image.NormalizedRef, firstMaterializedImageRef(image)} {
+		if strings.TrimSpace(candidate) == identity {
+			return true
+		}
+	}
+	return false
+}
+
 func (s MaterializedScanner) loadMetadata() (imagecache.MetadataFile, []string) {
 	metadata, err := s.Cache.LoadMetadata()
 	if err != nil {
@@ -78,8 +127,6 @@ func (s MaterializedScanner) scanMaterializedDir(dir string, refs map[string][]R
 	}{
 		{name: materializedOCIDirName, kind: KindMaterializedOCILayout},
 		{name: materializedRootFSDirName, kind: KindMaterializedRootFS},
-		{name: materializedOCIReadyName, kind: KindMaterializedReadyFlag},
-		{name: materializedRootFSReadyName, kind: KindMaterializedReadyFlag},
 		{name: materializedOCITempName, kind: KindMaterializedTempDir},
 		{name: materializedRootFSTempName, kind: KindMaterializedTempDir},
 	} {
@@ -126,6 +173,23 @@ func (s MaterializedScanner) materializedItem(path, kind string, info os.FileInf
 		References:     refs,
 		Warnings:       warnings,
 	}
+	if readyName := materializedReadyName(kind); readyName != "" {
+		readyPath := filepath.Join(filepath.Dir(path), readyName)
+		readyInfo, readyErr := os.Lstat(readyPath)
+		switch {
+		case readyErr != nil:
+			item.Status = StatusOrphaned
+			item.Warnings = AppendWarnings(item.Warnings, fmt.Sprintf("materialized cache ready flag %s is missing: %v", readyPath, readyErr))
+		case !readyInfo.Mode().IsRegular():
+			item.Status = StatusUnknown
+			item.Warnings = AppendWarnings(item.Warnings, fmt.Sprintf("materialized cache ready flag %s is not a regular file", readyPath))
+		default:
+			item.SizeBytes += uint64(readyInfo.Size())
+			if readyInfo.ModTime().After(item.LastUsedAt) {
+				item.LastUsedAt = readyInfo.ModTime().UTC()
+			}
+		}
+	}
 	if len(refs) > 0 {
 		item.ImageID = refs[0].ID
 		item.ImageRef = refs[0].Name
@@ -137,7 +201,18 @@ func (s MaterializedScanner) materializedItem(path, kind string, info os.FileInf
 		item.Status = StatusUnknown
 		item.Warnings = AppendWarnings(item.Warnings, err.Error())
 	}
-	return EvaluateProtection(item, false)
+	return EvaluateProtection(item)
+}
+
+func materializedReadyName(kind string) string {
+	switch kind {
+	case KindMaterializedOCILayout:
+		return materializedOCIReadyName
+	case KindMaterializedRootFS:
+		return materializedRootFSReadyName
+	default:
+		return ""
+	}
 }
 
 func materializedMetadataRefs(cache *imagecache.Cache, images []imagecache.ImageMetadata) (map[string][]Reference, []string) {
@@ -150,6 +225,7 @@ func materializedMetadataRefs(cache *imagecache.Cache, images []imagecache.Image
 			continue
 		}
 		ref := Reference{
+			Policy:      ReferencePolicyAdvisory,
 			Type:        "image-metadata",
 			ID:          imageID,
 			Name:        firstMaterializedNonEmpty(image.RequestedRef, image.NormalizedRef),
@@ -226,7 +302,7 @@ func warningItem(path, kind, warning string) Item {
 	if cacheID, err := GenerateCacheID(item); err == nil {
 		item.CacheID = cacheID
 	}
-	return EvaluateProtection(item, false)
+	return EvaluateProtection(item)
 }
 
 func firstMaterializedImageRef(image imagecache.ImageMetadata) string {

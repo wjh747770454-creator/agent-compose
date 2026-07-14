@@ -106,7 +106,7 @@ func testNewConfigParsesEnvironment(t *testing.T) {
 	t.Setenv("IMAGE_CACHE_ROOT", filepath.Join(root, "custom-images"))
 	t.Setenv("IMAGE_INSECURE_REGISTRIES", "oci-one.example; oci-two.example\noci-three.example")
 	t.Setenv("BOX_DISK_SIZE_GB", "11")
-	t.Setenv("BOX_CACHE_TTL", "2h")
+	t.Setenv("CACHE_TTL", "2h")
 	t.Setenv("GUEST_WORKSPACE", "/workspace")
 	t.Setenv("GUEST_HOME", "/home/test")
 	t.Setenv("GUEST_STATE_ROOT", "/state")
@@ -141,8 +141,8 @@ func testNewConfigParsesEnvironment(t *testing.T) {
 	if config.LLMTimeout != 7*time.Second || config.AgentTimeout != 8*time.Second {
 		t.Fatalf("timeouts = %s/%s", config.LLMTimeout, config.AgentTimeout)
 	}
-	if config.BoxDiskSizeGB != 11 || config.BoxCacheTTL != 2*time.Hour {
-		t.Fatalf("box disk/cache = %d/%s", config.BoxDiskSizeGB, config.BoxCacheTTL)
+	if config.BoxDiskSizeGB != 11 || config.CacheTTL != 2*time.Hour {
+		t.Fatalf("box disk/cache = %d/%s", config.BoxDiskSizeGB, config.CacheTTL)
 	}
 	if config.DefaultImage != "box:latest" || config.DockerDefaultImage != "docker:latest" || config.MicrosandboxDefaultImage != "box:latest" {
 		t.Fatalf("image config = %#v", config)
@@ -691,6 +691,39 @@ func TestNewConfigPreservesWindowsDockerHostSandboxRoot(t *testing.T) {
 	want := `E:/program/agent-compose-main/data/agent-compose/sandboxes`
 	if config.DockerHostSandboxRoot != want {
 		t.Fatalf("DockerHostSandboxRoot = %q, want %q", config.DockerHostSandboxRoot, want)
+	}
+}
+
+func TestNewConfigCacheTTL(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "default", want: 168 * time.Hour},
+		{name: "disabled", value: "0", want: 0},
+		{name: "custom", value: "24h", want: 24 * time.Hour},
+		{name: "negative", value: "-1h", wantErr: true},
+		{name: "invalid", value: "seven days", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("XDG_DATA_HOME", root)
+			t.Setenv("CACHE_TTL", tc.value)
+			di := do.New()
+			do.ProvideValue(di, slog.Default())
+			config, err := NewConfig(di)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("NewConfig CACHE_TTL=%q returned nil error", tc.value)
+				}
+				return
+			}
+			if err != nil || config.CacheTTL != tc.want {
+				t.Fatalf("NewConfig CACHE_TTL=%q = %v err=%v, want %v", tc.value, config.CacheTTL, err, tc.want)
+			}
+		})
 	}
 }
 

@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"context"
@@ -14,6 +14,7 @@ type Source interface {
 type Controller struct {
 	Sources []Source
 	Now     func() time.Time
+	TTL     time.Duration
 }
 
 func (c *Controller) ListCaches(ctx context.Context, req ListRequest) (ListResult, error) {
@@ -93,6 +94,7 @@ func (c *Controller) inventory(ctx context.Context) ([]Item, []string, map[strin
 		}
 		warnings = AppendWarnings(warnings, result.Warnings...)
 		for _, item := range result.Items {
+			item = c.evaluateStatus(item)
 			items = append(items, item)
 			if item.CacheID != "" {
 				sources[item.CacheID] = source
@@ -100,6 +102,22 @@ func (c *Controller) inventory(ctx context.Context) ([]Item, []string, map[strin
 		}
 	}
 	return items, warnings, sources, nil
+}
+
+func (c *Controller) evaluateStatus(item Item) Item {
+	if item.Status == StatusActive || item.Status == StatusUnknown || item.Status == StatusOrphaned {
+		return EvaluateProtection(item)
+	}
+	if HasRequiredReferences(item.References) {
+		item.Status = StatusReferenced
+		return EvaluateProtection(item)
+	}
+	if c.TTL > 0 && !item.LastUsedAt.IsZero() && c.now().Sub(item.LastUsedAt) >= c.TTL {
+		item.Status = StatusExpired
+	} else {
+		item.Status = StatusUnused
+	}
+	return EvaluateProtection(item)
 }
 
 func (c *Controller) now() time.Time {
@@ -125,9 +143,42 @@ type MaterializedSource struct {
 }
 
 func (s MaterializedSource) List(ctx context.Context) (ListResult, error) {
+	if s.Scanner.Cache == nil {
+		return s.Scanner.List(ctx)
+	}
+	unlock, err := s.Scanner.Cache.Lock()
+	if err != nil {
+		return ListResult{}, err
+	}
+	defer func() { _ = unlock() }()
 	return s.Scanner.List(ctx)
 }
 
 func (s MaterializedSource) Remove(ctx context.Context, item Item) error {
-	return s.Remover.Remove(ctx, item)
+	if s.Scanner.Cache == nil || s.Remover.Cache == nil || s.Scanner.Cache.Root() != s.Remover.Cache.Root() {
+		return fmt.Errorf("materialized cache source requires one shared image cache")
+	}
+	unlock, err := s.Remover.Cache.Lock()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unlock() }()
+	latest, err := s.Scanner.List(ctx)
+	if err != nil {
+		return err
+	}
+	resolved, err := ResolveCacheID(latest.Items, item.CacheID)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range latest.Items {
+		candidate = EvaluateProtection(candidate)
+		if candidate.CacheID == resolved {
+			if !candidate.Removable {
+				return fmt.Errorf("materialized cache item is no longer safely removable")
+			}
+			return s.Remover.removeLocked(ctx, candidate)
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrCacheNotFound, item.CacheID)
 }

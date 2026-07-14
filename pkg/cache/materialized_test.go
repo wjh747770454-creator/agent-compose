@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"context"
@@ -51,9 +51,10 @@ func TestMaterializedScannerListsReferencedItemsAndMetadataWarnings(t *testing.T
 	if layout.ImageID != image.ConfigDigest || layout.ImageRef != image.RequestedRef || layout.ResolvedRef != image.RepoDigests[0] {
 		t.Fatalf("layout image fields = %#v", layout)
 	}
-	ready := requireItem(t, result.Items, readyPath)
-	if ready.Kind != KindMaterializedReadyFlag || ready.Status != StatusReferenced {
-		t.Fatalf("ready item = %#v", ready)
+	for _, item := range result.Items {
+		if item.Path == readyPath {
+			t.Fatalf("ready flag was listed separately from layout: %#v", item)
+		}
 	}
 	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], image.RootFSCachePath) {
 		t.Fatalf("Warnings = %#v, want missing rootfs metadata path", result.Warnings)
@@ -97,12 +98,13 @@ func TestMaterializedScannerListsRootFSTempAndOrphanedDirs(t *testing.T) {
 		t.Fatalf("List returned error: %v", err)
 	}
 	rootfs := requireItem(t, result.Items, rootfsPath)
-	if rootfs.Kind != KindMaterializedRootFS || rootfs.Status != StatusReferenced || rootfs.SizeBytes != 4 {
+	if rootfs.Kind != KindMaterializedRootFS || rootfs.Status != StatusReferenced || rootfs.SizeBytes != 9 {
 		t.Fatalf("rootfs item = %#v", rootfs)
 	}
-	rootfsReady := requireItem(t, result.Items, rootfsReadyPath)
-	if rootfsReady.Kind != KindMaterializedReadyFlag || rootfsReady.Status != StatusReferenced {
-		t.Fatalf("rootfs ready item = %#v", rootfsReady)
+	for _, item := range result.Items {
+		if item.Path == rootfsReadyPath {
+			t.Fatalf("rootfs ready flag was listed separately: %#v", item)
+		}
 	}
 	tmp := requireItem(t, result.Items, tmpPath)
 	if tmp.Kind != KindMaterializedTempDir || tmp.Status != StatusOrphaned || !tmp.Removable {

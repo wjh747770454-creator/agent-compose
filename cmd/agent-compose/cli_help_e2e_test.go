@@ -54,7 +54,7 @@ func TestE2ECLIHelpCoversUserWorkflowCommandSurface(t *testing.T) {
 		{
 			name: "sandbox prune",
 			args: []string{"sandbox", "prune", "--help"},
-			want: []string{"Prune stopped or failed sandboxes", "--status", "--agent", "--driver", "--older-than", "--force"},
+			want: []string{"Prune stopped or failed sandboxes", "--status", "--agent", "--driver", "--older-than", "--include-orphans", "--force"},
 		},
 		{
 			name: "exec",
@@ -74,7 +74,7 @@ func TestE2ECLIHelpCoversUserWorkflowCommandSurface(t *testing.T) {
 		{
 			name: "cache prune",
 			args: []string{"cache", "prune", "--help"},
-			want: []string{"Prune daemon runtime caches", "--driver", "--type", "--status", "--unused", "--orphaned", "--expired", "--older-than", "--include-referenced", "--force"},
+			want: []string{"Prune daemon runtime caches", "--driver", "--type", "--status", "--unused", "--orphaned", "--expired", "--older-than", "--force"},
 		},
 		{
 			name: "cache rm",

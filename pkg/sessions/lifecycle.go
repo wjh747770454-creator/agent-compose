@@ -58,6 +58,7 @@ type Lifecycle struct {
 	TokenRevoker     FacadeTokenRevoker
 	Notifier         LifecycleNotifier
 	GuideWriter      CapabilityGuideWriter
+	Locks            *LifecycleLocks
 }
 
 func (l Lifecycle) validateSandboxRuntime(session *domain.Sandbox) error {
@@ -130,9 +131,14 @@ func (l Lifecycle) ReconcileRuntimeState(ctx context.Context, session *domain.Sa
 }
 
 func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*domain.Sandbox, domain.ProxyState, error) {
+	unlock := l.Locks.Lock(sessionID)
+	defer unlock()
 	session, err := l.Store.GetSandbox(ctx, sessionID)
 	if err != nil {
 		return nil, domain.ProxyState{}, err
+	}
+	if session.Summary.VMStatus == domain.VMStatusDeleting {
+		return nil, domain.ProxyState{}, fmt.Errorf("sandbox %s is being deleted", session.Summary.ID)
 	}
 	proxyState, err := l.Store.GetProxyState(session.Summary.ID)
 	if err != nil {
@@ -175,6 +181,22 @@ func (l Lifecycle) EnsureProxyReady(ctx context.Context, sessionID string) (*dom
 }
 
 func (l Lifecycle) ResumeLoaded(ctx context.Context, session *domain.Sandbox, capsetIDs []string) (*domain.Sandbox, error) {
+	if session == nil {
+		return nil, fmt.Errorf("sandbox is being deleted")
+	}
+	unlock := l.Locks.Lock(session.Summary.ID)
+	defer unlock()
+	if l.Store != nil {
+		current, err := l.Store.GetSandbox(ctx, session.Summary.ID)
+		if err != nil {
+			return nil, err
+		}
+		domain.RestoreSandboxTransientFields(current, session)
+		session = current
+	}
+	if session.Summary.VMStatus == domain.VMStatusDeleting {
+		return nil, fmt.Errorf("sandbox is being deleted")
+	}
 	if err := l.validateSandboxRuntime(session); err != nil {
 		return nil, err
 	}
@@ -217,6 +239,22 @@ func (l Lifecycle) ensureWorkspace(ctx context.Context, session *domain.Sandbox)
 }
 
 func (l Lifecycle) StopLoaded(ctx context.Context, session *domain.Sandbox) (*domain.Sandbox, bool, error) {
+	if session == nil {
+		return nil, false, fmt.Errorf("sandbox is required")
+	}
+	unlock := l.Locks.Lock(session.Summary.ID)
+	defer unlock()
+	if l.Store != nil {
+		current, err := l.Store.GetSandbox(ctx, session.Summary.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		domain.RestoreSandboxTransientFields(current, session)
+		session = current
+	}
+	if session.Summary.VMStatus == domain.VMStatusDeleting {
+		return nil, false, fmt.Errorf("sandbox is being deleted")
+	}
 	if session.Summary.VMStatus != domain.VMStatusRunning {
 		return session, false, nil
 	}

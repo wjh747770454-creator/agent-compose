@@ -22,6 +22,7 @@ import (
 	"agent-compose/pkg/execution"
 	"agent-compose/pkg/identity"
 	domain "agent-compose/pkg/model"
+	"agent-compose/pkg/sessions"
 
 	"github.com/google/uuid"
 	"github.com/samber/do/v2"
@@ -65,7 +66,11 @@ func NewWithConfig(config *appconfig.Config) (*Store, error) {
 	if err := os.MkdirAll(config.SandboxRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("create sandbox root: %w", err)
 	}
-	return &Store{config: config}, nil
+	store := &Store{config: config}
+	if err := store.backfillOwnershipRecords(); err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 func FromConfig(config *appconfig.Config) *Store {
@@ -204,6 +209,21 @@ func (s *Store) CreateSandboxWithOptions(_ context.Context, title, baseWorkspace
 	if err := s.saveEvents(id, nil); err != nil {
 		return nil, err
 	}
+	if err := sessions.WriteOwnershipRecord(s.config.SandboxRoot, sessions.OwnershipRecord{
+		Version:        sessions.OwnershipRecordVersion,
+		SandboxID:      session.Summary.ID,
+		Driver:         session.Summary.Driver,
+		RuntimeID:      session.Summary.RuntimeRef,
+		SandboxPath:    sandboxDir,
+		LifecycleState: "active",
+		OwnedResources: []sessions.OwnedResource{
+			{Kind: "runtime", Identity: session.Summary.RuntimeRef},
+			{Kind: "sandbox-directory", Path: sandboxDir},
+		},
+		CacheDependencies: []sessions.CacheDependency{{Domain: "runtime-image", Identity: guestImage}},
+	}); err != nil {
+		return nil, fmt.Errorf("write sandbox ownership record: %w", err)
+	}
 
 	return session, nil
 }
@@ -289,6 +309,39 @@ func (s *Store) RemoveSandbox(_ context.Context, id string) error {
 		return fmt.Errorf("remove sandbox dir %s: %w", id, err)
 	}
 	s.sandboxLocks.Delete(sandboxLockKey(id))
+	return nil
+}
+
+func (s *Store) backfillOwnershipRecords() error {
+	entries, err := os.ReadDir(s.config.SandboxRoot)
+	if err != nil {
+		return fmt.Errorf("read sandbox root for lifecycle backfill: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == ".lifecycle" {
+			continue
+		}
+		sandbox, loadErr := s.loadSandbox(entry.Name())
+		if loadErr != nil {
+			continue
+		}
+		if _, recordErr := sessions.ReadOwnershipRecord(s.config.SandboxRoot, sandbox.Summary.ID); recordErr == nil {
+			continue
+		} else if !os.IsNotExist(recordErr) {
+			// A corrupt or unsupported record is evidence we cannot safely replace.
+			continue
+		}
+		record := sessions.OwnershipRecord{
+			Version: sessions.OwnershipRecordVersion, SandboxID: sandbox.Summary.ID,
+			Driver: sandbox.Summary.Driver, RuntimeID: sandbox.Summary.RuntimeRef,
+			SandboxPath: s.sandboxDir(sandbox.Summary.ID), LifecycleState: "active",
+			OwnedResources:    []sessions.OwnedResource{{Kind: "runtime", Identity: sandbox.Summary.RuntimeRef}, {Kind: "sandbox-directory", Path: s.sandboxDir(sandbox.Summary.ID)}},
+			CacheDependencies: []sessions.CacheDependency{{Domain: "runtime-image", Identity: sandbox.Summary.GuestImage}},
+		}
+		if writeErr := sessions.WriteOwnershipRecord(s.config.SandboxRoot, record); writeErr != nil {
+			return fmt.Errorf("backfill sandbox ownership %s: %w", sandbox.Summary.ID, writeErr)
+		}
+	}
 	return nil
 }
 

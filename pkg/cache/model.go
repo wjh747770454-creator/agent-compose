@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import "time"
 
@@ -15,7 +15,7 @@ const (
 	DomainOCIImageStore          Domain = "oci-image-store"
 	DomainMaterializedImageCache Domain = "materialized-image-cache"
 	DomainRuntimeDerivedCache    Domain = "runtime-derived-cache"
-	DomainSandboxEphemeralState  Domain = "sandbox-ephemeral-state"
+	DomainSkillArtifactCache     Domain = "skill-artifact-cache"
 )
 
 type CacheType string
@@ -24,7 +24,7 @@ const (
 	CacheTypeOCI          CacheType = "oci"
 	CacheTypeMaterialized CacheType = "materialized"
 	CacheTypeRuntime      CacheType = "runtime"
-	CacheTypeSandbox      CacheType = "sandbox"
+	CacheTypeSkill        CacheType = "skill"
 )
 
 type Status string
@@ -39,6 +39,7 @@ const (
 )
 
 type Reference struct {
+	Policy      ReferencePolicy
 	Type        string
 	ID          string
 	Name        string
@@ -46,6 +47,15 @@ type Reference struct {
 	Status      string
 	Description string
 }
+
+type ReferencePolicy string
+
+const (
+	// The empty policy is treated as required so older inventory producers fail
+	// closed instead of accidentally making referenced artifacts removable.
+	ReferencePolicyRequired ReferencePolicy = "required"
+	ReferencePolicyAdvisory ReferencePolicy = "advisory"
+)
 
 type Item struct {
 	CacheID        string
@@ -57,7 +67,6 @@ type Item struct {
 	ImageID        string
 	ImageRef       string
 	ResolvedRef    string
-	SandboxID      string
 	Status         Status
 	Removable      bool
 	BlockedReasons []string
@@ -86,9 +95,8 @@ type ListResult struct {
 }
 
 type PruneRequest struct {
-	Filter            Filter
-	IncludeReferenced bool
-	Force             bool
+	Filter Filter
+	Force  bool
 }
 
 type RemoveRequest struct {

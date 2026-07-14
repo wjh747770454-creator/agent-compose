@@ -9,10 +9,11 @@ import (
 )
 
 const (
-	VMStatusPending = "PENDING"
-	VMStatusRunning = "RUNNING"
-	VMStatusStopped = "STOPPED"
-	VMStatusFailed  = "FAILED"
+	VMStatusPending  = "PENDING"
+	VMStatusRunning  = "RUNNING"
+	VMStatusStopped  = "STOPPED"
+	VMStatusFailed   = "FAILED"
+	VMStatusDeleting = "DELETING"
 
 	SandboxTypeManual = "manual"
 	SandboxTypeScript = "script"

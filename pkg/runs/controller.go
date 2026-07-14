@@ -125,6 +125,8 @@ type Controller struct {
 	dashboard        DashboardNotifier
 	capTokens        CapabilitySandboxIndexer
 	runLogs          *RunLogHub
+	lifecycleLocks   *sessions.LifecycleLocks
+	removal          SandboxRemoval
 }
 
 type llmFacadeTokenDeleter interface {
@@ -153,6 +155,12 @@ type ControllerDependencies struct {
 	Dashboard        DashboardNotifier
 	CapTokens        CapabilitySandboxIndexer
 	RunLogs          *RunLogHub
+	LifecycleLocks   *sessions.LifecycleLocks
+	Removal          SandboxRemoval
+}
+
+type SandboxRemoval interface {
+	Remove(context.Context, string, bool) (sessions.RemovalResult, error)
 }
 
 func NewController(deps ControllerDependencies) *Controller {
@@ -173,6 +181,8 @@ func NewController(deps ControllerDependencies) *Controller {
 		dashboard:        deps.Dashboard,
 		capTokens:        deps.CapTokens,
 		runLogs:          deps.RunLogs,
+		lifecycleLocks:   deps.LifecycleLocks,
+		removal:          deps.Removal,
 	}
 }
 
@@ -1940,6 +1950,8 @@ func (c *Controller) ensureProjectRunSandbox(ctx context.Context, run domain.Pro
 		}
 	}
 	if sandboxID := strings.TrimSpace(req.SandboxID); sandboxID != "" {
+		unlock := c.lifecycleLocks.Lock(sandboxID)
+		defer unlock()
 		if len(req.Volumes) > 0 {
 			return SandboxResult{}, fmt.Errorf("%w: run volumes cannot be combined with an existing sandbox", ErrInvalidRequest)
 		}
@@ -1950,6 +1962,9 @@ func (c *Controller) ensureProjectRunSandbox(ctx context.Context, run domain.Pro
 			}
 			warnings = append(warnings, fmt.Sprintf("sticky sandbox %s is unavailable; creating a replacement", sandboxID))
 		} else {
+			if sandbox.Summary.VMStatus == domain.VMStatusDeleting {
+				return SandboxResult{Sandbox: sandbox}, fmt.Errorf("sandbox %s is being deleted", sandboxID)
+			}
 			driver, err := driverpkg.ResolveSandboxRuntimeDriver(sandbox.Summary.Driver, c.config.RuntimeDriver)
 			if err != nil {
 				return SandboxResult{}, err
@@ -2106,6 +2121,9 @@ func (c *Controller) startProjectRunSandbox(ctx context.Context, sandbox *domain
 	if sandbox == nil {
 		return fmt.Errorf("sandbox is required")
 	}
+	if sandbox.Summary.VMStatus == domain.VMStatusDeleting {
+		return fmt.Errorf("sandbox %s is being deleted", sandbox.Summary.ID)
+	}
 	if err := c.workspaceEnsurer.Ensure(ctx, sandbox); err != nil {
 		sandbox.Summary.VMStatus = domain.VMStatusFailed
 		_ = c.store.UpdateSandbox(ctx, sandbox)
@@ -2188,6 +2206,10 @@ func (c *Controller) cleanupProjectRunSandbox(ctx context.Context, coordinator *
 func (c *Controller) cleanupProjectRunSandboxByPolicy(ctx context.Context, sandboxResult SandboxResult, policy agentcomposev2.RunSandboxCleanupPolicy) error {
 	sandbox := sandboxResult.Sandbox
 	if CleanupPolicyRemovesSandbox(policy) && sandboxResult.Created {
+		if c.removal != nil {
+			_, err := c.removal.Remove(ctx, sandbox.Summary.ID, true)
+			return err
+		}
 		if err := c.stopProjectRunSandbox(ctx, sandbox); err != nil {
 			return err
 		}

@@ -70,6 +70,7 @@ service VolumeService {
 
 service SandboxService {
   rpc RemoveSandbox(RemoveSandboxRequest) returns (RemoveSandboxResponse);
+  rpc PruneSandboxes(PruneSandboxesRequest) returns (PruneSandboxesResponse);
   rpc GetSandboxStats(GetSandboxStatsRequest) returns (GetSandboxStatsResponse);
   rpc GetSandbox(GetSandboxRequest) returns (GetSandboxResponse);
   rpc StopSandbox(StopSandboxRequest) returns (StopSandboxResponse);
@@ -240,13 +241,26 @@ enum MetricStatus {
 }
 
 enum CacheDomain {
-  reserved "CACHE_DOMAIN_SESSION_EPHEMERAL_STATE";
+  reserved 4;
+  reserved "CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE";
 
   CACHE_DOMAIN_UNSPECIFIED = 0;
   CACHE_DOMAIN_OCI_IMAGE_STORE = 1;
   CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE = 2;
   CACHE_DOMAIN_RUNTIME_DERIVED_CACHE = 3;
-  CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE = 4;
+  CACHE_DOMAIN_SKILL_ARTIFACT_CACHE = 5;
+}
+
+enum CacheReferencePolicy {
+  CACHE_REFERENCE_POLICY_UNSPECIFIED = 0;
+  CACHE_REFERENCE_POLICY_REQUIRED = 1;
+  CACHE_REFERENCE_POLICY_ADVISORY = 2;
+}
+
+enum SandboxPruneCandidateKind {
+  SANDBOX_PRUNE_CANDIDATE_KIND_UNSPECIFIED = 0;
+  SANDBOX_PRUNE_CANDIDATE_KIND_SANDBOX_RECORD = 1;
+  SANDBOX_PRUNE_CANDIDATE_KIND_RUNTIME_RESIDUE = 2;
 }
 
 enum CacheStatus {
@@ -854,6 +868,37 @@ message RemoveSandboxResponse {
   bool removed = 3;
 }
 
+message PruneSandboxesRequest {
+  string project_id = 1;
+  repeated string status = 2;
+  string agent_name = 3;
+  string driver = 4;
+  uint64 older_than_seconds = 5;
+  bool include_orphans = 6;
+  bool force = 7;
+}
+
+message SandboxPruneCandidate {
+  SandboxPruneCandidateKind kind = 1;
+  string sandbox_id = 2;
+  string project_id = 3;
+  string agent_name = 4;
+  string driver = 5;
+  string status = 6;
+  string runtime_id = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  bool removable = 9;
+  repeated string blocked_reasons = 10;
+}
+
+message PruneSandboxesResponse {
+  bool dry_run = 1;
+  repeated SandboxPruneCandidate matched = 2;
+  repeated string removed = 3;
+  repeated SandboxPruneCandidate skipped = 4;
+  repeated string warnings = 5;
+}
+
 message GetSandboxStatsRequest {
   string sandbox_id = 1;
 }
@@ -1263,7 +1308,6 @@ message InspectCacheResponse {
 
 message PruneCachesRequest {
   CacheFilter filter = 1;
-  bool include_referenced = 2;
   bool force = 3;
 }
 
@@ -1301,7 +1345,6 @@ message CacheItem {
   string image_id = 7;
   string image_ref = 8;
   string resolved_ref = 9;
-  string sandbox_id = 11;
   CacheStatus status = 12;
   bool removable = 13;
   repeated string blocked_reasons = 14;
@@ -1318,6 +1361,7 @@ message CacheReference {
   string path = 4;
   string status = 5;
   string description = 6;
+  CacheReferencePolicy policy = 7;
 }
 
 message ListVolumesRequest {

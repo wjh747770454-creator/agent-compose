@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"context"
@@ -36,7 +36,10 @@ func (r MaterializedRemover) Remove(ctx context.Context, item Item) error {
 		return err
 	}
 	defer func() { _ = unlock() }()
+	return r.removeLocked(ctx, item)
+}
 
+func (r MaterializedRemover) removeLocked(ctx context.Context, item Item) error {
 	safe, err := ValidateCachePath(r.Cache.MaterializationRoot(), item.Path)
 	if err != nil {
 		return err
@@ -47,7 +50,7 @@ func (r MaterializedRemover) Remove(ctx context.Context, item Item) error {
 		paths = append(paths, filepath.Join(safe.CanonicalParent, materializedOCIReadyName))
 	case KindMaterializedRootFS:
 		paths = append(paths, filepath.Join(safe.CanonicalParent, materializedRootFSReadyName))
-	case KindMaterializedReadyFlag, KindMaterializedTempDir:
+	case KindMaterializedTempDir:
 	default:
 		return fmt.Errorf("unsupported materialized cache kind %q", item.Kind)
 	}

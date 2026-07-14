@@ -74,7 +74,7 @@ type Config struct {
 	ImageCacheRoot             string
 	ImageInsecureRegistries    []string
 	BoxDiskSizeGB              int
-	BoxCacheTTL                time.Duration
+	CacheTTL                   time.Duration
 	ImagePullTimeout           time.Duration
 	GuestWorkspacePath         string
 	GuestHomePath              string
@@ -287,13 +287,16 @@ func NewConfig(di do.Injector) (*Config, error) {
 		}
 	}
 
-	boxCacheTTL := 7 * 24 * time.Hour
-	if raw := os.Getenv("BOX_CACHE_TTL"); raw != "" {
-		if parsed, err := time.ParseDuration(raw); err != nil {
-			logger.Warn("failed to parse BOX_CACHE_TTL", "value", raw, "error", err)
-		} else {
-			boxCacheTTL = parsed
+	cacheTTL := 7 * 24 * time.Hour
+	if raw := strings.TrimSpace(os.Getenv("CACHE_TTL")); raw != "" {
+		parsed, parseErr := time.ParseDuration(raw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse CACHE_TTL %q: %w", raw, parseErr)
 		}
+		if parsed < 0 {
+			return nil, fmt.Errorf("CACHE_TTL must not be negative")
+		}
+		cacheTTL = parsed
 	}
 
 	guestPaths := &Config{
@@ -462,7 +465,7 @@ func NewConfig(di do.Injector) (*Config, error) {
 		ImageCacheRoot:             imageCacheRoot,
 		ImageInsecureRegistries:    imageInsecureRegistries,
 		BoxDiskSizeGB:              boxDiskSizeGB,
-		BoxCacheTTL:                boxCacheTTL,
+		CacheTTL:                   cacheTTL,
 		ImagePullTimeout:           imagePullTimeout,
 		GuestWorkspacePath:         guestPaths.GuestWorkspacePath,
 		GuestHomePath:              guestPaths.GuestHomePath,

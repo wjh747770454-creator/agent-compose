@@ -238,7 +238,7 @@ sandbox store 会把 Jupyter options 写入 `proxy/jupyter.json`。driver 启动
 
 Docker daemon 只是可选 image backend；OCI cache 是 daemonless backend。BoxLite 和 Microsandbox 可以在启动 runtime 时从 OCI image 派生自身 artifact，但 `pull` 不属于 runtime driver 能力。
 
-`rmi` 同样只面向 image store/backend。materialized image cache、runtime-derived driver cache 和 sandbox-ephemeral state 的清理由 `cache ls|inspect|prune|rm` 显式完成，并复用 `CacheService` 的 dry-run、`--force`、保护状态和安全路径检查。
+`rmi` 同样只面向 image store/backend 的逻辑 ref。OCI 物理存储、materialized image cache、runtime-derived shared image cache 和 skill artifact cache 由 `cache ls|inspect|prune|rm` 显式管理；sandbox 自有 runtime state 由 `sandbox rm|prune` 管理。
 
 ## Sandbox lifecycle
 

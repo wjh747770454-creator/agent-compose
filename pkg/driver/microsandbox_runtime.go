@@ -44,6 +44,11 @@ type microsandboxExecCollector struct {
 
 const microsandboxExecExitIdleGracePeriod = 2 * time.Second
 
+const (
+	microsandboxManagedLabel   = "agent-compose.managed"
+	microsandboxSandboxIDLabel = "agent-compose.sandbox_id"
+)
+
 type microsandboxExecEventReceiver func(context.Context) (*microsandbox.ExecEvent, error)
 type microsandboxExecHandleCloser func() error
 
@@ -694,6 +699,9 @@ func (r *microsandboxRuntime) ensureDockerDisk(sandboxID string) (string, error)
 	}
 	if _, err := os.Stat(path); err == nil {
 		// Disk already exists; reuse it (idempotent for sandbox reconnects).
+		if err := writeMicrosandboxDiskOwnership(path, sandboxID); err != nil {
+			return "", err
+		}
 		return path, nil
 	}
 	legacyPath := r.legacyDockerDiskPath(sandboxID)
@@ -701,6 +709,9 @@ func (r *microsandboxRuntime) ensureDockerDisk(sandboxID string) (string, error)
 		if _, err := os.Stat(legacyPath); err == nil {
 			if err := os.Rename(legacyPath, path); err != nil {
 				return "", fmt.Errorf("migrate legacy docker disk image %s to %s: %w", legacyPath, path, err)
+			}
+			if err := writeMicrosandboxDiskOwnership(path, sandboxID); err != nil {
+				return "", err
 			}
 			return path, nil
 		} else if !os.IsNotExist(err) {
@@ -731,6 +742,10 @@ func (r *microsandboxRuntime) ensureDockerDisk(sandboxID string) (string, error)
 		_ = os.Remove(path)
 		return "", fmt.Errorf("mkfs.ext4 docker disk image %s: %w: %s", path, err, strings.TrimSpace(string(out)))
 	}
+	if err := writeMicrosandboxDiskOwnership(path, sandboxID); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
 	return path, nil
 }
 
@@ -748,6 +763,9 @@ func (r *microsandboxRuntime) removeDockerDiskFiles(sandboxID string) error {
 	for _, path := range paths {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove microsandbox docker disk image %s: %w", path, err)
+		}
+		if err := os.Remove(path + ".owner.json"); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove microsandbox docker disk ownership %s: %w", path, err)
 		}
 	}
 	return nil
@@ -932,14 +950,15 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sandbo
 	// with "invalid argument"; a disk-image mount keeps docker's overlay
 	// storage on a real block device. One disk image per sandbox so concurrent
 	// VMs never share the same ext4 image. The image is provisioned on the
-	// host by agent-compose and removed when the sandbox stops.
+	// host by agent-compose. Stop preserves it for resume; explicit sandbox
+	// removal deletes it together with the SDK sandbox state.
 	rawPath, err := r.ensureDockerDisk(session.Summary.ID)
 	if err != nil {
 		return nil, fmt.Errorf("provision docker disk: %w", err)
 	}
 	// If the sandbox never comes up, remove the disk we just provisioned:
 	// StopSandbox is not guaranteed to run for a sandbox that never started,
-	// so without this the .raw would linger until explicit cache prune. On
+	// so without this an unowned .raw would remain after failed creation. On
 	// success the flag below disarms the cleanup.
 	sandboxCreated := false
 	defer func() {
@@ -992,6 +1011,7 @@ func (r *microsandboxRuntime) createSandbox(ctx context.Context, session *Sandbo
 		microsandbox.WithNetwork(network),
 		microsandbox.WithPullPolicy(pullPolicy),
 		microsandbox.WithMounts(mounts),
+		microsandbox.WithLabels(map[string]string{microsandboxManagedLabel: "true", microsandboxSandboxIDLabel: session.Summary.ID}),
 		// Fixed microVM size: the SDK defaults (512MiB / 1 CPU) are too small
 		// for docker-in-VM workloads (pulling large images, building from a
 		// container).

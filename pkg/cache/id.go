@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"errors"
@@ -105,7 +105,6 @@ func cacheIDIdentity(item Item) string {
 		item.ImageID,
 		item.ResolvedRef,
 		item.ImageRef,
-		item.SandboxID,
 	} {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" {

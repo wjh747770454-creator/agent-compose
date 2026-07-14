@@ -250,6 +250,7 @@ agent-compose sandbox prune
 agent-compose sandbox prune --older-than 7d
 agent-compose sandbox prune --status error --json
 agent-compose sandbox prune --agent worker --driver microsandbox --force
+agent-compose sandbox prune --include-orphans
 ```
 
 Subcommands:
@@ -270,15 +271,18 @@ Subcommands:
 | `--agent <agent>` | Match only sandboxes for one agent name. |
 | `--driver <docker|boxlite|microsandbox>` | Match only sandboxes using one runtime driver. |
 | `--older-than <duration>` | Match sandboxes whose `updated_at`, or `created_at` when `updated_at` is missing, is older than a duration such as `7d` or `168h`. |
+| `--include-orphans` | Also inventory daemon-wide managed runtime residue that has no sandbox record in any project. |
 | `--force` | Actually remove matched sandboxes. Without this flag, `sandbox prune` is a dry-run. |
 
 Rules:
 
-- `sandbox prune` only considers sandboxes that belong to the current compose project.
-- `sandbox prune` never removes `running` or `pending` sandboxes and never sends `force=true` to `RemoveSandbox`.
-- Time values that cannot be parsed are skipped and reported as warnings.
-- `sandbox prune` removes sandbox records through `SandboxService.RemoveSandbox`; it does not clean runtime cache files. Use `cache prune` or `cache rm` for daemon runtime cache inventory.
+- Without `--include-orphans`, `sandbox prune` only considers stopped or failed sandbox records in the current compose project and does not scan driver residue.
+- With `--include-orphans`, `--driver` and `--older-than` filter both record and residue candidates; `--status` and `--agent` only filter records. A runtime resource associated with any known sandbox record is never an orphan.
+- Ownership-incomplete, corrupt, path-escaping, active, or unknown-schema residue is displayed as non-removable and remains skipped even with `--force`.
+- `sandbox prune` calls the daemon `SandboxService.PruneSandboxes` use case. It removes sandbox-owned runtime/data state, not shared cache artifacts; use `cache prune` or `cache rm` for cache inventory.
 - If a forced prune fails to remove one matched sandbox, it continues with later matches, writes the skipped item, and exits non-zero.
+
+`sandbox stop` preserves resumable driver state. `sandbox rm` writes a durable deletion journal under `<SANDBOX_ROOT>/.lifecycle`, rejects a running sandbox unless `--force` is supplied, and removes the driver resource, sandbox accessories, sandbox directory, and metadata in restart-safe stages. A sandbox in `DELETING` cannot be resumed or used for new exec/run work; daemon startup resumes only incomplete deletion journals and never guesses that an ordinary historical resource is orphaned.
 
 ## `stats`: Show Sandbox Resource Stats
 
@@ -467,7 +471,7 @@ Commands:
 - `images`: list images.
 - `pull`: pull all agent images referenced by the current project.
 - `pull <image>`: pull a specific image. If the local OCI image backend/store already has the image, the command succeeds directly with a skipped/already exists warning and does not pull again.
-- `rmi <image>`: remove an image metadata/store entry. It does not delete materialized image cache, runtime-derived cache, or sandbox ephemeral state.
+- `rmi <image>`: remove an image metadata/store entry. For OCI storage this removes the logical metadata reference only; physical manifests/blobs are reclaimed explicitly by CacheService once unreferenced. It does not delete materialized or runtime-derived cache.
 - `inspect image <image>`: inspect an image.
 
 Common options:
@@ -494,15 +498,15 @@ agent-compose inspect cache <cache-id>
 
 Cache domains are shown as command-level `--type` values:
 
-- `oci`: daemon OCI image store metadata/layout.
+- `oci`: physical manifests, blobs, and interrupted entries in the daemon OCI image store.
 - `materialized`: runtime input generated from images, such as BoxLite OCI layout or Microsandbox rootfs.
-- `runtime`: runtime-derived cache under driver homes, such as BoxLite image artifacts.
-- `sandbox`: sandbox-scoped runtime state, such as Microsandbox docker disks.
+- `runtime`: shared runtime-derived images under driver homes.
+- `skill`: content-addressed skill artifacts and interrupted temporary/lock entries.
 
 Protection status:
 
 - `active`: currently used by a running/resuming runtime; never removed.
-- `referenced`: not active, but still referenced by a stopped sandbox, project/image metadata, or runtime metadata. Skipped by default; `cache prune --include-referenced --force` can remove it.
+- `referenced`: has a `REQUIRED` reference, such as OCI metadata or a running/stopped sandbox dependency. It is never removable, including with `--force`. `ADVISORY` references are shown for context but do not block deletion.
 - `unused`, `expired`, `orphaned`: eligible for removal when `--force` is set.
 - `unknown`: reference or safety checks were incomplete; never removed.
 
@@ -511,11 +515,10 @@ Common options:
 | Command | Option | Description |
 | --- | --- | --- |
 | `cache ls`, `cache prune` | `--driver <docker|boxlite|microsandbox|all>` | Filter by runtime driver. |
-| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|sandbox>` | Filter by cache type. |
+| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|skill>` | Filter by cache type. |
 | `cache ls`, `cache prune` | `--status <active|referenced|unused|expired|orphaned|unknown>` | Filter by protection status. |
 | `cache prune` | `--unused`, `--orphaned`, `--expired` | Status shortcuts; mutually exclusive with each other and with `--status`. |
 | `cache prune` | `--older-than <duration>` | Match caches older than a duration such as `7d` or `168h`. |
-| `cache prune` | `--include-referenced` | Allow referenced items to be removed; active and unknown items remain protected. |
 | `cache prune`, `cache rm` | `--force` | Actually remove eligible items. Without `--force`, both commands are dry-run. |
 
 Examples:
@@ -524,12 +527,13 @@ Examples:
 agent-compose cache ls --type materialized
 agent-compose cache inspect <cache-id>
 agent-compose cache prune --driver boxlite --unused
-agent-compose cache prune --type sandbox --orphaned --force
+agent-compose cache prune --type skill --orphaned --force
+agent-compose cache prune --expired --force
 agent-compose cache prune --older-than 7d --force
 agent-compose cache rm <cache-id> --force
 ```
 
-`cache prune` and `cache rm` default to dry-run and do not delete files without `--force`. A dry-run that shows protected skipped items is not an error. A forced `cache rm` for a protected item exits non-zero and prints why it was skipped. `sandbox prune` does not delete runtime cache files; use these cache commands for cache cleanup.
+`CACHE_TTL` defaults to `168h`; `0` disables expiration classification. TTL never triggers background/startup deletion. Use `cache prune --expired --force` explicitly. `--older-than` remains an independent filter. `cache prune` and `cache rm` default to dry-run; `--force` authorizes execution but never bypasses `active`, `referenced`, or `unknown` protection. BoxLite v0.9.7 runtime image inventory is read-only because its ABI has no safe image remove/prune operation; Microsandbox shared images use the SDK inventory/remove APIs. `sandbox prune` does not delete cache artifacts.
 
 Compatibility:
 

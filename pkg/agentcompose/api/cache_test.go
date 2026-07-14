@@ -8,21 +8,21 @@ import (
 
 	"connectrpc.com/connect"
 
-	"agent-compose/pkg/runtimecache"
+	"agent-compose/pkg/cache"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 )
 
 func TestCacheHandlerListCachesMapsFilterAndResponse(t *testing.T) {
-	item := testRuntimeCacheItem(t, runtimecache.StatusOrphaned)
+	item := testRuntimeCacheItem(t, cache.StatusOrphaned)
 	controller := &fakeCacheController{
-		listResult: runtimecache.ListResult{Items: []runtimecache.Item{item}, Warnings: []string{"top warning"}},
+		listResult: cache.ListResult{Items: []cache.Item{item}, Warnings: []string{"top warning"}},
 	}
 	handler := NewCacheHandler(controller)
 
 	resp, err := handler.ListCaches(context.Background(), connect.NewRequest(&agentcomposev2.ListCachesRequest{Filter: &agentcomposev2.CacheFilter{
-		Driver:           runtimecache.DriverMicrosandbox,
-		Domain:           agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE,
-		Type:             string(runtimecache.CacheTypeSandbox),
+		Driver:           cache.DriverMicrosandbox,
+		Domain:           agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE,
+		Type:             string(cache.CacheTypeSkill),
 		Status:           agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED,
 		OlderThanSeconds: 7,
 		CacheId:          item.CacheID,
@@ -30,10 +30,10 @@ func TestCacheHandlerListCachesMapsFilterAndResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCaches: %v", err)
 	}
-	if controller.listReq.Filter.Driver != runtimecache.DriverMicrosandbox ||
-		controller.listReq.Filter.Domain != runtimecache.DomainSandboxEphemeralState ||
-		controller.listReq.Filter.Type != runtimecache.CacheTypeSandbox ||
-		controller.listReq.Filter.Status != runtimecache.StatusOrphaned ||
+	if controller.listReq.Filter.Driver != cache.DriverMicrosandbox ||
+		controller.listReq.Filter.Domain != cache.DomainSkillArtifactCache ||
+		controller.listReq.Filter.Type != cache.CacheTypeSkill ||
+		controller.listReq.Filter.Status != cache.StatusOrphaned ||
 		controller.listReq.Filter.OlderThan != 7*time.Second ||
 		controller.listReq.Filter.CacheID != item.CacheID {
 		t.Fatalf("mapped filter = %#v", controller.listReq.Filter)
@@ -43,7 +43,7 @@ func TestCacheHandlerListCachesMapsFilterAndResponse(t *testing.T) {
 	}
 	got := resp.Msg.GetCaches()[0]
 	if got.GetCacheId() != item.CacheID ||
-		got.GetDomain() != agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE ||
+		got.GetDomain() != agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE ||
 		got.GetStatus() != agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED ||
 		got.GetLastUsedAt() == "" ||
 		len(got.GetReferences()) != 1 ||
@@ -52,10 +52,19 @@ func TestCacheHandlerListCachesMapsFilterAndResponse(t *testing.T) {
 	}
 }
 
+func TestCacheDomainFourRemainsReserved(t *testing.T) {
+	if got := int32(agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE); got != 5 {
+		t.Fatalf("skill cache domain number = %d, want 5", got)
+	}
+	if _, err := RuntimeCacheDomainFromProto(agentcomposev2.CacheDomain(4)); err == nil {
+		t.Fatal("reserved sandbox cache domain number 4 was accepted")
+	}
+}
+
 func TestCacheHandlerInspectCache(t *testing.T) {
-	item := testRuntimeCacheItem(t, runtimecache.StatusUnknown)
+	item := testRuntimeCacheItem(t, cache.StatusUnknown)
 	controller := &fakeCacheController{
-		inspectResult: runtimecache.ListResult{Items: []runtimecache.Item{item}, Warnings: []string{"inspect warning"}},
+		inspectResult: cache.ListResult{Items: []cache.Item{item}, Warnings: []string{"inspect warning"}},
 	}
 	handler := NewCacheHandler(controller)
 
@@ -74,10 +83,10 @@ func TestCacheHandlerInspectCache(t *testing.T) {
 }
 
 func TestCacheHandlerInspectCacheAllowsIDPrefix(t *testing.T) {
-	item := testRuntimeCacheItem(t, runtimecache.StatusUnknown)
-	prefix := runtimecache.ShortCacheID(item.CacheID)
+	item := testRuntimeCacheItem(t, cache.StatusUnknown)
+	prefix := cache.ShortCacheID(item.CacheID)
 	controller := &fakeCacheController{
-		inspectResult: runtimecache.ListResult{Items: []runtimecache.Item{item}},
+		inspectResult: cache.ListResult{Items: []cache.Item{item}},
 	}
 	handler := NewCacheHandler(controller)
 
@@ -92,18 +101,18 @@ func TestCacheHandlerInspectCacheAllowsIDPrefix(t *testing.T) {
 
 func TestCacheHandlerInspectCacheNotFound(t *testing.T) {
 	handler := NewCacheHandler(&fakeCacheController{})
-	_, err := handler.InspectCache(context.Background(), connect.NewRequest(&agentcomposev2.InspectCacheRequest{CacheId: testRuntimeCacheID(t, runtimecache.StatusOrphaned)}))
+	_, err := handler.InspectCache(context.Background(), connect.NewRequest(&agentcomposev2.InspectCacheRequest{CacheId: testRuntimeCacheID(t, cache.StatusOrphaned)}))
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("InspectCache code = %v, want NotFound (err=%v)", connect.CodeOf(err), err)
 	}
 }
 
 func TestCacheHandlerPruneCachesMapsRequestAndResult(t *testing.T) {
-	matched := testRuntimeCacheItem(t, runtimecache.StatusOrphaned)
+	matched := testRuntimeCacheItem(t, cache.StatusOrphaned)
 	controller := &fakeCacheController{
-		pruneResult: runtimecache.Result{
+		pruneResult: cache.Result{
 			DryRun:   false,
-			Matched:  []runtimecache.Item{matched},
+			Matched:  []cache.Item{matched},
 			Removed:  []string{matched.CacheID},
 			Warnings: []string{"removed"},
 		},
@@ -111,14 +120,13 @@ func TestCacheHandlerPruneCachesMapsRequestAndResult(t *testing.T) {
 	handler := NewCacheHandler(controller)
 
 	resp, err := handler.PruneCaches(context.Background(), connect.NewRequest(&agentcomposev2.PruneCachesRequest{
-		Filter:            &agentcomposev2.CacheFilter{Status: agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED},
-		IncludeReferenced: true,
-		Force:             true,
+		Filter: &agentcomposev2.CacheFilter{Status: agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED},
+		Force:  true,
 	}))
 	if err != nil {
 		t.Fatalf("PruneCaches: %v", err)
 	}
-	if controller.pruneReq.Filter.Status != runtimecache.StatusOrphaned || !controller.pruneReq.IncludeReferenced || !controller.pruneReq.Force {
+	if controller.pruneReq.Filter.Status != cache.StatusOrphaned || !controller.pruneReq.Force {
 		t.Fatalf("prune request = %#v", controller.pruneReq)
 	}
 	if resp.Msg.GetDryRun() || len(resp.Msg.GetMatched()) != 1 || len(resp.Msg.GetRemoved()) != 1 || len(resp.Msg.GetWarnings()) != 1 {
@@ -127,12 +135,12 @@ func TestCacheHandlerPruneCachesMapsRequestAndResult(t *testing.T) {
 }
 
 func TestCacheHandlerRemoveCacheProtectedSkipped(t *testing.T) {
-	active := testRuntimeCacheItem(t, runtimecache.StatusActive)
+	active := testRuntimeCacheItem(t, cache.StatusActive)
 	controller := &fakeCacheController{
-		removeResult: runtimecache.Result{
+		removeResult: cache.Result{
 			DryRun:  false,
-			Matched: []runtimecache.Item{active},
-			Skipped: []runtimecache.Item{active},
+			Matched: []cache.Item{active},
+			Skipped: []cache.Item{active},
 		},
 	}
 	handler := NewCacheHandler(controller)
@@ -226,11 +234,11 @@ func TestConnectErrorForRuntimeCache(t *testing.T) {
 		err  error
 		code connect.Code
 	}{
-		{runtimecache.ErrCacheNotFound, connect.CodeNotFound},
-		{runtimecache.ErrInvalidFilter, connect.CodeInvalidArgument},
-		{runtimecache.ErrInvalidCacheID, connect.CodeInvalidArgument},
-		{runtimecache.ErrUnsafePath, connect.CodeFailedPrecondition},
-		{runtimecache.ErrRemoveUnavailable, connect.CodeUnavailable},
+		{cache.ErrCacheNotFound, connect.CodeNotFound},
+		{cache.ErrInvalidFilter, connect.CodeInvalidArgument},
+		{cache.ErrInvalidCacheID, connect.CodeInvalidArgument},
+		{cache.ErrUnsafePath, connect.CodeFailedPrecondition},
+		{cache.ErrRemoveUnavailable, connect.CodeUnavailable},
 		{errors.New("boom"), connect.CodeInternal},
 	} {
 		if got := connect.CodeOf(ConnectErrorForRuntimeCache(tc.err)); got != tc.code {
@@ -240,53 +248,53 @@ func TestConnectErrorForRuntimeCache(t *testing.T) {
 }
 
 type fakeCacheController struct {
-	listReq       runtimecache.ListRequest
-	listResult    runtimecache.ListResult
+	listReq       cache.ListRequest
+	listResult    cache.ListResult
 	listErr       error
 	inspectID     string
-	inspectResult runtimecache.ListResult
+	inspectResult cache.ListResult
 	inspectErr    error
-	pruneReq      runtimecache.PruneRequest
-	pruneResult   runtimecache.Result
+	pruneReq      cache.PruneRequest
+	pruneResult   cache.Result
 	pruneErr      error
-	removeReq     runtimecache.RemoveRequest
-	removeResult  runtimecache.Result
+	removeReq     cache.RemoveRequest
+	removeResult  cache.Result
 	removeErr     error
 }
 
-func (f *fakeCacheController) ListCaches(_ context.Context, req runtimecache.ListRequest) (runtimecache.ListResult, error) {
+func (f *fakeCacheController) ListCaches(_ context.Context, req cache.ListRequest) (cache.ListResult, error) {
 	f.listReq = req
 	return f.listResult, f.listErr
 }
 
-func (f *fakeCacheController) InspectCache(_ context.Context, cacheID string) (runtimecache.ListResult, error) {
+func (f *fakeCacheController) InspectCache(_ context.Context, cacheID string) (cache.ListResult, error) {
 	f.inspectID = cacheID
 	return f.inspectResult, f.inspectErr
 }
 
-func (f *fakeCacheController) PruneCaches(_ context.Context, req runtimecache.PruneRequest) (runtimecache.Result, error) {
+func (f *fakeCacheController) PruneCaches(_ context.Context, req cache.PruneRequest) (cache.Result, error) {
 	f.pruneReq = req
 	return f.pruneResult, f.pruneErr
 }
 
-func (f *fakeCacheController) RemoveCache(_ context.Context, req runtimecache.RemoveRequest) (runtimecache.Result, error) {
+func (f *fakeCacheController) RemoveCache(_ context.Context, req cache.RemoveRequest) (cache.Result, error) {
 	f.removeReq = req
 	return f.removeResult, f.removeErr
 }
 
-func testRuntimeCacheItem(t *testing.T, status runtimecache.Status) runtimecache.Item {
+func testRuntimeCacheItem(t *testing.T, status cache.Status) cache.Item {
 	t.Helper()
-	item := runtimecache.EvaluateProtection(runtimecache.Item{
-		Domain:         runtimecache.DomainSandboxEphemeralState,
-		Driver:         runtimecache.DriverMicrosandbox,
-		Kind:           "microsandbox-docker-disk",
+	item := cache.EvaluateProtection(cache.Item{
+		Domain:         cache.DomainSkillArtifactCache,
+		Driver:         cache.DriverMicrosandbox,
+		Kind:           "skill-artifact",
 		Path:           "/tmp/microsandbox/docker-disks/sandbox.raw",
 		SizeBytes:      12,
-		SandboxID:      "sandbox",
 		Status:         status,
 		LastUsedAt:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
 		LastUsedSource: "mtime",
-		References: []runtimecache.Reference{{
+		References: []cache.Reference{{
+			Policy:      cache.ReferencePolicyAdvisory,
 			Type:        "sandbox",
 			ID:          "sandbox",
 			Name:        "Sandbox",
@@ -295,8 +303,8 @@ func testRuntimeCacheItem(t *testing.T, status runtimecache.Status) runtimecache
 			Description: "test reference",
 		}},
 		Warnings: []string{"item warning"},
-	}, false)
-	cacheID, err := runtimecache.GenerateCacheID(item)
+	})
+	cacheID, err := cache.GenerateCacheID(item)
 	if err != nil {
 		t.Fatalf("GenerateCacheID: %v", err)
 	}
@@ -304,7 +312,7 @@ func testRuntimeCacheItem(t *testing.T, status runtimecache.Status) runtimecache
 	return item
 }
 
-func testRuntimeCacheID(t *testing.T, status runtimecache.Status) string {
+func testRuntimeCacheID(t *testing.T, status cache.Status) string {
 	t.Helper()
 	return testRuntimeCacheItem(t, status).CacheID
 }

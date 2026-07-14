@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -33,7 +34,17 @@ const (
 	DefaultDownloadLimitBytes = 64 << 20
 	MaxZipExpandedBytes       = 256 << 20
 	MaxZipFiles               = 4096
+	artifactManifestName      = ".artifact.json"
+	cacheRootLockName         = ".cache.lock"
 )
+
+type artifactManifest struct {
+	Version    int       `json:"version"`
+	Source     string    `json:"source"`
+	Identity   string    `json:"identity"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at"`
+}
 
 type Resolver struct {
 	CacheRoot          string
@@ -75,6 +86,11 @@ func (r Resolver) Resolve(ctx context.Context, specs []domain.AgentSkill) ([]Res
 	if err := os.MkdirAll(r.CacheRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("create skills cache root: %w", err)
 	}
+	rootLock, err := lockSkillCacheRoot(r.CacheRoot, syscall.LOCK_SH)
+	if err != nil {
+		return nil, err
+	}
+	defer rootLock()
 	resolved := make([]ResolvedSkill, 0, len(specs))
 	for _, spec := range domain.NormalizeAgentSkills(specs) {
 		current, err := r.resolveOne(ctx, spec)
@@ -127,6 +143,9 @@ func (r Resolver) resolveFile(spec domain.AgentSkill) (ResolvedSkill, error) {
 		return ResolvedSkill{}, err
 	}
 	if err := validateSkillDir(spec.Name, dst); err != nil {
+		return ResolvedSkill{}, err
+	}
+	if err := touchArtifactManifest(dst, "file", key); err != nil {
 		return ResolvedSkill{}, err
 	}
 	return ResolvedSkill{Name: spec.Name, LocalDir: dst}, nil
@@ -190,6 +209,9 @@ func (r Resolver) resolveGit(ctx context.Context, spec domain.AgentSkill) (Resol
 	}
 	content := filepath.Join(dst, "content")
 	if err := validateSkillDir(spec.Name, content); err != nil {
+		return ResolvedSkill{}, err
+	}
+	if err := touchArtifactManifest(dst, "git", commit); err != nil {
 		return ResolvedSkill{}, err
 	}
 	return ResolvedSkill{Name: spec.Name, LocalDir: content}, nil
@@ -264,6 +286,9 @@ func (r Resolver) resolveZip(ctx context.Context, spec domain.AgentSkill) (Resol
 		}
 	}
 	if err := validateSkillDir(spec.Name, content); err != nil {
+		return ResolvedSkill{}, err
+	}
+	if err := touchArtifactManifest(dst, "zip", hash); err != nil {
 		return ResolvedSkill{}, err
 	}
 	return ResolvedSkill{Name: spec.Name, LocalDir: content}, nil
@@ -580,6 +605,59 @@ func ensureCachedDir(dst string, fill func(tmp string) error) error {
 		return fmt.Errorf("promote skills cache dir: %w", err)
 	}
 	return nil
+}
+
+func lockSkillCacheRoot(root string, mode int) (func(), error) {
+	lock, err := os.OpenFile(filepath.Join(root, cacheRootLockName), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open skills cache root lock: %w", err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), mode); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("lock skills cache root: %w", err)
+	}
+	return func() {
+		_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+		_ = lock.Close()
+	}, nil
+}
+
+func touchArtifactManifest(root, source, identity string) error {
+	now := time.Now().UTC()
+	manifest := artifactManifest{Version: 1, Source: strings.TrimSpace(source), Identity: strings.TrimSpace(identity), CreatedAt: now, LastUsedAt: now}
+	path := filepath.Join(root, artifactManifestName)
+	if data, err := os.ReadFile(path); err == nil {
+		var existing artifactManifest
+		if json.Unmarshal(data, &existing) == nil && existing.Version == 1 && !existing.CreatedAt.IsZero() {
+			manifest.CreatedAt = existing.CreatedAt
+		}
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(root, ".artifact-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func copyDir(src, dst string) error {

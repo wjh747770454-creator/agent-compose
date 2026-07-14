@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"context"
@@ -14,10 +14,11 @@ var (
 
 type RemoveFunc func(context.Context, Item) error
 
-func EvaluateProtection(item Item, includeReferenced bool) Item {
+func EvaluateProtection(item Item) Item {
 	item.Status, _ = NormalizeStatus(item.Status)
 	item.Removable = false
 	item.BlockedReasons = nil
+	hasRequired := HasRequiredReferences(item.References)
 
 	switch item.Status {
 	case StatusActive:
@@ -26,16 +27,22 @@ func EvaluateProtection(item Item, includeReferenced bool) Item {
 		item.Status = StatusUnknown
 		item.BlockedReasons = AppendWarnings(item.BlockedReasons, "cache safety is unknown")
 	case StatusReferenced:
-		if includeReferenced {
-			item.Removable = true
+		if hasRequired || len(item.References) == 0 {
+			item.BlockedReasons = AppendWarnings(item.BlockedReasons, "cache has a required reference")
 		} else {
-			item.BlockedReasons = AppendWarnings(item.BlockedReasons, "cache is referenced")
+			item.Removable = true
 		}
 	case StatusUnused, StatusOrphaned:
-		item.Removable = true
+		if hasRequired {
+			item.Status = StatusReferenced
+			item.BlockedReasons = AppendWarnings(item.BlockedReasons, "cache has a required reference")
+		} else {
+			item.Removable = true
+		}
 	case StatusExpired:
-		if len(item.References) > 0 && !includeReferenced {
-			item.BlockedReasons = AppendWarnings(item.BlockedReasons, "expired cache is still referenced")
+		if hasRequired {
+			item.Status = StatusReferenced
+			item.BlockedReasons = AppendWarnings(item.BlockedReasons, "expired cache has a required reference")
 		} else {
 			item.Removable = true
 		}
@@ -46,6 +53,22 @@ func EvaluateProtection(item Item, includeReferenced bool) Item {
 	return item
 }
 
+func NormalizeReferencePolicy(policy ReferencePolicy) ReferencePolicy {
+	if policy == ReferencePolicyAdvisory {
+		return ReferencePolicyAdvisory
+	}
+	return ReferencePolicyRequired
+}
+
+func HasRequiredReferences(refs []Reference) bool {
+	for _, ref := range refs {
+		if NormalizeReferencePolicy(ref.Policy) == ReferencePolicyRequired {
+			return true
+		}
+	}
+	return false
+}
+
 func PruneItems(ctx context.Context, items []Item, req PruneRequest, now time.Time, remove RemoveFunc) (Result, error) {
 	matched, err := FilterItems(items, req.Filter, now)
 	if err != nil {
@@ -53,7 +76,7 @@ func PruneItems(ctx context.Context, items []Item, req PruneRequest, now time.Ti
 	}
 	result := Result{DryRun: !req.Force}
 	for _, item := range matched {
-		item = EvaluateProtection(item, req.IncludeReferenced)
+		item = EvaluateProtection(item)
 		result.Matched = append(result.Matched, item)
 		if !item.Removable {
 			result.Skipped = append(result.Skipped, item)

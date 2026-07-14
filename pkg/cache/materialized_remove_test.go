@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"context"
@@ -18,6 +18,7 @@ func TestMaterializedPruneSkipsReferencedByDefault(t *testing.T) {
 	layoutPath := cache.MaterializedOCILayoutPath(image.ConfigDigest)
 	items := scanMaterializedItems(t, cache)
 	layout := requireItem(t, items, layoutPath)
+	layout.References[0].Policy = ReferencePolicyRequired
 
 	result, err := PruneItems(context.Background(), []Item{layout}, PruneRequest{Force: true}, time.Now(), MaterializedRemover{Cache: cache}.Remove)
 	if err != nil {
@@ -29,7 +30,7 @@ func TestMaterializedPruneSkipsReferencedByDefault(t *testing.T) {
 	assertPathExists(t, layoutPath)
 }
 
-func TestMaterializedPruneIncludeReferencedDeletesLayoutAndReadyOnly(t *testing.T) {
+func TestMaterializedPruneAdvisoryReferenceDeletesLayoutAndReadyOnly(t *testing.T) {
 	cache, image := materializedRemovalFixture(t)
 	imageDir := cache.MaterializedImageDir(image.ConfigDigest)
 	layoutPath := cache.MaterializedOCILayoutPath(image.ConfigDigest)
@@ -38,7 +39,7 @@ func TestMaterializedPruneIncludeReferencedDeletesLayoutAndReadyOnly(t *testing.
 	items := scanMaterializedItems(t, cache)
 	layout := requireItem(t, items, layoutPath)
 
-	result, err := PruneItems(context.Background(), []Item{layout}, PruneRequest{Force: true, IncludeReferenced: true}, time.Now(), MaterializedRemover{Cache: cache}.Remove)
+	result, err := PruneItems(context.Background(), []Item{layout}, PruneRequest{Force: true}, time.Now(), MaterializedRemover{Cache: cache}.Remove)
 	if err != nil {
 		t.Fatalf("PruneItems returned error: %v", err)
 	}
@@ -50,6 +51,34 @@ func TestMaterializedPruneIncludeReferencedDeletesLayoutAndReadyOnly(t *testing.
 	assertPathExists(t, rootfsPath)
 }
 
+func TestMaterializedSourceRechecksRequiredDependenciesBeforeRemoval(t *testing.T) {
+	imageCache, image := materializedRemovalFixture(t)
+	layoutPath := imageCache.MaterializedOCILayoutPath(image.ConfigDigest)
+	dependencies := &changingMaterializedDependencies{dependency: MaterializedDependency{SandboxID: "sandbox-new", Identity: image.ConfigDigest, Status: "stopped"}}
+	source := MaterializedSource{
+		Scanner: MaterializedScanner{Cache: imageCache, Dependencies: dependencies},
+		Remover: MaterializedRemover{Cache: imageCache},
+	}
+	controller := &Controller{Sources: []Source{source}}
+	listed, err := controller.ListCaches(context.Background(), ListRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := requireItem(t, listed.Items, layoutPath)
+	if !item.Removable || HasRequiredReferences(item.References) {
+		t.Fatalf("initial item = %#v", item)
+	}
+
+	result, err := controller.RemoveCache(context.Background(), RemoveRequest{CacheID: item.CacheID, Force: true})
+	if err != nil {
+		t.Fatalf("RemoveCache returned controller error: %v", err)
+	}
+	if len(result.Removed) != 0 || len(result.Skipped) != 1 || len(result.Warnings) == 0 {
+		t.Fatalf("RemoveCache result = %#v", result)
+	}
+	assertPathExists(t, layoutPath)
+}
+
 func TestMaterializedRemoveRootFSDeletesRootFSReady(t *testing.T) {
 	cache, image := materializedRemovalFixture(t)
 	imageDir := cache.MaterializedImageDir(image.ConfigDigest)
@@ -58,7 +87,7 @@ func TestMaterializedRemoveRootFSDeletesRootFSReady(t *testing.T) {
 	items := scanMaterializedItems(t, cache)
 	rootfs := requireItem(t, items, rootfsPath)
 
-	result, err := PruneItems(context.Background(), []Item{rootfs}, PruneRequest{Force: true, IncludeReferenced: true}, time.Now(), MaterializedRemover{Cache: cache}.Remove)
+	result, err := PruneItems(context.Background(), []Item{rootfs}, PruneRequest{Force: true}, time.Now(), MaterializedRemover{Cache: cache}.Remove)
 	if err != nil {
 		t.Fatalf("PruneItems returned error: %v", err)
 	}
@@ -273,6 +302,19 @@ func materializedRemovalFixture(t *testing.T) (*imagecache.Cache, imagecache.Ima
 		}
 	}
 	return cache, image
+}
+
+type changingMaterializedDependencies struct {
+	calls      int
+	dependency MaterializedDependency
+}
+
+func (d *changingMaterializedDependencies) MaterializedDependencies(context.Context) ([]MaterializedDependency, []string, error) {
+	d.calls++
+	if d.calls < 3 {
+		return nil, nil, nil
+	}
+	return []MaterializedDependency{d.dependency}, nil, nil
 }
 
 func scanMaterializedItems(t *testing.T, cache *imagecache.Cache) []Item {

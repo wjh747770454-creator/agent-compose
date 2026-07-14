@@ -10,15 +10,15 @@ import (
 
 	"connectrpc.com/connect"
 
-	"agent-compose/pkg/runtimecache"
+	"agent-compose/pkg/cache"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
 )
 
 type CacheController interface {
-	ListCaches(context.Context, runtimecache.ListRequest) (runtimecache.ListResult, error)
-	InspectCache(context.Context, string) (runtimecache.ListResult, error)
-	PruneCaches(context.Context, runtimecache.PruneRequest) (runtimecache.Result, error)
-	RemoveCache(context.Context, runtimecache.RemoveRequest) (runtimecache.Result, error)
+	ListCaches(context.Context, cache.ListRequest) (cache.ListResult, error)
+	InspectCache(context.Context, string) (cache.ListResult, error)
+	PruneCaches(context.Context, cache.PruneRequest) (cache.Result, error)
+	RemoveCache(context.Context, cache.RemoveRequest) (cache.Result, error)
 }
 
 type CacheHandler struct {
@@ -37,7 +37,7 @@ func (h *CacheHandler) ListCaches(ctx context.Context, req *connect.Request[agen
 	if err != nil {
 		return nil, ConnectErrorForRuntimeCache(err)
 	}
-	result, err := h.controller.ListCaches(ctx, runtimecache.ListRequest{Filter: filter})
+	result, err := h.controller.ListCaches(ctx, cache.ListRequest{Filter: filter})
 	if err != nil {
 		return nil, ConnectErrorForRuntimeCache(err)
 	}
@@ -55,7 +55,7 @@ func (h *CacheHandler) InspectCache(ctx context.Context, req *connect.Request[ag
 	if cacheID == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cache_id is required"))
 	}
-	if err := runtimecache.ValidateCacheIDReference(cacheID); err != nil {
+	if err := cache.ValidateCacheIDReference(cacheID); err != nil {
 		return nil, ConnectErrorForRuntimeCache(err)
 	}
 	result, err := h.controller.InspectCache(ctx, cacheID)
@@ -63,7 +63,7 @@ func (h *CacheHandler) InspectCache(ctx context.Context, req *connect.Request[ag
 		return nil, ConnectErrorForRuntimeCache(err)
 	}
 	if len(result.Items) == 0 {
-		return nil, ConnectErrorForRuntimeCache(fmt.Errorf("%w: %s", runtimecache.ErrCacheNotFound, cacheID))
+		return nil, ConnectErrorForRuntimeCache(fmt.Errorf("%w: %s", cache.ErrCacheNotFound, cacheID))
 	}
 	return connect.NewResponse(&agentcomposev2.InspectCacheResponse{
 		Cache:    RuntimeCacheItemToProto(result.Items[0]),
@@ -79,10 +79,9 @@ func (h *CacheHandler) PruneCaches(ctx context.Context, req *connect.Request[age
 	if err != nil {
 		return nil, ConnectErrorForRuntimeCache(err)
 	}
-	result, err := h.controller.PruneCaches(ctx, runtimecache.PruneRequest{
-		Filter:            filter,
-		IncludeReferenced: req.Msg.GetIncludeReferenced(),
-		Force:             req.Msg.GetForce(),
+	result, err := h.controller.PruneCaches(ctx, cache.PruneRequest{
+		Filter: filter,
+		Force:  req.Msg.GetForce(),
 	})
 	if err != nil {
 		return nil, ConnectErrorForRuntimeCache(err)
@@ -98,10 +97,10 @@ func (h *CacheHandler) RemoveCache(ctx context.Context, req *connect.Request[age
 	if cacheID == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cache_id is required"))
 	}
-	if err := runtimecache.ValidateCacheIDReference(cacheID); err != nil {
+	if err := cache.ValidateCacheIDReference(cacheID); err != nil {
 		return nil, ConnectErrorForRuntimeCache(err)
 	}
-	result, err := h.controller.RemoveCache(ctx, runtimecache.RemoveRequest{
+	result, err := h.controller.RemoveCache(ctx, cache.RemoveRequest{
 		CacheID: cacheID,
 		Force:   req.Msg.GetForce(),
 	})
@@ -111,27 +110,27 @@ func (h *CacheHandler) RemoveCache(ctx context.Context, req *connect.Request[age
 	return connect.NewResponse(RuntimeCacheResultToRemoveProto(result)), nil
 }
 
-func RuntimeCacheFilterFromProto(filter *agentcomposev2.CacheFilter) (runtimecache.Filter, error) {
+func RuntimeCacheFilterFromProto(filter *agentcomposev2.CacheFilter) (cache.Filter, error) {
 	if filter == nil {
-		return runtimecache.Filter{}, nil
+		return cache.Filter{}, nil
 	}
 	domain, err := RuntimeCacheDomainFromProto(filter.GetDomain())
 	if err != nil {
-		return runtimecache.Filter{}, err
+		return cache.Filter{}, err
 	}
 	status, err := RuntimeCacheStatusFromProto(filter.GetStatus())
 	if err != nil {
-		return runtimecache.Filter{}, err
+		return cache.Filter{}, err
 	}
 	olderThan, err := RuntimeCacheOlderThanFromProto(filter.GetOlderThanSeconds())
 	if err != nil {
-		return runtimecache.Filter{}, err
+		return cache.Filter{}, err
 	}
-	cacheType, ok := runtimecache.NormalizeType(runtimecache.CacheType(filter.GetType()))
+	cacheType, ok := cache.NormalizeType(cache.CacheType(filter.GetType()))
 	if !ok {
-		return runtimecache.Filter{}, fmt.Errorf("%w: unknown type %q", runtimecache.ErrInvalidFilter, filter.GetType())
+		return cache.Filter{}, fmt.Errorf("%w: unknown type %q", cache.ErrInvalidFilter, filter.GetType())
 	}
-	out := runtimecache.Filter{
+	out := cache.Filter{
 		Driver:    strings.TrimSpace(filter.GetDriver()),
 		Domain:    domain,
 		Type:      cacheType,
@@ -139,8 +138,8 @@ func RuntimeCacheFilterFromProto(filter *agentcomposev2.CacheFilter) (runtimecac
 		OlderThan: olderThan,
 		CacheID:   strings.TrimSpace(filter.GetCacheId()),
 	}
-	if _, err := runtimecache.NormalizeFilter(out); err != nil {
-		return runtimecache.Filter{}, err
+	if _, err := cache.NormalizeFilter(out); err != nil {
+		return cache.Filter{}, err
 	}
 	return out, nil
 }
@@ -150,84 +149,84 @@ func RuntimeCacheOlderThanFromProto(seconds uint64) (time.Duration, error) {
 		return 0, nil
 	}
 	if seconds > uint64(math.MaxInt64/int64(time.Second)) {
-		return 0, fmt.Errorf("%w: older_than_seconds is too large", runtimecache.ErrInvalidFilter)
+		return 0, fmt.Errorf("%w: older_than_seconds is too large", cache.ErrInvalidFilter)
 	}
 	return time.Duration(seconds) * time.Second, nil
 }
 
-func RuntimeCacheDomainFromProto(domain agentcomposev2.CacheDomain) (runtimecache.Domain, error) {
+func RuntimeCacheDomainFromProto(domain agentcomposev2.CacheDomain) (cache.Domain, error) {
 	switch domain {
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_UNSPECIFIED:
 		return "", nil
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_OCI_IMAGE_STORE:
-		return runtimecache.DomainOCIImageStore, nil
+		return cache.DomainOCIImageStore, nil
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE:
-		return runtimecache.DomainMaterializedImageCache, nil
+		return cache.DomainMaterializedImageCache, nil
 	case agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE:
-		return runtimecache.DomainRuntimeDerivedCache, nil
-	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE:
-		return runtimecache.DomainSandboxEphemeralState, nil
+		return cache.DomainRuntimeDerivedCache, nil
+	case agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE:
+		return cache.DomainSkillArtifactCache, nil
 	default:
-		return "", fmt.Errorf("%w: unknown domain %d", runtimecache.ErrInvalidFilter, domain)
+		return "", fmt.Errorf("%w: unknown domain %d", cache.ErrInvalidFilter, domain)
 	}
 }
 
-func RuntimeCacheDomainToProto(domain runtimecache.Domain) agentcomposev2.CacheDomain {
+func RuntimeCacheDomainToProto(domain cache.Domain) agentcomposev2.CacheDomain {
 	switch domain {
-	case runtimecache.DomainOCIImageStore:
+	case cache.DomainOCIImageStore:
 		return agentcomposev2.CacheDomain_CACHE_DOMAIN_OCI_IMAGE_STORE
-	case runtimecache.DomainMaterializedImageCache:
+	case cache.DomainMaterializedImageCache:
 		return agentcomposev2.CacheDomain_CACHE_DOMAIN_MATERIALIZED_IMAGE_CACHE
-	case runtimecache.DomainRuntimeDerivedCache:
+	case cache.DomainRuntimeDerivedCache:
 		return agentcomposev2.CacheDomain_CACHE_DOMAIN_RUNTIME_DERIVED_CACHE
-	case runtimecache.DomainSandboxEphemeralState:
-		return agentcomposev2.CacheDomain_CACHE_DOMAIN_SANDBOX_EPHEMERAL_STATE
+	case cache.DomainSkillArtifactCache:
+		return agentcomposev2.CacheDomain_CACHE_DOMAIN_SKILL_ARTIFACT_CACHE
 	default:
 		return agentcomposev2.CacheDomain_CACHE_DOMAIN_UNSPECIFIED
 	}
 }
 
-func RuntimeCacheStatusFromProto(status agentcomposev2.CacheStatus) (runtimecache.Status, error) {
+func RuntimeCacheStatusFromProto(status agentcomposev2.CacheStatus) (cache.Status, error) {
 	switch status {
 	case agentcomposev2.CacheStatus_CACHE_STATUS_UNSPECIFIED:
 		return "", nil
 	case agentcomposev2.CacheStatus_CACHE_STATUS_ACTIVE:
-		return runtimecache.StatusActive, nil
+		return cache.StatusActive, nil
 	case agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED:
-		return runtimecache.StatusReferenced, nil
+		return cache.StatusReferenced, nil
 	case agentcomposev2.CacheStatus_CACHE_STATUS_UNUSED:
-		return runtimecache.StatusUnused, nil
+		return cache.StatusUnused, nil
 	case agentcomposev2.CacheStatus_CACHE_STATUS_EXPIRED:
-		return runtimecache.StatusExpired, nil
+		return cache.StatusExpired, nil
 	case agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED:
-		return runtimecache.StatusOrphaned, nil
+		return cache.StatusOrphaned, nil
 	case agentcomposev2.CacheStatus_CACHE_STATUS_UNKNOWN:
-		return runtimecache.StatusUnknown, nil
+		return cache.StatusUnknown, nil
 	default:
-		return "", fmt.Errorf("%w: unknown status %d", runtimecache.ErrInvalidFilter, status)
+		return "", fmt.Errorf("%w: unknown status %d", cache.ErrInvalidFilter, status)
 	}
 }
 
-func RuntimeCacheStatusToProto(status runtimecache.Status) agentcomposev2.CacheStatus {
+func RuntimeCacheStatusToProto(status cache.Status) agentcomposev2.CacheStatus {
 	switch status {
-	case runtimecache.StatusActive:
+	case cache.StatusActive:
 		return agentcomposev2.CacheStatus_CACHE_STATUS_ACTIVE
-	case runtimecache.StatusReferenced:
+	case cache.StatusReferenced:
 		return agentcomposev2.CacheStatus_CACHE_STATUS_REFERENCED
-	case runtimecache.StatusUnused:
+	case cache.StatusUnused:
 		return agentcomposev2.CacheStatus_CACHE_STATUS_UNUSED
-	case runtimecache.StatusExpired:
+	case cache.StatusExpired:
 		return agentcomposev2.CacheStatus_CACHE_STATUS_EXPIRED
-	case runtimecache.StatusOrphaned:
+	case cache.StatusOrphaned:
 		return agentcomposev2.CacheStatus_CACHE_STATUS_ORPHANED
-	case runtimecache.StatusUnknown:
+	case cache.StatusUnknown:
 		return agentcomposev2.CacheStatus_CACHE_STATUS_UNKNOWN
 	default:
 		return agentcomposev2.CacheStatus_CACHE_STATUS_UNSPECIFIED
 	}
 }
 
-func RuntimeCacheItemToProto(item runtimecache.Item) *agentcomposev2.CacheItem {
+func RuntimeCacheItemToProto(item cache.Item) *agentcomposev2.CacheItem {
 	out := &agentcomposev2.CacheItem{
 		CacheId:        item.CacheID,
 		Domain:         RuntimeCacheDomainToProto(item.Domain),
@@ -238,7 +237,6 @@ func RuntimeCacheItemToProto(item runtimecache.Item) *agentcomposev2.CacheItem {
 		ImageId:        item.ImageID,
 		ImageRef:       item.ImageRef,
 		ResolvedRef:    item.ResolvedRef,
-		SandboxId:      item.SandboxID,
 		Status:         RuntimeCacheStatusToProto(item.Status),
 		Removable:      item.Removable,
 		BlockedReasons: item.BlockedReasons,
@@ -252,7 +250,7 @@ func RuntimeCacheItemToProto(item runtimecache.Item) *agentcomposev2.CacheItem {
 	return out
 }
 
-func RuntimeCacheItemsToProto(items []runtimecache.Item) []*agentcomposev2.CacheItem {
+func RuntimeCacheItemsToProto(items []cache.Item) []*agentcomposev2.CacheItem {
 	out := make([]*agentcomposev2.CacheItem, 0, len(items))
 	for _, item := range items {
 		out = append(out, RuntimeCacheItemToProto(item))
@@ -260,10 +258,11 @@ func RuntimeCacheItemsToProto(items []runtimecache.Item) []*agentcomposev2.Cache
 	return out
 }
 
-func RuntimeCacheReferencesToProto(refs []runtimecache.Reference) []*agentcomposev2.CacheReference {
+func RuntimeCacheReferencesToProto(refs []cache.Reference) []*agentcomposev2.CacheReference {
 	out := make([]*agentcomposev2.CacheReference, 0, len(refs))
 	for _, ref := range refs {
 		out = append(out, &agentcomposev2.CacheReference{
+			Policy:      RuntimeCacheReferencePolicyToProto(ref.Policy),
 			Type:        ref.Type,
 			Id:          ref.ID,
 			Name:        ref.Name,
@@ -275,7 +274,14 @@ func RuntimeCacheReferencesToProto(refs []runtimecache.Reference) []*agentcompos
 	return out
 }
 
-func RuntimeCacheResultToPruneProto(result runtimecache.Result) *agentcomposev2.PruneCachesResponse {
+func RuntimeCacheReferencePolicyToProto(policy cache.ReferencePolicy) agentcomposev2.CacheReferencePolicy {
+	if cache.NormalizeReferencePolicy(policy) == cache.ReferencePolicyAdvisory {
+		return agentcomposev2.CacheReferencePolicy_CACHE_REFERENCE_POLICY_ADVISORY
+	}
+	return agentcomposev2.CacheReferencePolicy_CACHE_REFERENCE_POLICY_REQUIRED
+}
+
+func RuntimeCacheResultToPruneProto(result cache.Result) *agentcomposev2.PruneCachesResponse {
 	return &agentcomposev2.PruneCachesResponse{
 		DryRun:   result.DryRun,
 		Matched:  RuntimeCacheItemsToProto(result.Matched),
@@ -285,7 +291,7 @@ func RuntimeCacheResultToPruneProto(result runtimecache.Result) *agentcomposev2.
 	}
 }
 
-func RuntimeCacheResultToRemoveProto(result runtimecache.Result) *agentcomposev2.RemoveCacheResponse {
+func RuntimeCacheResultToRemoveProto(result cache.Result) *agentcomposev2.RemoveCacheResponse {
 	return &agentcomposev2.RemoveCacheResponse{
 		DryRun:   result.DryRun,
 		Matched:  RuntimeCacheItemsToProto(result.Matched),
@@ -300,13 +306,13 @@ func ConnectErrorForRuntimeCache(err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, runtimecache.ErrCacheNotFound):
+	case errors.Is(err, cache.ErrCacheNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
-	case errors.Is(err, runtimecache.ErrInvalidFilter), errors.Is(err, runtimecache.ErrInvalidCacheID), errors.Is(err, runtimecache.ErrAmbiguousCacheID):
+	case errors.Is(err, cache.ErrInvalidFilter), errors.Is(err, cache.ErrInvalidCacheID), errors.Is(err, cache.ErrAmbiguousCacheID):
 		return connect.NewError(connect.CodeInvalidArgument, err)
-	case errors.Is(err, runtimecache.ErrUnsafePath):
+	case errors.Is(err, cache.ErrUnsafePath):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
-	case errors.Is(err, runtimecache.ErrRemoveUnavailable):
+	case errors.Is(err, cache.ErrRemoveUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 	default:
 		return connect.NewError(connect.CodeInternal, err)

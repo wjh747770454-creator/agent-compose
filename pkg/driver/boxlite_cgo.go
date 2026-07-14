@@ -150,7 +150,6 @@ type cgoSandboxRuntime struct {
 	mu       sync.Mutex
 	ensureMu sync.Mutex
 	rt       *C.CBoxliteRuntime
-	cache    boxliteCacheGCState
 }
 
 type cgoBoxHandle struct {
@@ -440,11 +439,6 @@ func (r *cgoSandboxRuntime) StopSandbox(ctx context.Context, sandbox *Sandbox, v
 	box, err := r.getBox(ctx, vmState.BoxID)
 	if err != nil {
 		if isBoxNotFound(err) {
-			if sandbox != nil {
-				if cleanupErr := CleanupBoxliteVolumeBridgeMounts(hostSandboxDir(sandbox)); cleanupErr != nil {
-					return true, cleanupErr
-				}
-			}
 			return true, nil
 		}
 		return false, err
@@ -453,11 +447,6 @@ func (r *cgoSandboxRuntime) StopSandbox(ctx context.Context, sandbox *Sandbox, v
 	missing, err := classifyBoxliteStopError(r.stopBox(ctx, box))
 	if err != nil {
 		return false, err
-	}
-	if sandbox != nil {
-		if err := CleanupBoxliteVolumeBridgeMounts(hostSandboxDir(sandbox)); err != nil {
-			return missing, err
-		}
 	}
 	return missing, nil
 }

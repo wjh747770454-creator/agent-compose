@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -60,6 +61,11 @@ type SandboxRuntimeRemover interface {
 	RemoveSandboxVM(context.Context, *domain.Sandbox) error
 }
 
+type SandboxRemovalCoordinator interface {
+	Remove(context.Context, string, bool) (sessions.RemovalResult, error)
+	Prune(context.Context, sessions.PruneRequest) (sessions.PruneResult, error)
+}
+
 type SandboxDashboardNotifier interface {
 	Notify(string)
 }
@@ -89,6 +95,12 @@ type SandboxHandler struct {
 	dashboard  SandboxDashboardNotifier
 	stats      SandboxStatsRuntimeResolver
 	runTargets SandboxRunTargetResolver
+	removal    SandboxRemovalCoordinator
+}
+
+func (h *SandboxHandler) WithRemovalCoordinator(coordinator SandboxRemovalCoordinator) *SandboxHandler {
+	h.removal = coordinator
+	return h
 }
 
 func (h *SandboxHandler) WithRunTargetResolver(resolver SandboxRunTargetResolver) *SandboxHandler {
@@ -440,6 +452,22 @@ func (h *SandboxHandler) RemoveSandbox(ctx context.Context, req *connect.Request
 	if err := validateSandboxID(sandboxID); err != nil {
 		return nil, err
 	}
+	if h.removal != nil {
+		result, err := h.removal.Remove(ctx, sandboxID, req.Msg.GetForce())
+		if err != nil {
+			if errors.Is(err, sessions.ErrSandboxRunning) {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+			}
+			if errors.Is(err, sessions.ErrOwnershipUnknown) || errors.Is(err, sessions.ErrUnsafeResidue) {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+			}
+			return nil, ConnectErrorForDomain(err)
+		}
+		if h.dashboard != nil {
+			h.dashboard.Notify("sandbox_removed")
+		}
+		return connect.NewResponse(&agentcomposev2.RemoveSandboxResponse{SandboxId: result.SandboxID, Stopped: result.Stopped, Removed: result.Removed}), nil
+	}
 	session, err := h.store.GetSandbox(ctx, sandboxID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
@@ -479,6 +507,48 @@ func (h *SandboxHandler) RemoveSandbox(ctx context.Context, req *connect.Request
 		Stopped:   stopped,
 		Removed:   true,
 	}), nil
+}
+
+func (h *SandboxHandler) PruneSandboxes(ctx context.Context, req *connect.Request[agentcomposev2.PruneSandboxesRequest]) (*connect.Response[agentcomposev2.PruneSandboxesResponse], error) {
+	if h.removal == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("sandbox removal coordinator is unavailable"))
+	}
+	olderThan, err := RuntimeCacheOlderThanFromProto(req.Msg.GetOlderThanSeconds())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	result, err := h.removal.Prune(ctx, sessions.PruneRequest{
+		ProjectID: strings.TrimSpace(req.Msg.GetProjectId()), Statuses: append([]string(nil), req.Msg.GetStatus()...),
+		AgentName: strings.TrimSpace(req.Msg.GetAgentName()), Driver: strings.TrimSpace(req.Msg.GetDriver()),
+		OlderThan: olderThan, IncludeOrphans: req.Msg.GetIncludeOrphans(), Force: req.Msg.GetForce(),
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	return connect.NewResponse(&agentcomposev2.PruneSandboxesResponse{
+		DryRun: result.DryRun, Matched: sandboxPruneCandidatesToProto(result.Matched), Removed: result.Removed,
+		Skipped: sandboxPruneCandidatesToProto(result.Skipped), Warnings: result.Warnings,
+	}), nil
+}
+
+func sandboxPruneCandidatesToProto(items []sessions.PruneCandidate) []*agentcomposev2.SandboxPruneCandidate {
+	out := make([]*agentcomposev2.SandboxPruneCandidate, 0, len(items))
+	for _, item := range items {
+		kind := agentcomposev2.SandboxPruneCandidateKind_SANDBOX_PRUNE_CANDIDATE_KIND_SANDBOX_RECORD
+		if item.Kind == sessions.PruneCandidateRuntimeResidue {
+			kind = agentcomposev2.SandboxPruneCandidateKind_SANDBOX_PRUNE_CANDIDATE_KIND_RUNTIME_RESIDUE
+		}
+		candidate := &agentcomposev2.SandboxPruneCandidate{
+			Kind: kind, SandboxId: item.SandboxID, ProjectId: item.ProjectID, AgentName: item.AgentName,
+			Driver: item.Driver, Status: item.Status, RuntimeId: item.RuntimeID,
+			Removable: item.Removable, BlockedReasons: append([]string(nil), item.BlockedReasons...),
+		}
+		if !item.UpdatedAt.IsZero() {
+			candidate.UpdatedAt = timestamppb.New(item.UpdatedAt)
+		}
+		out = append(out, candidate)
+	}
+	return out
 }
 
 func (h *SandboxHandler) GetSandboxStats(ctx context.Context, req *connect.Request[agentcomposev2.GetSandboxStatsRequest]) (*connect.Response[agentcomposev2.GetSandboxStatsResponse], error) {

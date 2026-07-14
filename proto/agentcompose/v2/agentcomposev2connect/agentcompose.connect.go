@@ -159,6 +159,9 @@ const (
 	// SandboxServiceRemoveSandboxProcedure is the fully-qualified name of the SandboxService's
 	// RemoveSandbox RPC.
 	SandboxServiceRemoveSandboxProcedure = "/agentcompose.v2.SandboxService/RemoveSandbox"
+	// SandboxServicePruneSandboxesProcedure is the fully-qualified name of the SandboxService's
+	// PruneSandboxes RPC.
+	SandboxServicePruneSandboxesProcedure = "/agentcompose.v2.SandboxService/PruneSandboxes"
 	// SandboxServiceGetSandboxStatsProcedure is the fully-qualified name of the SandboxService's
 	// GetSandboxStats RPC.
 	SandboxServiceGetSandboxStatsProcedure = "/agentcompose.v2.SandboxService/GetSandboxStats"
@@ -1493,6 +1496,7 @@ func (UnimplementedVolumeServiceHandler) PruneVolumes(context.Context, *connect.
 // SandboxServiceClient is a client for the agentcompose.v2.SandboxService service.
 type SandboxServiceClient interface {
 	RemoveSandbox(context.Context, *connect.Request[v2.RemoveSandboxRequest]) (*connect.Response[v2.RemoveSandboxResponse], error)
+	PruneSandboxes(context.Context, *connect.Request[v2.PruneSandboxesRequest]) (*connect.Response[v2.PruneSandboxesResponse], error)
 	GetSandboxStats(context.Context, *connect.Request[v2.GetSandboxStatsRequest]) (*connect.Response[v2.GetSandboxStatsResponse], error)
 	GetSandbox(context.Context, *connect.Request[v2.GetSandboxRequest]) (*connect.Response[v2.GetSandboxResponse], error)
 	StopSandbox(context.Context, *connect.Request[v2.StopSandboxRequest]) (*connect.Response[v2.StopSandboxResponse], error)
@@ -1517,6 +1521,12 @@ func NewSandboxServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			httpClient,
 			baseURL+SandboxServiceRemoveSandboxProcedure,
 			connect.WithSchema(sandboxServiceMethods.ByName("RemoveSandbox")),
+			connect.WithClientOptions(opts...),
+		),
+		pruneSandboxes: connect.NewClient[v2.PruneSandboxesRequest, v2.PruneSandboxesResponse](
+			httpClient,
+			baseURL+SandboxServicePruneSandboxesProcedure,
+			connect.WithSchema(sandboxServiceMethods.ByName("PruneSandboxes")),
 			connect.WithClientOptions(opts...),
 		),
 		getSandboxStats: connect.NewClient[v2.GetSandboxStatsRequest, v2.GetSandboxStatsResponse](
@@ -1567,6 +1577,7 @@ func NewSandboxServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 // sandboxServiceClient implements SandboxServiceClient.
 type sandboxServiceClient struct {
 	removeSandbox      *connect.Client[v2.RemoveSandboxRequest, v2.RemoveSandboxResponse]
+	pruneSandboxes     *connect.Client[v2.PruneSandboxesRequest, v2.PruneSandboxesResponse]
 	getSandboxStats    *connect.Client[v2.GetSandboxStatsRequest, v2.GetSandboxStatsResponse]
 	getSandbox         *connect.Client[v2.GetSandboxRequest, v2.GetSandboxResponse]
 	stopSandbox        *connect.Client[v2.StopSandboxRequest, v2.StopSandboxResponse]
@@ -1579,6 +1590,11 @@ type sandboxServiceClient struct {
 // RemoveSandbox calls agentcompose.v2.SandboxService.RemoveSandbox.
 func (c *sandboxServiceClient) RemoveSandbox(ctx context.Context, req *connect.Request[v2.RemoveSandboxRequest]) (*connect.Response[v2.RemoveSandboxResponse], error) {
 	return c.removeSandbox.CallUnary(ctx, req)
+}
+
+// PruneSandboxes calls agentcompose.v2.SandboxService.PruneSandboxes.
+func (c *sandboxServiceClient) PruneSandboxes(ctx context.Context, req *connect.Request[v2.PruneSandboxesRequest]) (*connect.Response[v2.PruneSandboxesResponse], error) {
+	return c.pruneSandboxes.CallUnary(ctx, req)
 }
 
 // GetSandboxStats calls agentcompose.v2.SandboxService.GetSandboxStats.
@@ -1619,6 +1635,7 @@ func (c *sandboxServiceClient) WatchSandbox(ctx context.Context, req *connect.Re
 // SandboxServiceHandler is an implementation of the agentcompose.v2.SandboxService service.
 type SandboxServiceHandler interface {
 	RemoveSandbox(context.Context, *connect.Request[v2.RemoveSandboxRequest]) (*connect.Response[v2.RemoveSandboxResponse], error)
+	PruneSandboxes(context.Context, *connect.Request[v2.PruneSandboxesRequest]) (*connect.Response[v2.PruneSandboxesResponse], error)
 	GetSandboxStats(context.Context, *connect.Request[v2.GetSandboxStatsRequest]) (*connect.Response[v2.GetSandboxStatsResponse], error)
 	GetSandbox(context.Context, *connect.Request[v2.GetSandboxRequest]) (*connect.Response[v2.GetSandboxResponse], error)
 	StopSandbox(context.Context, *connect.Request[v2.StopSandboxRequest]) (*connect.Response[v2.StopSandboxResponse], error)
@@ -1639,6 +1656,12 @@ func NewSandboxServiceHandler(svc SandboxServiceHandler, opts ...connect.Handler
 		SandboxServiceRemoveSandboxProcedure,
 		svc.RemoveSandbox,
 		connect.WithSchema(sandboxServiceMethods.ByName("RemoveSandbox")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sandboxServicePruneSandboxesHandler := connect.NewUnaryHandler(
+		SandboxServicePruneSandboxesProcedure,
+		svc.PruneSandboxes,
+		connect.WithSchema(sandboxServiceMethods.ByName("PruneSandboxes")),
 		connect.WithHandlerOptions(opts...),
 	)
 	sandboxServiceGetSandboxStatsHandler := connect.NewUnaryHandler(
@@ -1687,6 +1710,8 @@ func NewSandboxServiceHandler(svc SandboxServiceHandler, opts ...connect.Handler
 		switch r.URL.Path {
 		case SandboxServiceRemoveSandboxProcedure:
 			sandboxServiceRemoveSandboxHandler.ServeHTTP(w, r)
+		case SandboxServicePruneSandboxesProcedure:
+			sandboxServicePruneSandboxesHandler.ServeHTTP(w, r)
 		case SandboxServiceGetSandboxStatsProcedure:
 			sandboxServiceGetSandboxStatsHandler.ServeHTTP(w, r)
 		case SandboxServiceGetSandboxProcedure:
@@ -1712,6 +1737,10 @@ type UnimplementedSandboxServiceHandler struct{}
 
 func (UnimplementedSandboxServiceHandler) RemoveSandbox(context.Context, *connect.Request[v2.RemoveSandboxRequest]) (*connect.Response[v2.RemoveSandboxResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.SandboxService.RemoveSandbox is not implemented"))
+}
+
+func (UnimplementedSandboxServiceHandler) PruneSandboxes(context.Context, *connect.Request[v2.PruneSandboxesRequest]) (*connect.Response[v2.PruneSandboxesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentcompose.v2.SandboxService.PruneSandboxes is not implemented"))
 }
 
 func (UnimplementedSandboxServiceHandler) GetSandboxStats(context.Context, *connect.Request[v2.GetSandboxStatsRequest]) (*connect.Response[v2.GetSandboxStatsResponse], error) {

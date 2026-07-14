@@ -47,6 +47,9 @@ func (d *SandboxDriver) ValidateSandboxRuntime(session *domain.Sandbox) error {
 }
 
 func (d *SandboxDriver) StartSandboxVM(ctx context.Context, session *domain.Sandbox) error {
+	if session == nil || session.Summary.VMStatus == domain.VMStatusDeleting {
+		return domain.ClassifyError(domain.ErrConflict, "sandbox is being deleted", nil)
+	}
 	ctx, cancel := context.WithTimeout(ctx, d.Config.SandboxStartTimeout)
 	defer cancel()
 

@@ -5,25 +5,25 @@ package driver
 import (
 	"context"
 
+	"agent-compose/pkg/cache"
 	appconfig "agent-compose/pkg/config"
-	"agent-compose/pkg/runtimecache"
 )
 
 type boxliteRuntimeCacheSource struct {
 	boxliteHome string
 }
 
-func appendBoxliteRuntimeCacheSource(sources []runtimecache.Source, config *appconfig.Config) []runtimecache.Source {
+func appendBoxliteRuntimeCacheSource(sources []cache.Source, config *appconfig.Config) []cache.Source {
 	if config == nil {
 		return sources
 	}
 	return append(sources, boxliteRuntimeCacheSource{boxliteHome: config.BoxliteHome})
 }
 
-func (s boxliteRuntimeCacheSource) List(ctx context.Context) (runtimecache.ListResult, error) {
+func (s boxliteRuntimeCacheSource) List(ctx context.Context) (cache.ListResult, error) {
 	return listBoxliteRuntimeDerivedCaches(ctx, s.boxliteHome)
 }
 
-func (s boxliteRuntimeCacheSource) Remove(ctx context.Context, item runtimecache.Item) error {
+func (s boxliteRuntimeCacheSource) Remove(ctx context.Context, item cache.Item) error {
 	return boxliteRuntimeDerivedRemover{boxliteHome: s.boxliteHome}.Remove(ctx, item)
 }

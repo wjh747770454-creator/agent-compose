@@ -1,4 +1,4 @@
-package runtimecache
+package cache
 
 import (
 	"context"
@@ -11,29 +11,28 @@ import (
 
 func TestEvaluateProtection(t *testing.T) {
 	tests := []struct {
-		name              string
-		item              Item
-		includeReferenced bool
-		wantStatus        Status
-		wantRemovable     bool
-		wantBlocked       bool
+		name          string
+		item          Item
+		wantStatus    Status
+		wantRemovable bool
+		wantBlocked   bool
 	}{
 		{name: "active", item: Item{Status: StatusActive}, wantStatus: StatusActive, wantBlocked: true},
 		{name: "unknown", item: Item{Status: StatusUnknown}, wantStatus: StatusUnknown, wantBlocked: true},
 		{name: "empty status is unknown", item: Item{}, wantStatus: StatusUnknown, wantBlocked: true},
 		{name: "referenced blocked by default", item: Item{Status: StatusReferenced}, wantStatus: StatusReferenced, wantBlocked: true},
-		{name: "referenced allowed when included", item: Item{Status: StatusReferenced}, includeReferenced: true, wantStatus: StatusReferenced, wantRemovable: true},
+		{name: "advisory reference is removable", item: Item{Status: StatusReferenced, References: []Reference{{Policy: ReferencePolicyAdvisory}}}, wantStatus: StatusReferenced, wantRemovable: true},
 		{name: "unused", item: Item{Status: StatusUnused}, wantStatus: StatusUnused, wantRemovable: true},
 		{name: "orphaned", item: Item{Status: StatusOrphaned}, wantStatus: StatusOrphaned, wantRemovable: true},
 		{name: "expired", item: Item{Status: StatusExpired}, wantStatus: StatusExpired, wantRemovable: true},
-		{name: "expired referenced blocked", item: Item{Status: StatusExpired, References: []Reference{{Type: "sandbox", ID: "s1"}}}, wantStatus: StatusExpired, wantBlocked: true},
-		{name: "expired referenced included", item: Item{Status: StatusExpired, References: []Reference{{Type: "sandbox", ID: "s1"}}}, includeReferenced: true, wantStatus: StatusExpired, wantRemovable: true},
+		{name: "expired required reference blocked", item: Item{Status: StatusExpired, References: []Reference{{Type: "sandbox", ID: "s1"}}}, wantStatus: StatusReferenced, wantBlocked: true},
+		{name: "expired advisory reference removable", item: Item{Status: StatusExpired, References: []Reference{{Policy: ReferencePolicyAdvisory, Type: "image"}}}, wantStatus: StatusExpired, wantRemovable: true},
 		{name: "future status fails closed", item: Item{Status: Status("future")}, wantStatus: StatusUnknown, wantBlocked: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := EvaluateProtection(tt.item, tt.includeReferenced)
+			got := EvaluateProtection(tt.item)
 			if got.Status != tt.wantStatus || got.Removable != tt.wantRemovable {
 				t.Fatalf("EvaluateProtection = status %q removable %v, want %q %v", got.Status, got.Removable, tt.wantStatus, tt.wantRemovable)
 			}
@@ -72,32 +71,32 @@ func TestPruneItemsDryRunDoesNotRemove(t *testing.T) {
 	}
 }
 
-func TestPruneItemsForceAndIncludeReferenced(t *testing.T) {
+func TestPruneItemsForceKeepsRequiredReferences(t *testing.T) {
 	items := []Item{
 		mustCacheItem(t, "unused", StatusUnused),
-		mustCacheItem(t, "referenced", StatusReferenced),
-		mustCacheItem(t, "expired-referenced", StatusExpired, Reference{Type: "project", ID: "p1"}),
+		mustCacheItem(t, "advisory", StatusReferenced, Reference{Policy: ReferencePolicyAdvisory, Type: "image", ID: "i1"}),
+		mustCacheItem(t, "expired-required", StatusExpired, Reference{Type: "project", ID: "p1"}),
 		mustCacheItem(t, "unknown", StatusUnknown),
 		mustCacheItem(t, "active", StatusActive),
 	}
 	var removed []string
-	result, err := PruneItems(context.Background(), items, PruneRequest{Force: true, IncludeReferenced: true}, time.Now(), func(_ context.Context, item Item) error {
+	result, err := PruneItems(context.Background(), items, PruneRequest{Force: true}, time.Now(), func(_ context.Context, item Item) error {
 		removed = append(removed, item.CacheID)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("PruneItems returned error: %v", err)
 	}
-	wantRemoved := []string{items[0].CacheID, items[1].CacheID, items[2].CacheID}
+	wantRemoved := []string{items[0].CacheID, items[1].CacheID}
 	if !reflect.DeepEqual(result.Removed, wantRemoved) || !reflect.DeepEqual(removed, wantRemoved) {
 		t.Fatalf("Removed = %#v calls %#v, want %#v", result.Removed, removed, wantRemoved)
 	}
-	if got := cacheIDs(result.Skipped); !reflect.DeepEqual(got, []string{items[3].CacheID, items[4].CacheID}) {
+	if got := cacheIDs(result.Skipped); !reflect.DeepEqual(got, []string{items[2].CacheID, items[3].CacheID, items[4].CacheID}) {
 		t.Fatalf("Skipped ids = %#v", got)
 	}
 }
 
-func TestPruneItemsReferencedRequiresIncludeReferenced(t *testing.T) {
+func TestPruneItemsRequiredReferenceCannotBeForced(t *testing.T) {
 	item := mustCacheItem(t, "referenced", StatusReferenced)
 	result, err := PruneItems(context.Background(), []Item{item}, PruneRequest{Force: true}, time.Now(), func(context.Context, Item) error {
 		t.Fatal("remover should not be called")

@@ -3,10 +3,10 @@
 package driver
 
 import (
+	"agent-compose/pkg/cache"
 	appconfig "agent-compose/pkg/config"
-	"agent-compose/pkg/runtimecache"
 )
 
-func appendBoxliteRuntimeCacheSource(sources []runtimecache.Source, _ *appconfig.Config) []runtimecache.Source {
+func appendBoxliteRuntimeCacheSource(sources []cache.Source, _ *appconfig.Config) []cache.Source {
 	return sources
 }

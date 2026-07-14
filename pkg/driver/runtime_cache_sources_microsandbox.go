@@ -4,29 +4,83 @@ package driver
 
 import (
 	"context"
+	"fmt"
 
+	"agent-compose/pkg/cache"
 	appconfig "agent-compose/pkg/config"
-	"agent-compose/pkg/runtimecache"
+	microsandbox "github.com/superradcompany/microsandbox/sdk/go"
 )
 
-type microsandboxRuntimeCacheSource struct {
-	microsandboxHome string
-}
+const microsandboxImageCacheKind = "microsandbox-image"
 
-func appendMicrosandboxRuntimeCacheSource(sources []runtimecache.Source, config *appconfig.Config) []runtimecache.Source {
+type microsandboxRuntimeCacheSource struct{}
+
+func appendMicrosandboxRuntimeCacheSource(sources []cache.Source, config *appconfig.Config) []cache.Source {
 	if config == nil {
 		return sources
 	}
-	return append(sources, microsandboxRuntimeCacheSource{microsandboxHome: config.MicrosandboxHome})
+	return append(sources, microsandboxRuntimeCacheSource{})
 }
 
-func (s microsandboxRuntimeCacheSource) List(ctx context.Context) (runtimecache.ListResult, error) {
-	return listMicrosandboxSandboxEphemeralCaches(ctx, s.microsandboxHome, microsandboxCacheReferenceState{
-		Unknown:  true,
-		Warnings: []string{"microsandbox sandbox references are not fully resolved"},
-	})
+func (microsandboxRuntimeCacheSource) List(ctx context.Context) (cache.ListResult, error) {
+	handles, err := microsandbox.Image.List(ctx)
+	if err != nil {
+		return cache.ListResult{}, fmt.Errorf("list microsandbox image cache: %w", err)
+	}
+	result := cache.ListResult{Items: make([]cache.Item, 0, len(handles))}
+	for _, handle := range handles {
+		if handle == nil {
+			continue
+		}
+		item := cache.Item{
+			Domain:         cache.DomainRuntimeDerivedCache,
+			Driver:         cache.DriverMicrosandbox,
+			Kind:           microsandboxImageCacheKind,
+			ImageID:        handle.ManifestDigest(),
+			ImageRef:       handle.Reference(),
+			ResolvedRef:    handle.ManifestDigest(),
+			Status:         cache.StatusUnused,
+			LastUsedAt:     handle.LastUsedAt().UTC(),
+			LastUsedSource: "microsandbox-sdk",
+		}
+		if size := handle.SizeBytes(); size != nil && *size > 0 {
+			item.SizeBytes = uint64(*size)
+		}
+		cacheID, idErr := cache.GenerateCacheID(item)
+		if idErr != nil {
+			item.Status = cache.StatusUnknown
+			item.Warnings = append(item.Warnings, idErr.Error())
+		} else {
+			item.CacheID = cacheID
+		}
+		result.Items = append(result.Items, cache.EvaluateProtection(item))
+	}
+	return result, nil
 }
 
-func (s microsandboxRuntimeCacheSource) Remove(ctx context.Context, item runtimecache.Item) error {
-	return microsandboxSandboxEphemeralRemover(s).Remove(ctx, item)
+func (source microsandboxRuntimeCacheSource) Remove(ctx context.Context, item cache.Item) error {
+	if item.Domain != cache.DomainRuntimeDerivedCache || item.Driver != cache.DriverMicrosandbox || item.Kind != microsandboxImageCacheKind {
+		return fmt.Errorf("microsandbox image remover rejected cache inventory item")
+	}
+	latest, err := source.List(ctx)
+	if err != nil {
+		return err
+	}
+	resolved, err := cache.ResolveCacheID(latest.Items, item.CacheID)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range latest.Items {
+		if candidate.CacheID != resolved {
+			continue
+		}
+		candidate = cache.EvaluateProtection(candidate)
+		if !candidate.Removable {
+			return fmt.Errorf("microsandbox image is no longer safely removable")
+		}
+		// force=false is the final SDK-level in-use guard and is intentionally not
+		// coupled to CacheService's execution --force flag.
+		return microsandbox.Image.Remove(ctx, candidate.ImageRef, false)
+	}
+	return fmt.Errorf("%w: %s", cache.ErrCacheNotFound, item.CacheID)
 }

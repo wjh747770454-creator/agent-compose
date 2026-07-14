@@ -257,6 +257,7 @@ agent-compose sandbox prune
 agent-compose sandbox prune --older-than 7d
 agent-compose sandbox prune --status error --json
 agent-compose sandbox prune --agent worker --driver microsandbox --force
+agent-compose sandbox prune --include-orphans
 ```
 
 子命令：
@@ -277,15 +278,18 @@ agent-compose sandbox prune --agent worker --driver microsandbox --force
 | `--agent <agent>` | 只匹配指定 agent name 的 sandbox。 |
 | `--driver <docker|boxlite|microsandbox>` | 只匹配指定 runtime driver 的 sandbox。 |
 | `--older-than <duration>` | 匹配 `updated_at` 早于指定时长的 sandbox；缺少 `updated_at` 时回退使用 `created_at`。时长示例：`7d`、`168h`。 |
+| `--include-orphans` | 同时扫描 daemon 全局、在任何 project 中都已无 sandbox 记录的受管 runtime 残留。 |
 | `--force` | 实际删除匹配的 sandbox。不带该参数时，`sandbox prune` 只做 dry-run。 |
 
 行为规则：
 
-- `sandbox prune` 只处理属于当前 compose project 的 sandbox。
-- `sandbox prune` 永远不会删除 `running` 或 `pending` sandbox，也不会向 `RemoveSandbox` 发送 `force=true`。
-- 无法解析的时间会被跳过，并在 warnings 中报告。
-- `sandbox prune` 通过 `SandboxService.RemoveSandbox` 删除 sandbox 记录；它不清理 runtime cache 文件。daemon runtime cache inventory 仍由 `cache prune` 或 `cache rm` 管理。
+- 不带 `--include-orphans` 时，`sandbox prune` 只处理当前 compose project 的 stopped/failed sandbox 记录，且不会扫描 driver 残留。
+- 带 `--include-orphans` 时，`--driver`、`--older-than` 同时过滤记录和残留；`--status`、`--agent` 只过滤记录。任何仍关联已知 sandbox 记录的 runtime 资源都不会成为 orphan。
+- ownership 不完整、manifest 损坏、路径越界、仍 active 或 schema 未知的残留会显示为不可删除；即使 `--force` 也只会 skipped。
+- `sandbox prune` 调用 daemon 的 `SandboxService.PruneSandboxes` use case，删除 sandbox 自有 runtime/data，不删除共享 cache artifact；cache inventory 仍由 `cache prune` 或 `cache rm` 管理。
 - forced prune 中某个 sandbox 删除失败时，命令会继续处理后续匹配项，输出 skipped 项，并以非零退出码结束。
+
+`sandbox stop` 会保留可恢复的 driver state。`sandbox rm` 在 `<SANDBOX_ROOT>/.lifecycle` 写入持久 deletion journal；running sandbox 必须显式使用 `--force`，删除会按可恢复阶段清理 driver resource、sandbox accessories、sandbox 目录和 metadata。处于 `DELETING` 的 sandbox 不能 resume，也不能接收新的 exec/run；daemon 启动时只继续未完成的 deletion journal，不会猜测或自动删除普通历史残留。
 
 ## `stats`：查看 sandbox 资源统计
 
@@ -480,7 +484,7 @@ agent-compose inspect image <image>
 - `images`：列出镜像。
 - `pull`：拉取当前 project 中所有 agent 引用的镜像。
 - `pull <image>`：拉取指定镜像；如果本地 OCI image backend/store 已存在该镜像，会直接成功并输出 skipped/already exists warning，不会再次 pull。
-- `rmi <image>`：删除镜像 metadata/store entry，不删除 materialized image cache、runtime-derived cache 或 sandbox ephemeral state。
+- `rmi <image>`：删除镜像 metadata/store entry。OCI 模式下只删除逻辑 metadata ref；无引用的物理 manifest/blob 由 CacheService 显式回收。该命令不删除 materialized 或 runtime-derived cache。
 - `inspect image <image>`：查看镜像详情。
 
 常用选项：
@@ -507,15 +511,15 @@ agent-compose inspect cache <cache-id>
 
 Cache domain 在 CLI 中用 `--type` 表示：
 
-- `oci`：daemon OCI image store metadata/layout。
+- `oci`：daemon OCI image store 中的物理 manifest、blob 和中断项。
 - `materialized`：从镜像派生出的 runtime 输入，例如 BoxLite OCI layout 或 Microsandbox rootfs。
-- `runtime`：runtime driver home 下的派生缓存，例如 BoxLite image artifacts。
-- `sandbox`：sandbox 级 runtime state，例如 Microsandbox docker disks。
+- `runtime`：driver home 下可跨 sandbox 复用的 runtime-derived image。
+- `skill`：content-addressed skill artifact 及中断的临时/lock 项。
 
 保护状态：
 
 - `active`：正在被 running/resuming runtime 使用，永不删除。
-- `referenced`：当前不 active，但仍被 stopped sandbox、project/image metadata 或 runtime metadata 引用。默认跳过；`cache prune --include-referenced --force` 可以删除。
+- `referenced`：存在 `REQUIRED` 引用，例如 OCI metadata 或 running/stopped sandbox dependency。即使带 `--force` 也不可删除。`ADVISORY` 引用只用于展示，不阻止删除。
 - `unused`、`expired`、`orphaned`：设置 `--force` 后可删除。
 - `unknown`：引用或安全检查不完整，永不删除。
 
@@ -524,11 +528,10 @@ Cache domain 在 CLI 中用 `--type` 表示：
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
 | `cache ls`, `cache prune` | `--driver <docker|boxlite|microsandbox|all>` | 按 runtime driver 过滤。 |
-| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|sandbox>` | 按 cache type 过滤。 |
+| `cache ls`, `cache prune` | `--type <oci|materialized|runtime|skill>` | 按 cache type 过滤。 |
 | `cache ls`, `cache prune` | `--status <active|referenced|unused|expired|orphaned|unknown>` | 按保护状态过滤。 |
 | `cache prune` | `--unused`, `--orphaned`, `--expired` | status 快捷参数；彼此互斥，也不能与 `--status` 同用。 |
 | `cache prune` | `--older-than <duration>` | 匹配超过指定时长的 cache，例如 `7d` 或 `168h`。 |
-| `cache prune` | `--include-referenced` | 允许删除 referenced items；active 和 unknown 仍受保护。 |
 | `cache prune`, `cache rm` | `--force` | 实际删除符合条件的 item。没有 `--force` 时两个命令都是 dry-run。 |
 
 示例：
@@ -537,12 +540,13 @@ Cache domain 在 CLI 中用 `--type` 表示：
 agent-compose cache ls --type materialized
 agent-compose cache inspect <cache-id>
 agent-compose cache prune --driver boxlite --unused
-agent-compose cache prune --type sandbox --orphaned --force
+agent-compose cache prune --type skill --orphaned --force
+agent-compose cache prune --expired --force
 agent-compose cache prune --older-than 7d --force
 agent-compose cache rm <cache-id> --force
 ```
 
-`cache prune` 和 `cache rm` 默认 dry-run，不带 `--force` 不删除文件。dry-run 展示 protected skipped items 不算错误。对 protected item 执行 forced `cache rm` 会非零退出，并展示跳过原因。`sandbox prune` 不删除 runtime cache 文件；cache 清理请使用这些 cache 命令。
+`CACHE_TTL` 默认 `168h`，设为 `0` 会禁用 expired 判定；TTL 不会触发后台或启动时删除，必须显式执行 `cache prune --expired --force`。`--older-than` 仍是独立过滤条件。`cache prune` 和 `cache rm` 默认 dry-run；`--force` 只授权执行，不能绕过 `active`、`referenced` 或 `unknown` 保护。BoxLite v0.9.7 ABI 不提供安全 image remove/prune，因此 runtime image inventory 只读；Microsandbox 共享 image 使用 SDK inventory/remove API。`sandbox prune` 不删除 cache artifact。
 
 兼容说明：
 
