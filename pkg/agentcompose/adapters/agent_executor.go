@@ -204,7 +204,12 @@ func (e *AgentExecutor) ExecuteAgentRequest(ctx context.Context, session *domain
 	}
 
 	execResult = execution.MergeExecResults(execResult, streamed.Result(execResult.ExitCode, result.Success))
-	if strings.TrimSpace(execResult.Output) == "" {
+	if strings.TrimSpace(request.OutputSchemaJSON) != "" && strings.TrimSpace(result.JSONText) != "" {
+		// Streaming output is a human-readable transcript. A structured Run must
+		// persist the provider's final JSON payload as the cell output so callers
+		// never have to scrape tool traces from that transcript.
+		execResult.Output = result.JSONText
+	} else if strings.TrimSpace(execResult.Output) == "" {
 		execResult.Output = firstNonEmpty(result.DisplayOutput, result.Transcript, result.FinalText)
 	}
 	if err := execution.WriteCellArtifacts(hostCellDir, message, execResult); err != nil {

@@ -160,6 +160,22 @@ func TestAgentExecutorStreamsOnlyHumanVisibleAgentOutput(t *testing.T) {
 	if !strings.Contains(cell.Output, "stdout transcript") || !strings.Contains(cell.Output, "loader agent transcript") || strings.Contains(cell.Output, execution.AgentResultPrefix) {
 		t.Fatalf("cell output = %q", cell.Output)
 	}
+
+	structuredPayload := execution.AgentResultPrefix + `{"provider":"claude","threadId":"agent-thread-2","finalText":"{\"ok\":true}","transcript":"human-readable tool transcript","stopReason":"end_turn"}`
+	structuredRuntime := &fakeAgentRuntime{
+		streamChunks: []domain.ExecChunk{{Text: "human-readable tool transcript\n"}},
+		result:       domain.ExecResult{Stdout: structuredPayload, Output: structuredPayload, ExitCode: 0, Success: true},
+	}
+	structuredExecutor := NewAgentExecutor(config, store, nil, NewAgentRunner(config, store, nil, nil, fakeRuntimeProvider{runtime: structuredRuntime}))
+	structuredCell, _, _, err := structuredExecutor.ExecuteAgentRequest(ctx, session, execution.ExecuteAgentRequest{
+		Agent: "claude", Message: "structured", OutputSchemaJSON: `{"type":"object"}`,
+	})
+	if err != nil {
+		t.Fatalf("structured ExecuteAgentRequest returned error: %v", err)
+	}
+	if structuredCell.Output != `{"ok":true}` {
+		t.Fatalf("structured cell output = %q", structuredCell.Output)
+	}
 }
 
 func TestAgentExecutorPersistsFailedCellWhenStreamCallbackFails(t *testing.T) {
