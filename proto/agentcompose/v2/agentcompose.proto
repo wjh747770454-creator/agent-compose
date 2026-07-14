@@ -772,6 +772,8 @@ message ListRunsRequest {
   uint32 offset = 9;
   uint32 limit = 10;
   string sandbox_id = 11;
+  string parent_run_id = 12;
+  string root_run_id = 13;
 }
 
 message ListRunsResponse {
@@ -967,6 +969,11 @@ message RunSummary {
   string sandbox_id = 20;
   string run_short_id = 21;
   string sandbox_short_id = 22;
+  string parent_run_id = 23;
+  string root_run_id = 24;
+  string delegation_id = 25;
+  uint32 delegation_attempt = 26;
+  string delegation_reason = 27;
 }
 
 message RunDetail {
@@ -980,6 +987,7 @@ message RunDetail {
   string driver = 8;
   string image_ref = 9;
   repeated string warnings = 10;
+  string structured_result_json = 11;
 }
 
 message ExecRequest {

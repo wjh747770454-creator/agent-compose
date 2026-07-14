@@ -473,12 +473,14 @@ func (s *projectStore) CreateProjectRun(ctx context.Context, run ProjectRunRecor
 	run.CreatedAt = now
 	run.UpdatedAt = now
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO project_run(
-		run_id, project_id, project_name, project_revision, agent_name, managed_agent_id, source, scheduler_id, trigger_id, status,
-		sandbox_id, exit_code, error, prompt, output, result_json, logs_path, artifacts_dir, cleanup_error, driver, image_ref,
+		run_id, parent_run_id, root_run_id, delegation_id, delegation_attempt, delegation_reason,
+		project_id, project_name, project_revision, agent_name, managed_agent_id, source, scheduler_id, trigger_id, status,
+		sandbox_id, exit_code, error, prompt, output, result_json, structured_result_json, logs_path, artifacts_dir, cleanup_error, driver, image_ref,
 		started_at, completed_at, duration_ms, created_at, updated_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.RunID, run.ProjectID, run.ProjectName, run.ProjectRevision, run.AgentName, run.ManagedAgentID, run.Source, run.SchedulerID, run.TriggerID, run.Status,
-		run.SandboxID, run.ExitCode, run.Error, run.Prompt, run.Output, run.ResultJSON, run.LogsPath, run.ArtifactsDir, run.CleanupError, run.Driver, run.ImageRef,
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.RunID, run.ParentRunID, run.RootRunID, run.DelegationID, run.DelegationAttempt, run.DelegationReason,
+		run.ProjectID, run.ProjectName, run.ProjectRevision, run.AgentName, run.ManagedAgentID, run.Source, run.SchedulerID, run.TriggerID, run.Status,
+		run.SandboxID, run.ExitCode, run.Error, run.Prompt, run.Output, run.ResultJSON, run.StructuredResultJSON, run.LogsPath, run.ArtifactsDir, run.CleanupError, run.Driver, run.ImageRef,
 		domain.NonZeroTimeUnixMilli(run.StartedAt), domain.NonZeroTimeUnixMilli(run.CompletedAt), run.DurationMs, run.CreatedAt.Unix(), run.UpdatedAt.Unix()); err != nil {
 		return ProjectRunRecord{}, fmt.Errorf("insert project run %s: %w", run.RunID, err)
 	}
@@ -492,12 +494,14 @@ func (s *projectStore) UpdateProjectRun(ctx context.Context, run ProjectRunRecor
 	}
 	now := time.Now().UTC()
 	result, err := s.db.ExecContext(ctx, `UPDATE project_run SET
+		parent_run_id = ?, root_run_id = ?, delegation_id = ?, delegation_attempt = ?, delegation_reason = ?,
 		project_id = ?, project_name = ?, project_revision = ?, agent_name = ?, managed_agent_id = ?, source = ?, scheduler_id = ?, trigger_id = ?, status = ?,
-		sandbox_id = ?, exit_code = ?, error = ?, prompt = ?, output = ?, result_json = ?, logs_path = ?, artifacts_dir = ?, cleanup_error = ?, driver = ?, image_ref = ?,
+		sandbox_id = ?, exit_code = ?, error = ?, prompt = ?, output = ?, result_json = ?, structured_result_json = ?, logs_path = ?, artifacts_dir = ?, cleanup_error = ?, driver = ?, image_ref = ?,
 		started_at = ?, completed_at = ?, duration_ms = ?, updated_at = ?
 		WHERE run_id = ?`,
+		run.ParentRunID, run.RootRunID, run.DelegationID, run.DelegationAttempt, run.DelegationReason,
 		run.ProjectID, run.ProjectName, run.ProjectRevision, run.AgentName, run.ManagedAgentID, run.Source, run.SchedulerID, run.TriggerID, run.Status,
-		run.SandboxID, run.ExitCode, run.Error, run.Prompt, run.Output, run.ResultJSON, run.LogsPath, run.ArtifactsDir, run.CleanupError, run.Driver, run.ImageRef,
+		run.SandboxID, run.ExitCode, run.Error, run.Prompt, run.Output, run.ResultJSON, run.StructuredResultJSON, run.LogsPath, run.ArtifactsDir, run.CleanupError, run.Driver, run.ImageRef,
 		domain.NonZeroTimeUnixMilli(run.StartedAt), domain.NonZeroTimeUnixMilli(run.CompletedAt), run.DurationMs, now.Unix(), run.RunID)
 	if err != nil {
 		return ProjectRunRecord{}, fmt.Errorf("update project run %s: %w", run.RunID, err)
@@ -537,11 +541,19 @@ func (s *projectStore) ListProjectRunsByOptions(ctx context.Context, options Pro
 	if offset < 0 {
 		offset = 0
 	}
-	where := make([]string, 0, 6)
+	where := make([]string, 0, 8)
 	args := make([]any, 0, 8)
 	if projectID := strings.TrimSpace(options.ProjectID); projectID != "" {
 		where = append(where, "project_id = ?")
 		args = append(args, projectID)
+	}
+	if parentRunID := strings.TrimSpace(options.ParentRunID); parentRunID != "" {
+		where = append(where, "parent_run_id = ?")
+		args = append(args, parentRunID)
+	}
+	if rootRunID := strings.TrimSpace(options.RootRunID); rootRunID != "" {
+		where = append(where, "root_run_id = ?")
+		args = append(args, rootRunID)
 	}
 	if agentName := strings.TrimSpace(options.AgentName); agentName != "" {
 		where = append(where, "agent_name = ?")

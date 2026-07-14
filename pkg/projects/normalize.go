@@ -138,6 +138,10 @@ func NormalizeSchedulerRecord(scheduler domain.ProjectSchedulerRecord) (domain.P
 
 func NormalizeRunRecord(run domain.ProjectRunRecord) (domain.ProjectRunRecord, error) {
 	run.RunID = strings.TrimSpace(run.RunID)
+	run.ParentRunID = strings.TrimSpace(run.ParentRunID)
+	run.RootRunID = strings.TrimSpace(run.RootRunID)
+	run.DelegationID = strings.TrimSpace(run.DelegationID)
+	run.DelegationReason = strings.TrimSpace(run.DelegationReason)
 	run.ProjectID = strings.TrimSpace(run.ProjectID)
 	run.ProjectName = strings.TrimSpace(run.ProjectName)
 	run.AgentName = strings.TrimSpace(run.AgentName)
@@ -148,6 +152,7 @@ func NormalizeRunRecord(run domain.ProjectRunRecord) (domain.ProjectRunRecord, e
 	run.Status = NormalizeRunStatus(run.Status)
 	run.SandboxID = strings.TrimSpace(run.SandboxID)
 	run.ResultJSON = strings.TrimSpace(run.ResultJSON)
+	run.StructuredResultJSON = strings.TrimSpace(run.StructuredResultJSON)
 	run.LogsPath = strings.TrimSpace(run.LogsPath)
 	run.ArtifactsDir = strings.TrimSpace(run.ArtifactsDir)
 	run.Driver = strings.TrimSpace(run.Driver)
@@ -158,11 +163,22 @@ func NormalizeRunRecord(run domain.ProjectRunRecord) (domain.ProjectRunRecord, e
 	if run.ProjectRevision < 0 {
 		return domain.ProjectRunRecord{}, fmt.Errorf("project run revision cannot be negative")
 	}
+	if run.DelegationAttempt < 0 {
+		return domain.ProjectRunRecord{}, fmt.Errorf("project run delegation attempt cannot be negative")
+	}
+	if run.ParentRunID == "" {
+		run.RootRunID = run.RunID
+	} else if run.RootRunID == "" {
+		return domain.ProjectRunRecord{}, fmt.Errorf("delegated project run root_run_id is required")
+	}
 	if run.ResultJSON == "" {
 		run.ResultJSON = "{}"
 	}
 	if !json.Valid([]byte(run.ResultJSON)) {
 		return domain.ProjectRunRecord{}, fmt.Errorf("project run result_json must be valid JSON")
+	}
+	if run.StructuredResultJSON != "" && !json.Valid([]byte(run.StructuredResultJSON)) {
+		return domain.ProjectRunRecord{}, fmt.Errorf("project run structured_result_json must be valid JSON")
 	}
 	return run, nil
 }

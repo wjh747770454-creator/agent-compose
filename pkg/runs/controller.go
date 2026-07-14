@@ -179,6 +179,11 @@ func NewController(deps ControllerDependencies) *Controller {
 type RunAgentRequest struct {
 	ProjectID              string
 	AgentName              string
+	ParentRunID            string
+	RootRunID              string
+	DelegationID           string
+	DelegationAttempt      int
+	DelegationReason       string
 	Prompt                 string
 	Command                string
 	Source                 string
@@ -242,14 +247,19 @@ func (c *Controller) StartProjectRun(ctx context.Context, req RunAgentRequest) (
 	warnings := resolved.Warnings
 	coordinator := NewCoordinator(c.configDB, domain.StableProjectRunID)
 	run, err := coordinator.BeginRun(ctx, StartRequest{
-		ProjectID:       req.ProjectID,
-		AgentName:       req.AgentName,
-		Source:          req.Source,
-		SchedulerID:     req.SchedulerID,
-		TriggerID:       req.TriggerID,
-		Prompt:          req.Prompt,
-		Driver:          req.Driver,
-		ClientRequestID: req.ClientRequestID,
+		ProjectID:         req.ProjectID,
+		AgentName:         req.AgentName,
+		ParentRunID:       req.ParentRunID,
+		RootRunID:         req.RootRunID,
+		DelegationID:      req.DelegationID,
+		DelegationAttempt: req.DelegationAttempt,
+		DelegationReason:  req.DelegationReason,
+		Source:            req.Source,
+		SchedulerID:       req.SchedulerID,
+		TriggerID:         req.TriggerID,
+		Prompt:            req.Prompt,
+		Driver:            req.Driver,
+		ClientRequestID:   req.ClientRequestID,
 	})
 	if err != nil {
 		return StartedProjectRun{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
@@ -436,6 +446,13 @@ func (c *Controller) executeStartedProjectRun(ctx context.Context, coordinator *
 		Stream:            projectRunAgentExecutionStream(transitionCtx, coordinator, run, sandboxResult.Sandbox, stream, c.runLogs),
 	})
 	transition := TransitionFromAgentCell(run, sandboxResult.Sandbox, cell, execErr)
+	if execErr == nil && cell.Success && strings.TrimSpace(req.OutputSchemaJSON) != "" {
+		var promoteErr error
+		transition, promoteErr = promoteStructuredResult(transition, req.OutputSchemaJSON)
+		if promoteErr != nil {
+			execErr = promoteErr
+		}
+	}
 	if execErr != nil || !cell.Success {
 		run, err = markProjectRunTerminalError(transitionCtx, coordinator, transition, execErr)
 		if err != nil {
@@ -452,6 +469,22 @@ func (c *Controller) executeStartedProjectRun(ctx context.Context, coordinator *
 	run = c.cleanupProjectRunSandbox(transitionCtx, coordinator, run, sandboxResult, req.CleanupPolicy)
 	run = withRunWarnings(run, warnings)
 	return run, nil, nil
+}
+
+func promoteStructuredResult(transition TransitionRequest, outputSchemaJSON string) (TransitionRequest, error) {
+	if !json.Valid([]byte(strings.TrimSpace(outputSchemaJSON))) {
+		transition.ExitCode = execution.FirstNonZeroInt(transition.ExitCode, 1)
+		transition.Error = "agent structured output schema is invalid JSON"
+		return transition, errors.New(transition.Error)
+	}
+	value := strings.TrimSpace(transition.Output)
+	if value == "" || !json.Valid([]byte(value)) {
+		transition.ExitCode = execution.FirstNonZeroInt(transition.ExitCode, 1)
+		transition.Error = "agent structured output is missing or invalid JSON"
+		return transition, errors.New(transition.Error)
+	}
+	transition.StructuredResultJSON = value
+	return transition, nil
 }
 
 func withRunWarnings(run domain.ProjectRunRecord, warnings []string) domain.ProjectRunRecord {

@@ -152,6 +152,12 @@ func RegisterRoutes(di do.Injector) {
 	registerProxyRoutes(app, di)
 	registerWorkspaceRoutes(app, di)
 	registerRuntimeLLMFacadeRoutes(app, di)
+	proxy.RegisterRuntimeDelegationRoutes(app, proxy.RuntimeDelegationOptions{
+		Sandboxes: do.MustInvoke[*adapters.CapabilitySandboxResolver](di),
+		Runs:      do.MustInvoke[*configstore.ConfigStore](di),
+		Runner:    do.MustInvoke[*runs.Controller](di),
+		Auditor:   do.MustInvoke[*configstore.ConfigStore](di),
+	})
 	registerWebhookRoutes(app, di)
 }
 

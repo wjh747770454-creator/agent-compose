@@ -5874,6 +5874,8 @@ type ListRunsRequest struct {
 	Offset        uint32                 `protobuf:"varint,9,opt,name=offset,proto3" json:"offset,omitempty"`
 	Limit         uint32                 `protobuf:"varint,10,opt,name=limit,proto3" json:"limit,omitempty"`
 	SandboxId     string                 `protobuf:"bytes,11,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	ParentRunId   string                 `protobuf:"bytes,12,opt,name=parent_run_id,json=parentRunId,proto3" json:"parent_run_id,omitempty"`
+	RootRunId     string                 `protobuf:"bytes,13,opt,name=root_run_id,json=rootRunId,proto3" json:"root_run_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5974,6 +5976,20 @@ func (x *ListRunsRequest) GetLimit() uint32 {
 func (x *ListRunsRequest) GetSandboxId() string {
 	if x != nil {
 		return x.SandboxId
+	}
+	return ""
+}
+
+func (x *ListRunsRequest) GetParentRunId() string {
+	if x != nil {
+		return x.ParentRunId
+	}
+	return ""
+}
+
+func (x *ListRunsRequest) GetRootRunId() string {
+	if x != nil {
+		return x.RootRunId
 	}
 	return ""
 }
@@ -7635,30 +7651,35 @@ func (x *SandboxStats) GetUptimeSeconds() *MetricValue {
 }
 
 type RunSummary struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	RunId           string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	ProjectId       string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	ProjectName     string                 `protobuf:"bytes,3,opt,name=project_name,json=projectName,proto3" json:"project_name,omitempty"`
-	ProjectRevision uint64                 `protobuf:"varint,4,opt,name=project_revision,json=projectRevision,proto3" json:"project_revision,omitempty"`
-	AgentId         string                 `protobuf:"bytes,5,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	AgentName       string                 `protobuf:"bytes,6,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
-	Source          RunSource              `protobuf:"varint,7,opt,name=source,proto3,enum=agentcompose.v2.RunSource" json:"source,omitempty"`
-	SchedulerId     string                 `protobuf:"bytes,8,opt,name=scheduler_id,json=schedulerId,proto3" json:"scheduler_id,omitempty"`
-	TriggerId       string                 `protobuf:"bytes,9,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
-	Status          RunStatus              `protobuf:"varint,10,opt,name=status,proto3,enum=agentcompose.v2.RunStatus" json:"status,omitempty"`
-	ExitCode        int32                  `protobuf:"varint,12,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
-	Error           string                 `protobuf:"bytes,13,opt,name=error,proto3" json:"error,omitempty"`
-	StartedAt       string                 `protobuf:"bytes,14,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	CompletedAt     string                 `protobuf:"bytes,15,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
-	DurationMs      int64                  `protobuf:"varint,16,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
-	CreatedAt       string                 `protobuf:"bytes,17,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt       string                 `protobuf:"bytes,18,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	Warnings        []string               `protobuf:"bytes,19,rep,name=warnings,proto3" json:"warnings,omitempty"`
-	SandboxId       string                 `protobuf:"bytes,20,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
-	RunShortId      string                 `protobuf:"bytes,21,opt,name=run_short_id,json=runShortId,proto3" json:"run_short_id,omitempty"`
-	SandboxShortId  string                 `protobuf:"bytes,22,opt,name=sandbox_short_id,json=sandboxShortId,proto3" json:"sandbox_short_id,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RunId             string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	ProjectId         string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	ProjectName       string                 `protobuf:"bytes,3,opt,name=project_name,json=projectName,proto3" json:"project_name,omitempty"`
+	ProjectRevision   uint64                 `protobuf:"varint,4,opt,name=project_revision,json=projectRevision,proto3" json:"project_revision,omitempty"`
+	AgentId           string                 `protobuf:"bytes,5,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentName         string                 `protobuf:"bytes,6,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	Source            RunSource              `protobuf:"varint,7,opt,name=source,proto3,enum=agentcompose.v2.RunSource" json:"source,omitempty"`
+	SchedulerId       string                 `protobuf:"bytes,8,opt,name=scheduler_id,json=schedulerId,proto3" json:"scheduler_id,omitempty"`
+	TriggerId         string                 `protobuf:"bytes,9,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
+	Status            RunStatus              `protobuf:"varint,10,opt,name=status,proto3,enum=agentcompose.v2.RunStatus" json:"status,omitempty"`
+	ExitCode          int32                  `protobuf:"varint,12,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Error             string                 `protobuf:"bytes,13,opt,name=error,proto3" json:"error,omitempty"`
+	StartedAt         string                 `protobuf:"bytes,14,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	CompletedAt       string                 `protobuf:"bytes,15,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	DurationMs        int64                  `protobuf:"varint,16,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	CreatedAt         string                 `protobuf:"bytes,17,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt         string                 `protobuf:"bytes,18,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Warnings          []string               `protobuf:"bytes,19,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	SandboxId         string                 `protobuf:"bytes,20,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	RunShortId        string                 `protobuf:"bytes,21,opt,name=run_short_id,json=runShortId,proto3" json:"run_short_id,omitempty"`
+	SandboxShortId    string                 `protobuf:"bytes,22,opt,name=sandbox_short_id,json=sandboxShortId,proto3" json:"sandbox_short_id,omitempty"`
+	ParentRunId       string                 `protobuf:"bytes,23,opt,name=parent_run_id,json=parentRunId,proto3" json:"parent_run_id,omitempty"`
+	RootRunId         string                 `protobuf:"bytes,24,opt,name=root_run_id,json=rootRunId,proto3" json:"root_run_id,omitempty"`
+	DelegationId      string                 `protobuf:"bytes,25,opt,name=delegation_id,json=delegationId,proto3" json:"delegation_id,omitempty"`
+	DelegationAttempt uint32                 `protobuf:"varint,26,opt,name=delegation_attempt,json=delegationAttempt,proto3" json:"delegation_attempt,omitempty"`
+	DelegationReason  string                 `protobuf:"bytes,27,opt,name=delegation_reason,json=delegationReason,proto3" json:"delegation_reason,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RunSummary) Reset() {
@@ -7838,20 +7859,56 @@ func (x *RunSummary) GetSandboxShortId() string {
 	return ""
 }
 
+func (x *RunSummary) GetParentRunId() string {
+	if x != nil {
+		return x.ParentRunId
+	}
+	return ""
+}
+
+func (x *RunSummary) GetRootRunId() string {
+	if x != nil {
+		return x.RootRunId
+	}
+	return ""
+}
+
+func (x *RunSummary) GetDelegationId() string {
+	if x != nil {
+		return x.DelegationId
+	}
+	return ""
+}
+
+func (x *RunSummary) GetDelegationAttempt() uint32 {
+	if x != nil {
+		return x.DelegationAttempt
+	}
+	return 0
+}
+
+func (x *RunSummary) GetDelegationReason() string {
+	if x != nil {
+		return x.DelegationReason
+	}
+	return ""
+}
+
 type RunDetail struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Summary       *RunSummary            `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
-	Prompt        string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	Output        string                 `protobuf:"bytes,3,opt,name=output,proto3" json:"output,omitempty"`
-	ResultJson    string                 `protobuf:"bytes,4,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
-	LogsPath      string                 `protobuf:"bytes,5,opt,name=logs_path,json=logsPath,proto3" json:"logs_path,omitempty"`
-	ArtifactsDir  string                 `protobuf:"bytes,6,opt,name=artifacts_dir,json=artifactsDir,proto3" json:"artifacts_dir,omitempty"`
-	CleanupError  string                 `protobuf:"bytes,7,opt,name=cleanup_error,json=cleanupError,proto3" json:"cleanup_error,omitempty"`
-	Driver        string                 `protobuf:"bytes,8,opt,name=driver,proto3" json:"driver,omitempty"`
-	ImageRef      string                 `protobuf:"bytes,9,opt,name=image_ref,json=imageRef,proto3" json:"image_ref,omitempty"`
-	Warnings      []string               `protobuf:"bytes,10,rep,name=warnings,proto3" json:"warnings,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Summary              *RunSummary            `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
+	Prompt               string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	Output               string                 `protobuf:"bytes,3,opt,name=output,proto3" json:"output,omitempty"`
+	ResultJson           string                 `protobuf:"bytes,4,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
+	LogsPath             string                 `protobuf:"bytes,5,opt,name=logs_path,json=logsPath,proto3" json:"logs_path,omitempty"`
+	ArtifactsDir         string                 `protobuf:"bytes,6,opt,name=artifacts_dir,json=artifactsDir,proto3" json:"artifacts_dir,omitempty"`
+	CleanupError         string                 `protobuf:"bytes,7,opt,name=cleanup_error,json=cleanupError,proto3" json:"cleanup_error,omitempty"`
+	Driver               string                 `protobuf:"bytes,8,opt,name=driver,proto3" json:"driver,omitempty"`
+	ImageRef             string                 `protobuf:"bytes,9,opt,name=image_ref,json=imageRef,proto3" json:"image_ref,omitempty"`
+	Warnings             []string               `protobuf:"bytes,10,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	StructuredResultJson string                 `protobuf:"bytes,11,opt,name=structured_result_json,json=structuredResultJson,proto3" json:"structured_result_json,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *RunDetail) Reset() {
@@ -7952,6 +8009,13 @@ func (x *RunDetail) GetWarnings() []string {
 		return x.Warnings
 	}
 	return nil
+}
+
+func (x *RunDetail) GetStructuredResultJson() string {
+	if x != nil {
+		return x.StructuredResultJson
+	}
+	return ""
 }
 
 type ExecRequest struct {
@@ -15628,7 +15692,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\n" +
 	"project_id\x18\x02 \x01(\tR\tprojectId\">\n" +
 	"\x0eGetRunResponse\x12,\n" +
-	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\"\xfb\x02\n" +
+	"\x03run\x18\x01 \x01(\v2\x1a.agentcompose.v2.RunDetailR\x03run\"\xbf\x03\n" +
 	"\x0fListRunsRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
@@ -15644,7 +15708,9 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x05limit\x18\n" +
 	" \x01(\rR\x05limit\x12\x1d\n" +
 	"\n" +
-	"sandbox_id\x18\v \x01(\tR\tsandboxIdJ\x04\b\x03\x10\x04R\n" +
+	"sandbox_id\x18\v \x01(\tR\tsandboxId\x12\"\n" +
+	"\rparent_run_id\x18\f \x01(\tR\vparentRunId\x12\x1e\n" +
+	"\vroot_run_id\x18\r \x01(\tR\trootRunIdJ\x04\b\x03\x10\x04R\n" +
 	"session_id\"C\n" +
 	"\x10ListRunsResponse\x12/\n" +
 	"\x04runs\x18\x01 \x03(\v2\x1b.agentcompose.v2.RunSummaryR\x04runs\"\xa6\x01\n" +
@@ -15793,7 +15859,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x10block_read_bytes\x18\n" +
 	" \x01(\v2\x1c.agentcompose.v2.MetricValueR\x0eblockReadBytes\x12H\n" +
 	"\x11block_write_bytes\x18\v \x01(\v2\x1c.agentcompose.v2.MetricValueR\x0fblockWriteBytes\x12C\n" +
-	"\x0euptime_seconds\x18\f \x01(\v2\x1c.agentcompose.v2.MetricValueR\ruptimeSeconds\"\xe1\x05\n" +
+	"\x0euptime_seconds\x18\f \x01(\v2\x1c.agentcompose.v2.MetricValueR\ruptimeSeconds\"\xa6\a\n" +
 	"\n" +
 	"RunSummary\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1d\n" +
@@ -15826,8 +15892,13 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"sandbox_id\x18\x14 \x01(\tR\tsandboxId\x12 \n" +
 	"\frun_short_id\x18\x15 \x01(\tR\n" +
 	"runShortId\x12(\n" +
-	"\x10sandbox_short_id\x18\x16 \x01(\tR\x0esandboxShortIdJ\x04\b\v\x10\fR\n" +
-	"session_id\"\xcb\x02\n" +
+	"\x10sandbox_short_id\x18\x16 \x01(\tR\x0esandboxShortId\x12\"\n" +
+	"\rparent_run_id\x18\x17 \x01(\tR\vparentRunId\x12\x1e\n" +
+	"\vroot_run_id\x18\x18 \x01(\tR\trootRunId\x12#\n" +
+	"\rdelegation_id\x18\x19 \x01(\tR\fdelegationId\x12-\n" +
+	"\x12delegation_attempt\x18\x1a \x01(\rR\x11delegationAttempt\x12+\n" +
+	"\x11delegation_reason\x18\x1b \x01(\tR\x10delegationReasonJ\x04\b\v\x10\fR\n" +
+	"session_id\"\x81\x03\n" +
 	"\tRunDetail\x125\n" +
 	"\asummary\x18\x01 \x01(\v2\x1b.agentcompose.v2.RunSummaryR\asummary\x12\x16\n" +
 	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x16\n" +
@@ -15840,7 +15911,8 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x06driver\x18\b \x01(\tR\x06driver\x12\x1b\n" +
 	"\timage_ref\x18\t \x01(\tR\bimageRef\x12\x1a\n" +
 	"\bwarnings\x18\n" +
-	" \x03(\tR\bwarnings\"\xe3\x02\n" +
+	" \x03(\tR\bwarnings\x124\n" +
+	"\x16structured_result_json\x18\v \x01(\tR\x14structuredResultJson\"\xe3\x02\n" +
 	"\vExecRequest\x12\x1f\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tH\x00R\tsandboxId\x12\x17\n" +

@@ -273,6 +273,8 @@ func (h *RunHandler) ListRuns(ctx context.Context, req *connect.Request[agentcom
 	}
 	runs, err := h.store.ListProjectRunsByOptions(ctx, domain.ProjectRunListOptions{
 		ProjectID:   req.Msg.GetProjectId(),
+		ParentRunID: req.Msg.GetParentRunId(),
+		RootRunID:   req.Msg.GetRootRunId(),
 		AgentName:   req.Msg.GetAgentName(),
 		SandboxID:   req.Msg.GetSandboxId(),
 		SchedulerID: req.Msg.GetSchedulerId(),

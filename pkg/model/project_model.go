@@ -72,33 +72,39 @@ type ProjectSchedulerRecord struct {
 }
 
 type ProjectRunRecord struct {
-	RunID           string    `json:"run_id"`
-	ProjectID       string    `json:"project_id"`
-	ProjectName     string    `json:"project_name,omitempty"`
-	ProjectRevision int64     `json:"project_revision"`
-	AgentName       string    `json:"agent_name,omitempty"`
-	ManagedAgentID  string    `json:"managed_agent_id,omitempty"`
-	Source          string    `json:"source,omitempty"`
-	SchedulerID     string    `json:"scheduler_id,omitempty"`
-	TriggerID       string    `json:"trigger_id,omitempty"`
-	Status          string    `json:"status"`
-	SandboxID       string    `json:"sandbox_id,omitempty"`
-	ExitCode        int       `json:"exit_code,omitempty"`
-	Error           string    `json:"error,omitempty"`
-	Prompt          string    `json:"prompt,omitempty"`
-	Output          string    `json:"output,omitempty"`
-	ResultJSON      string    `json:"result_json,omitempty"`
-	LogsPath        string    `json:"logs_path,omitempty"`
-	ArtifactsDir    string    `json:"artifacts_dir,omitempty"`
-	CleanupError    string    `json:"cleanup_error,omitempty"`
-	Driver          string    `json:"driver,omitempty"`
-	ImageRef        string    `json:"image_ref,omitempty"`
-	StartedAt       time.Time `json:"started_at,omitempty"`
-	CompletedAt     time.Time `json:"completed_at,omitempty"`
-	DurationMs      int64     `json:"duration_ms,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	Warnings        []string  `json:"warnings,omitempty"`
+	RunID                string    `json:"run_id"`
+	ParentRunID          string    `json:"parent_run_id,omitempty"`
+	RootRunID            string    `json:"root_run_id,omitempty"`
+	DelegationID         string    `json:"delegation_id,omitempty"`
+	DelegationAttempt    int       `json:"delegation_attempt,omitempty"`
+	DelegationReason     string    `json:"delegation_reason,omitempty"`
+	ProjectID            string    `json:"project_id"`
+	ProjectName          string    `json:"project_name,omitempty"`
+	ProjectRevision      int64     `json:"project_revision"`
+	AgentName            string    `json:"agent_name,omitempty"`
+	ManagedAgentID       string    `json:"managed_agent_id,omitempty"`
+	Source               string    `json:"source,omitempty"`
+	SchedulerID          string    `json:"scheduler_id,omitempty"`
+	TriggerID            string    `json:"trigger_id,omitempty"`
+	Status               string    `json:"status"`
+	SandboxID            string    `json:"sandbox_id,omitempty"`
+	ExitCode             int       `json:"exit_code,omitempty"`
+	Error                string    `json:"error,omitempty"`
+	Prompt               string    `json:"prompt,omitempty"`
+	Output               string    `json:"output,omitempty"`
+	ResultJSON           string    `json:"result_json,omitempty"`
+	StructuredResultJSON string    `json:"structured_result_json,omitempty"`
+	LogsPath             string    `json:"logs_path,omitempty"`
+	ArtifactsDir         string    `json:"artifacts_dir,omitempty"`
+	CleanupError         string    `json:"cleanup_error,omitempty"`
+	Driver               string    `json:"driver,omitempty"`
+	ImageRef             string    `json:"image_ref,omitempty"`
+	StartedAt            time.Time `json:"started_at,omitempty"`
+	CompletedAt          time.Time `json:"completed_at,omitempty"`
+	DurationMs           int64     `json:"duration_ms,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	Warnings             []string  `json:"warnings,omitempty"`
 }
 
 type ProjectRunEventKind string
@@ -134,6 +140,8 @@ type ProjectListOptions struct {
 
 type ProjectRunListOptions struct {
 	ProjectID   string
+	ParentRunID string
+	RootRunID   string
 	AgentName   string
 	SandboxID   string
 	SchedulerID string
