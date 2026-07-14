@@ -9435,14 +9435,28 @@ func newRunServiceStubServer(t *testing.T, stub runServiceStub) *httptest.Server
 }
 
 type composeServiceStubs struct {
-	project projectServiceStub
-	run     runServiceStub
-	exec    execServiceStub
-	image   imageServiceStub
-	cache   cacheServiceStub
-	volume  volumeServiceStub
-	sandbox sandboxServiceStub
-	session sessionServiceStub
+	project  projectServiceStub
+	run      runServiceStub
+	exec     execServiceStub
+	resource resourceServiceStub
+	image    imageServiceStub
+	cache    cacheServiceStub
+	volume   volumeServiceStub
+	sandbox  sandboxServiceStub
+	session  sessionServiceStub
+}
+
+type resourceServiceStub struct {
+	resolveID func(context.Context, *connect.Request[agentcomposev2.ResolveResourceIDRequest]) (*connect.Response[agentcomposev2.ResolveResourceIDResponse], error)
+
+	agentcomposev2connect.UnimplementedResourceServiceHandler
+}
+
+func (s resourceServiceStub) ResolveID(ctx context.Context, req *connect.Request[agentcomposev2.ResolveResourceIDRequest]) (*connect.Response[agentcomposev2.ResolveResourceIDResponse], error) {
+	if s.resolveID == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("ResolveID stub is not configured"))
+	}
+	return s.resolveID(ctx, req)
 }
 
 type projectServiceStub struct {
@@ -9855,6 +9869,10 @@ func newComposeServiceStubServer(t *testing.T, stubs composeServiceStubs) *httpt
 	}
 	if stubs.exec.exec != nil || stubs.exec.execStream != nil || stubs.exec.execAttach != nil {
 		path, handler := agentcomposev2connect.NewExecServiceHandler(stubs.exec)
+		mux.Handle(path, handler)
+	}
+	if stubs.resource.resolveID != nil {
+		path, handler := agentcomposev2connect.NewResourceServiceHandler(stubs.resource)
 		mux.Handle(path, handler)
 	}
 	if stubs.image.listImages != nil || stubs.image.pullImage != nil || stubs.image.inspectImage != nil || stubs.image.removeImage != nil || stubs.image.buildImage != nil {

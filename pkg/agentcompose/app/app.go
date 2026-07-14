@@ -27,6 +27,7 @@ import (
 	"agent-compose/pkg/loaders"
 	domain "agent-compose/pkg/model"
 	"agent-compose/pkg/projects"
+	"agent-compose/pkg/resources"
 	"agent-compose/pkg/runs"
 	"agent-compose/pkg/runtimecache"
 	"agent-compose/pkg/sessions"
@@ -60,6 +61,7 @@ func RegisterDependencies(di do.Injector) {
 	do.Provide(di, NewCapabilitySandboxResolver)
 	do.Provide(di, NewImageBackends)
 	do.Provide(di, NewCacheController)
+	do.Provide(di, NewResourceLocator)
 	do.Provide(di, NewVolumeManager)
 	do.Provide(di, NewCapProxyServer)
 	do.Provide(di, loaders.NewBus)
@@ -143,6 +145,9 @@ func RegisterRoutes(di do.Injector) {
 	app.Any(path+"*", echo.WrapHandler(handler))
 	path, handler = agentcomposev2connect.NewLLMServiceHandler(api.NewLLMHandler(do.MustInvoke[*adapters.LLMClient](di)))
 	app.Any(path+"*", echo.WrapHandler(handler))
+	resourceHandler := api.NewResourceHandler(do.MustInvoke[*resources.Locator](di))
+	path, handler = agentcomposev2connect.NewResourceServiceHandler(resourceHandler)
+	app.Any(path+"*", echo.WrapHandler(handler))
 
 	registerProxyRoutes(app, di)
 	registerWorkspaceRoutes(app, di)
@@ -210,6 +215,16 @@ func NewCacheController(di do.Injector) (*runtimecache.Controller, error) {
 	}
 	sources = append(sources, driver.NewRuntimeCacheSources(config)...)
 	return &runtimecache.Controller{Sources: sources}, nil
+}
+
+func NewResourceLocator(di do.Injector) (*resources.Locator, error) {
+	backends := do.MustInvoke[*adapters.ImageBackends](di)
+	return resources.NewLocator(
+		do.MustInvoke[*configstore.ConfigStore](di),
+		do.MustInvoke[*sessionstore.Store](di),
+		backends.Auto,
+		do.MustInvoke[*runtimecache.Controller](di),
+	), nil
 }
 
 func NewVolumeManager(di do.Injector) (*volumes.Manager, error) {

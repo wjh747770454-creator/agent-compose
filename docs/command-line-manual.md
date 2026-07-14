@@ -396,6 +396,7 @@ Current `logs` output is based on run log artifacts returned by the v2 RunServic
 ```bash
 agent-compose logs
 agent-compose logs <agent>
+agent-compose logs <project|agent|run|sandbox-id>
 agent-compose logs --agent reviewer
 agent-compose logs --run <run-id>
 agent-compose logs --sandbox <sandbox>
@@ -430,12 +431,15 @@ Inspect project resources, daemon images, or runtime cache items.
 
 ```bash
 agent-compose inspect project
+agent-compose inspect <project|agent|run|sandbox|image|cache-id>
 agent-compose inspect agent <agent>
 agent-compose inspect run <run-id>
 agent-compose inspect sandbox <sandbox>
 agent-compose inspect image <image>
 agent-compose inspect cache <cache-id>
 ```
+
+When a full ID or hexadecimal short ID is passed as the only argument, `inspect` resolves its resource type through the daemon. Names still require the explicit typed form. Ambiguous short IDs are rejected with the matching resource types.
 
 Details:
 

@@ -105,6 +105,10 @@ service LLMService {
   rpc Generate(GenerateLLMRequest) returns (GenerateLLMResponse);
 }
 
+service ResourceService {
+  rpc ResolveID(ResolveResourceIDRequest) returns (ResolveResourceIDResponse);
+}
+
 enum ProjectValidationSeverity {
   PROJECT_VALIDATION_SEVERITY_UNSPECIFIED = 0;
   PROJECT_VALIDATION_SEVERITY_WARNING = 1;
@@ -253,6 +257,16 @@ enum CacheStatus {
   CACHE_STATUS_EXPIRED = 4;
   CACHE_STATUS_ORPHANED = 5;
   CACHE_STATUS_UNKNOWN = 6;
+}
+
+enum ResourceKind {
+  RESOURCE_KIND_UNSPECIFIED = 0;
+  RESOURCE_KIND_PROJECT = 1;
+  RESOURCE_KIND_AGENT = 2;
+  RESOURCE_KIND_RUN = 3;
+  RESOURCE_KIND_SANDBOX = 4;
+  RESOURCE_KIND_IMAGE = 5;
+  RESOURCE_KIND_CACHE = 6;
 }
 
 message ValidateProjectRequest {
@@ -1458,6 +1472,25 @@ message SkillSpec {
   string username = 6;
   string password = 7;
   string token = 8;
+}
+
+message ResolveResourceIDRequest {
+  string id = 1;
+  repeated ResourceKind kinds = 2;
+}
+
+message ResolveResourceIDResponse {
+  repeated ResourceTarget targets = 1;
+  repeated string warnings = 2;
+}
+
+message ResourceTarget {
+  ResourceKind kind = 1;
+  string id = 2;
+  string short_id = 3;
+  string project_id = 4;
+  string project_name = 5;
+  string agent_name = 6;
 }
 
 message GetDashboardOverviewRequest {}

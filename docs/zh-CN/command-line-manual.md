@@ -407,6 +407,7 @@ agent-compose exec sandbox_123 --cwd /workspace --command "pwd"
 ```bash
 agent-compose logs
 agent-compose logs <agent>
+agent-compose logs <project|agent|run|sandbox-id>
 agent-compose logs --agent reviewer
 agent-compose logs --run <run-id>
 agent-compose logs --sandbox <sandbox>
@@ -443,12 +444,15 @@ agent-compose logs --run run_123 --json
 
 ```bash
 agent-compose inspect project
+agent-compose inspect <project|agent|run|sandbox|image|cache-id>
 agent-compose inspect agent <agent>
 agent-compose inspect run <run-id>
 agent-compose inspect sandbox <sandbox>
 agent-compose inspect image <image>
 agent-compose inspect cache <cache-id>
 ```
+
+当唯一参数是完整 ID 或十六进制短 ID 时，`inspect` 会通过 daemon 自动识别资源类型。名称仍需使用显式类型形式；短 ID 命中多个资源时，命令会报告歧义及候选资源类型。
 
 说明：
 

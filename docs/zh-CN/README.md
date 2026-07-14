@@ -134,7 +134,7 @@ agents:
 | `agent-compose run <agent> --prompt/--command` | 以 agent 身份执行 prompt 或 shell 命令。 |
 | `agent-compose exec <sandbox>` | 在运行中的 sandbox 内执行命令或 prompt。 |
 | `agent-compose ps` / `stats` | 列出 project sandbox / 查看 sandbox 资源统计。 |
-| `agent-compose logs` | 查看 project run 日志。 |
+| `agent-compose logs` | 查看 project run 日志；可直接传入 project、agent、run 或 sandbox ID，无需指定资源类型。 |
 | `agent-compose scheduler ls\|trigger\|inspect` | 查看、执行或检查 scheduler trigger。 |
 | `agent-compose sandbox ls\|stop\|resume\|rm\|prune` | 管理 project sandbox。 |
 | `agent-compose images\|pull\|build\|rmi\|inspect` | 管理 daemon 镜像并构建 agent 镜像。 |
