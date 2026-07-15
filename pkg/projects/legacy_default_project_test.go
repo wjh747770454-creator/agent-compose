@@ -63,7 +63,7 @@ func TestLegacyDefaultNormalizedProjectRejectsLossyMappings(t *testing.T) {
 
 func TestLegacyDefaultNormalizedProjectUsesStableCompatibilityNames(t *testing.T) {
 	agents := []domain.AgentDefinition{
-		{ID: "agent-chinese", Name: "ai资讯推送", Enabled: true, Provider: "codex"},
+		{ID: "agent-chinese", Name: "ai资讯推送", Description: "每天汇总 AI 资讯", Enabled: true, Provider: "codex"},
 		{ID: "agent-duplicate-b", Name: "worker", Enabled: true, Provider: "codex"},
 		{ID: "agent-duplicate-a", Name: "worker", Enabled: true, Provider: "codex"},
 		{ID: "agent-valid", Name: "Reviewer-Z", Enabled: true, Provider: "codex"},
@@ -78,6 +78,7 @@ func TestLegacyDefaultNormalizedProjectUsesStableCompatibilityNames(t *testing.T
 	}
 	names := make(map[string]struct{}, len(project.Spec.Agents))
 	var compatibilityName string
+	var compatibilityAgent compose.NormalizedAgentSpec
 	duplicateCount := 0
 	for _, agent := range project.Spec.Agents {
 		if !domain.IsProjectStableIdentifier(agent.Name) {
@@ -89,6 +90,7 @@ func TestLegacyDefaultNormalizedProjectUsesStableCompatibilityNames(t *testing.T
 		names[agent.Name] = struct{}{}
 		if strings.HasPrefix(agent.Name, "legacy-agent-") {
 			compatibilityName = agent.Name
+			compatibilityAgent = agent
 		}
 		if strings.HasPrefix(agent.Name, "worker-") {
 			duplicateCount++
@@ -96,6 +98,9 @@ func TestLegacyDefaultNormalizedProjectUsesStableCompatibilityNames(t *testing.T
 	}
 	if compatibilityName == "" || duplicateCount != 2 {
 		t.Fatalf("compatibility names = %#v", names)
+	}
+	if compatibilityAgent.DisplayName != "ai资讯推送" || compatibilityAgent.Description != "每天汇总 AI 资讯" {
+		t.Fatalf("compatibility agent metadata = %#v", compatibilityAgent)
 	}
 	if _, exists := names["reviewer-z"]; !exists {
 		t.Fatalf("valid normalized name missing from %#v", names)
@@ -136,6 +141,7 @@ func TestLegacyDefaultNormalizedProjectAdoptsLegacyLoaders(t *testing.T) {
 			Summary: domain.LoaderSummary{
 				ID:                "loader-b",
 				Name:              "Second task",
+				Description:       "Second task description",
 				Enabled:           true,
 				Runtime:           domain.LoaderRuntimeScheduler,
 				AgentID:           "agent-1",
@@ -152,6 +158,7 @@ func TestLegacyDefaultNormalizedProjectAdoptsLegacyLoaders(t *testing.T) {
 			Summary: domain.LoaderSummary{
 				ID:            "loader-a",
 				Name:          "First task",
+				Description:   "First task description",
 				Enabled:       false,
 				Runtime:       domain.LoaderRuntimeScheduler,
 				AgentID:       "agent-1",
@@ -173,7 +180,7 @@ func TestLegacyDefaultNormalizedProjectAdoptsLegacyLoaders(t *testing.T) {
 		t.Fatalf("project agents/overrides = %#v/%#v", project.Spec.Agents, project.managedLoaderOverrides)
 	}
 	worker := findLegacyProjectAgent(t, project, "worker")
-	if worker.Scheduler == nil || worker.Scheduler.Enabled || worker.Scheduler.Script != loaders[1].Script {
+	if worker.Scheduler == nil || worker.Scheduler.Enabled || worker.Scheduler.Script != loaders[1].Script || worker.Scheduler.DisplayName != "First task" || worker.Scheduler.Description != "First task description" {
 		t.Fatalf("worker scheduler = %#v", worker.Scheduler)
 	}
 	workerLoader := project.managedLoaderOverrides["worker"]
@@ -185,7 +192,7 @@ func TestLegacyDefaultNormalizedProjectAdoptsLegacyLoaders(t *testing.T) {
 	for _, agent := range project.Spec.Agents {
 		if strings.HasPrefix(agent.Name, "worker-loader-") {
 			clonedName = agent.Name
-			if agent.Scheduler == nil || !agent.Scheduler.Enabled || agent.Scheduler.Script != loaders[0].Script {
+			if agent.Scheduler == nil || !agent.Scheduler.Enabled || agent.Scheduler.Script != loaders[0].Script || agent.Scheduler.DisplayName != "Second task" || agent.Scheduler.Description != "Second task description" {
 				t.Fatalf("cloned scheduler = %#v", agent.Scheduler)
 			}
 		}
@@ -207,7 +214,8 @@ func TestLegacyDefaultNormalizedProjectKeepsUnboundLoaderVisibleButDisabled(t *t
 	loader := domain.Loader{
 		Summary: domain.LoaderSummary{
 			ID:           "loader-unbound",
-			Name:         "Unbound task",
+			Name:         "未绑定任务",
+			Description:  "迁移后保持可见但禁用",
 			Enabled:      true,
 			Runtime:      domain.LoaderRuntimeScheduler,
 			DefaultAgent: "codex",
@@ -228,6 +236,12 @@ func TestLegacyDefaultNormalizedProjectKeepsUnboundLoaderVisibleButDisabled(t *t
 	agent := project.Spec.Agents[0]
 	if agent.Status != "disabled" || agent.Scheduler == nil || agent.Scheduler.Enabled {
 		t.Fatalf("unbound compatibility agent = %#v", agent)
+	}
+	if agent.DisplayName != "未绑定任务" || agent.Description != "迁移后保持可见但禁用" {
+		t.Fatalf("unbound compatibility agent metadata = %#v", agent)
+	}
+	if agent.Scheduler.DisplayName != "未绑定任务" || agent.Scheduler.Description != "迁移后保持可见但禁用" {
+		t.Fatalf("unbound scheduler metadata = %#v", agent.Scheduler)
 	}
 	if adopted := project.managedLoaderOverrides[agent.Name]; adopted.Summary.ID != loader.Summary.ID || adopted.Summary.Enabled {
 		t.Fatalf("unbound loader override = %#v", adopted)

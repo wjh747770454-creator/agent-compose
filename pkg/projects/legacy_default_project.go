@@ -121,6 +121,7 @@ func legacyDefaultNormalizedProject(agents []domain.AgentDefinition, legacyLoade
 			return NormalizedProject{}, err
 		}
 		agent.Name = names[index]
+		agent.DisplayName = distinctLegacyDisplayName(agent.DisplayName, agent.Name)
 		if legacyID := strings.TrimSpace(definition.ID); legacyID != "" {
 			agentByLegacyID[legacyID] = len(spec.Agents)
 		}
@@ -244,6 +245,8 @@ func projectLegacyLoaders(spec *compose.NormalizedProjectSpec, legacyLoaders []d
 		spec.Agents[targetIndex].Scheduler = &compose.NormalizedSchedulerSpec{
 			Enabled:       projected.Summary.Enabled,
 			SandboxPolicy: domain.NormalizeLoaderSandboxPolicy(projected.Summary.SandboxPolicy),
+			DisplayName:   strings.TrimSpace(projected.Summary.Name),
+			Description:   strings.TrimSpace(projected.Summary.Description),
 			Script:        projected.Script,
 		}
 		scheduledAgents[targetName] = struct{}{}
@@ -276,6 +279,14 @@ func appendLegacyLoaderAgent(spec *compose.NormalizedProjectSpec, loader domain.
 		}
 	}
 	agent.Name = name
+	displayName := strings.TrimSpace(loader.Summary.Name)
+	if displayName == "" && sourceFound {
+		displayName = projectAgentDisplayName(spec.Agents[sourceIndex])
+	}
+	agent.DisplayName = distinctLegacyDisplayName(displayName, name)
+	if description := strings.TrimSpace(loader.Summary.Description); description != "" {
+		agent.Description = description
+	}
 	spec.Agents = append(spec.Agents, agent)
 	return len(spec.Agents) - 1
 }
@@ -325,6 +336,8 @@ func normalizedAgentFromLegacy(definition domain.AgentDefinition) (compose.Norma
 	}
 	agent := compose.NormalizedAgentSpec{
 		Name:         strings.TrimSpace(definition.Name),
+		DisplayName:  strings.TrimSpace(definition.Name),
+		Description:  strings.TrimSpace(definition.Description),
 		Status:       map[bool]string{true: "enabled", false: "disabled"}[definition.Enabled],
 		Provider:     strings.TrimSpace(definition.Provider),
 		Model:        strings.TrimSpace(definition.Model),
@@ -339,6 +352,14 @@ func normalizedAgentFromLegacy(definition domain.AgentDefinition) (compose.Norma
 		MCPServers:   config.MCPServers,
 	}
 	return agent, nil
+}
+
+func distinctLegacyDisplayName(displayName, stableName string) string {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == strings.TrimSpace(stableName) {
+		return ""
+	}
+	return displayName
 }
 
 type legacyAgentConfig struct {
