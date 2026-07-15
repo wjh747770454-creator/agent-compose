@@ -3143,20 +3143,6 @@ func TestNormalizeComposeSchedulerTriggerOptionsPayload(t *testing.T) {
 	}
 }
 
-func TestSchedulerRunShortIDNormalizesRuntimeUUID(t *testing.T) {
-	uuid := "6bbc222f-e90d-4921-a129-7a3005ce1fd9"
-	if got := schedulerRunShortID(uuid); got != "6bbc222fe90d" {
-		t.Fatalf("schedulerRunShortID() = %q", got)
-	}
-	if !schedulerRunRefMatches("6bbc222fe90d", uuid, schedulerRunShortID(uuid)) {
-		t.Fatal("normalized UUID short id did not resolve")
-	}
-	sha := strings.Repeat("a", 64)
-	if got := schedulerRunShortID(sha); got != strings.Repeat("a", 12) {
-		t.Fatalf("schedulerRunShortID(SHA) = %q", got)
-	}
-}
-
 func TestIntegrationCLISchedulerRunsLogsAndInspectResources(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-scheduler-observability

@@ -2552,7 +2552,7 @@ func schedulerRunItem(agentName, schedulerID, loaderID string, run *agentcompose
 	}
 	return composeSchedulerRunItem{
 		RunID:           run.GetRunId(),
-		RunShortID:      schedulerRunShortID(run.GetRunId()),
+		RunShortID:      shortOpaqueID(run.GetRunId()),
 		AgentName:       agentName,
 		SchedulerID:     schedulerID,
 		ManagedLoaderID: loaderID,
@@ -2621,7 +2621,7 @@ func listSchedulerRuntimeRuns(ctx context.Context, client agentcomposev2connect.
 		}
 		run := byID[runID]
 		if run == nil {
-			run = &composeSchedulerRunItem{RunID: runID, RunShortID: schedulerRunShortID(runID), AgentName: agentName, SchedulerID: schedulerID, ManagedLoaderID: loaderID, TriggerID: event.GetTriggerId(), Status: "running", schedulerRuntime: true}
+			run = &composeSchedulerRunItem{RunID: runID, RunShortID: shortOpaqueID(runID), AgentName: agentName, SchedulerID: schedulerID, ManagedLoaderID: loaderID, TriggerID: event.GetTriggerId(), Status: "running", schedulerRuntime: true}
 			byID[runID] = run
 		}
 		applySchedulerRuntimeEvent(run, event)
@@ -2675,7 +2675,7 @@ func resolveSchedulerRuntimeRun(ctx context.Context, client agentcomposev2connec
 			return nil, err
 		}
 		for _, run := range runs {
-			if schedulerRunRefMatches(ref, run.RunID, run.RunShortID) {
+			if resourceRefMatches(ref, run.RunID, run.RunShortID) {
 				matches = append(matches, run)
 			}
 		}
@@ -2687,23 +2687,6 @@ func resolveSchedulerRuntimeRun(ctx context.Context, client agentcomposev2connec
 		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler run reference %q is ambiguous", ref)}
 	}
 	return nil, schedulerResourceNotFoundError{kind: "run", ref: ref}
-}
-
-func schedulerRunShortID(id string) string {
-	normalized := strings.ReplaceAll(strings.TrimSpace(id), "-", "")
-	if len(normalized) > 12 {
-		return normalized[:12]
-	}
-	return normalized
-}
-
-func schedulerRunRefMatches(ref, runID, shortID string) bool {
-	if resourceRefMatches(ref, runID, shortID) {
-		return true
-	}
-	normalizedRef := strings.ReplaceAll(strings.TrimSpace(ref), "-", "")
-	normalizedID := strings.ReplaceAll(strings.TrimSpace(runID), "-", "")
-	return len(normalizedRef) >= 6 && strings.HasPrefix(normalizedID, normalizedRef)
 }
 
 func listSchedulerRuntimeLogEvents(ctx context.Context, client agentcomposev2connect.ProjectServiceClient, projectID string, run composeSchedulerRunItem) ([]composeSchedulerLogEvent, error) {
