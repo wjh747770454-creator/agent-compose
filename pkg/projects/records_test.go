@@ -44,6 +44,24 @@ func TestNewAgentDefinitionFromSpecKeepsEmptyConfigWithoutJupyter(t *testing.T) 
 	}
 }
 
+func TestNewAgentDefinitionFromSpecKeepsStableNameWithPresentationMetadata(t *testing.T) {
+	project := domain.ProjectRecord{ID: "project-1", Name: "project"}
+	agent := compose.NormalizedAgentSpec{
+		Name:        "legacy-agent-bfe5286dc77f",
+		DisplayName: "通用助手",
+		Description: "处理日常通用任务",
+		Provider:    "codex",
+	}
+
+	definition, err := NewAgentDefinitionFromSpec(project, 1, agent, nil)
+	if err != nil {
+		t.Fatalf("NewAgentDefinitionFromSpec returned error: %v", err)
+	}
+	if definition.Name != agent.Name || definition.Description != "处理日常通用任务" || definition.ManagedAgentName != agent.Name {
+		t.Fatalf("managed agent definition = %#v", definition)
+	}
+}
+
 func TestProjectRecordsCarryVolumeMountSpecs(t *testing.T) {
 	project := domain.ProjectRecord{ID: "project-1", Name: "project"}
 	agent := compose.NormalizedAgentSpec{
@@ -54,7 +72,7 @@ func TestProjectRecordsCarryVolumeMountSpecs(t *testing.T) {
 			{Type: "volume", Source: "cache", Target: "/cache"},
 			{Type: "bind", Source: "./fixtures", Target: "/fixtures", ReadOnly: true},
 		},
-		Scheduler: &compose.NormalizedSchedulerSpec{Enabled: true, Script: "scheduler.agent('hi')"},
+		Scheduler: &compose.NormalizedSchedulerSpec{Enabled: true, DisplayName: "缓存巡检", Description: "检查缓存状态", Script: "scheduler.agent('hi')"},
 	}
 	definition, err := NewAgentDefinitionFromSpec(project, 1, agent, nil)
 	if err != nil {
@@ -73,6 +91,9 @@ func TestProjectRecordsCarryVolumeMountSpecs(t *testing.T) {
 	}
 	if len(loader.Volumes) != 2 || loader.Volumes[0].Source != "cache" {
 		t.Fatalf("loader volumes = %#v", loader.Volumes)
+	}
+	if loader.Summary.Name != "缓存巡检" || loader.Summary.Description != "检查缓存状态" {
+		t.Fatalf("loader presentation = %#v", loader.Summary)
 	}
 }
 

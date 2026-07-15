@@ -9,6 +9,7 @@ import (
 	"agent-compose/pkg/compose"
 	domain "agent-compose/pkg/model"
 	agentcomposev2 "agent-compose/proto/agentcompose/v2"
+	"gopkg.in/yaml.v3"
 )
 
 func TestProjectToProtoOnlyIncludesCurrentRevisionArtifacts(t *testing.T) {
@@ -104,6 +105,8 @@ func TestProjectSpecToProtoIncludesSchedulerScript(t *testing.T) {
 			Scheduler: &compose.NormalizedSchedulerSpec{
 				Enabled:       true,
 				SandboxPolicy: "sticky",
+				DisplayName:   "Hourly review",
+				Description:   "Reviews pending changes every hour",
 				Script:        script,
 			},
 		}},
@@ -120,8 +123,11 @@ func TestProjectSpecToProtoIncludesSchedulerScript(t *testing.T) {
 	if scheduler.GetSandboxPolicy() != "sticky" {
 		t.Fatalf("scheduler sandbox policy = %q, want sticky", scheduler.GetSandboxPolicy())
 	}
+	if scheduler.GetDisplayName() != "Hourly review" || scheduler.GetDescription() != "Reviews pending changes every hour" {
+		t.Fatalf("scheduler presentation = %#v", scheduler)
+	}
 	shape := SchedulerYAMLShape(scheduler)
-	if shape["sandbox_policy"] != "sticky" {
+	if shape["sandbox_policy"] != "sticky" || shape["display_name"] != "Hourly review" || shape["description"] != "Reviews pending changes every hour" {
 		t.Fatalf("scheduler YAML shape = %#v", shape)
 	}
 	if got := len(scheduler.GetTriggers()); got != 0 {
@@ -150,6 +156,41 @@ func TestProjectSpecToProtoIncludesJupyter(t *testing.T) {
 	jupyter := response.GetAgents()[0].GetJupyter()
 	if !jupyter.GetEnabled() || jupyter.GetGuestPort() != 8888 {
 		t.Fatalf("jupyter = %#v, want enabled guest port 8888", jupyter)
+	}
+}
+
+func TestIntegrationAgentPresentationMetadataRoundTripsThroughProtoAndCompose(t *testing.T) {
+	shape, issues := ProjectSpecYAMLShape(&agentcomposev2.ProjectSpec{
+		Name: "presentation",
+		Agents: []*agentcomposev2.AgentSpec{{
+			Name:        "legacy-agent-bfe5286dc77f",
+			DisplayName: "通用助手",
+			Description: "处理日常通用任务",
+			Provider:    "codex",
+		}},
+	})
+	if len(issues) != 0 {
+		t.Fatalf("ProjectSpecYAMLShape issues = %#v", issues)
+	}
+	data, err := yaml.Marshal(shape)
+	if err != nil {
+		t.Fatalf("marshal project shape: %v", err)
+	}
+	parsed, err := compose.Parse(data)
+	if err != nil {
+		t.Fatalf("parse project shape: %v", err)
+	}
+	normalized, err := compose.Normalize(parsed, compose.NormalizeOptions{})
+	if err != nil {
+		t.Fatalf("normalize project shape: %v", err)
+	}
+	response := ProjectSpecToProto(normalized)
+	if response == nil || len(response.GetAgents()) != 1 {
+		t.Fatalf("ProjectSpecToProto response = %#v", response)
+	}
+	agent := response.GetAgents()[0]
+	if agent.GetName() != "legacy-agent-bfe5286dc77f" || agent.GetDisplayName() != "通用助手" || agent.GetDescription() != "处理日常通用任务" {
+		t.Fatalf("round-tripped agent = %#v", agent)
 	}
 }
 

@@ -49,6 +49,59 @@ agents:
 	}
 }
 
+func TestAgentPresentationMetadataSurvivesNormalizationAndCanonicalOutput(t *testing.T) {
+	normalized := mustNormalizeCompose(t, `
+name: presentation
+agents:
+  legacy-agent-bfe5286dc77f:
+    display_name: "  通用助手  "
+    description: "  处理日常通用任务  "
+    provider: codex
+    scheduler:
+      display_name: "  每日巡检  "
+      description: "  每天汇总巡检结果  "
+      enabled: false
+`, nil)
+
+	agent := normalized.Agents[0]
+	if agent.Name != "legacy-agent-bfe5286dc77f" || agent.DisplayName != "通用助手" || agent.Description != "处理日常通用任务" {
+		t.Fatalf("normalized agent metadata = %#v", agent)
+	}
+	if agent.Scheduler == nil || agent.Scheduler.DisplayName != "每日巡检" || agent.Scheduler.Description != "每天汇总巡检结果" {
+		t.Fatalf("normalized scheduler metadata = %#v", agent.Scheduler)
+	}
+	jsonData, err := normalized.MarshalCanonicalJSON(false)
+	if err != nil {
+		t.Fatalf("MarshalCanonicalJSON returned error: %v", err)
+	}
+	for _, want := range []string{`"display_name":"通用助手"`, `"description":"处理日常通用任务"`, `"display_name":"每日巡检"`, `"description":"每天汇总巡检结果"`} {
+		if !bytes.Contains(jsonData, []byte(want)) {
+			t.Fatalf("canonical JSON = %s, want %s", jsonData, want)
+		}
+	}
+	redacted := normalized.Redacted()
+	if redacted.Agents[0].DisplayName != agent.DisplayName || redacted.Agents[0].Description != agent.Description {
+		t.Fatalf("redacted agent metadata = %#v", redacted.Agents[0])
+	}
+	if redacted.Agents[0].Scheduler == agent.Scheduler || redacted.Agents[0].Scheduler.DisplayName != agent.Scheduler.DisplayName || redacted.Agents[0].Scheduler.Description != agent.Scheduler.Description {
+		t.Fatalf("redacted scheduler metadata = %#v", redacted.Agents[0].Scheduler)
+	}
+}
+
+func TestAgentDisplayNameDoesNotRelaxStableAgentNameValidation(t *testing.T) {
+	spec := mustParseCompose(t, `
+name: presentation
+agents:
+  通用助手:
+    display_name: 通用助手
+    provider: codex
+`)
+
+	if _, err := Normalize(spec, NormalizeOptions{}); err == nil || !strings.Contains(err.Error(), "agents.通用助手") {
+		t.Fatalf("Normalize error = %v, want agent name validation", err)
+	}
+}
+
 func TestNormalizeInterpolationMissingEnvIncludesFieldPath(t *testing.T) {
 	tests := []struct {
 		name      string

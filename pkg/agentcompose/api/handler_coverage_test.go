@@ -701,7 +701,7 @@ func TestProjectAndRunHandlersStoreBackedWorkflows(t *testing.T) {
 			{ProjectID: "project-1", AgentName: "worker-2", ManagedAgentID: "agent-2", Revision: 1, Driver: "boxlite", Image: "guest:latest"},
 		},
 		schedulers: []domain.ProjectSchedulerRecord{
-			{ProjectID: "project-1", SchedulerID: "scheduler-1", AgentName: "worker", ManagedLoaderID: "loader-1", Revision: 1, Enabled: true, SpecJSON: `{"enabled":true,"script":"run()"}`, RunCount: 3, LatestRunAt: time.Unix(10, 0), LastError: "failed"},
+			{ProjectID: "project-1", SchedulerID: "scheduler-1", AgentName: "worker", ManagedLoaderID: "loader-1", Revision: 1, Enabled: true, SpecJSON: `{"enabled":true,"display_name":"每日巡检","description":"每天汇总巡检结果","script":"run()"}`, RunCount: 3, LatestRunAt: time.Unix(10, 0), LastError: "failed"},
 			{ProjectID: "project-1", SchedulerID: "scheduler-2", AgentName: "worker-2", ManagedLoaderID: "loader-2", Revision: 1, Enabled: true, SpecJSON: `{"enabled":true,"script":"run()"}`},
 		},
 		loaders: map[string]domain.Loader{
@@ -738,14 +738,14 @@ func TestProjectAndRunHandlersStoreBackedWorkflows(t *testing.T) {
 		t.Fatalf("ListProjects summary counts = agents %d schedulers %d", summary.GetAgentCount(), summary.GetSchedulerCount())
 	}
 	scheduler, err := projectHandler.GetScheduler(ctx, connect.NewRequest(&agentcomposev2.GetSchedulerRequest{Project: &agentcomposev2.ProjectRef{ProjectId: "project-1"}, AgentName: "worker"}))
-	if err != nil || scheduler.Msg.GetScheduler().GetSchedulerId() != "scheduler-1" || scheduler.Msg.GetSpec().GetScript() != "run()" {
+	if err != nil || scheduler.Msg.GetScheduler().GetSchedulerId() != "scheduler-1" || scheduler.Msg.GetScheduler().GetDisplayName() != "每日巡检" || scheduler.Msg.GetSpec().GetScript() != "run()" || scheduler.Msg.GetSpec().GetDescription() != "每天汇总巡检结果" {
 		t.Fatalf("GetScheduler resp=%#v err=%v", scheduler, err)
 	}
 	firstSchedulers, err := projectHandler.ListSchedulers(ctx, connect.NewRequest(&agentcomposev2.ListSchedulersRequest{Limit: 1}))
 	if err != nil || len(firstSchedulers.Msg.GetSchedulers()) != 1 || firstSchedulers.Msg.GetNextCursor() == "" {
 		t.Fatalf("ListSchedulers first page=%#v err=%v", firstSchedulers, err)
 	}
-	if summary := firstSchedulers.Msg.GetSchedulers()[0]; summary.GetEnabled() || summary.GetRunCount() != 3 || !summary.GetLatestRunAt().AsTime().Equal(time.Unix(10, 0)) || summary.GetLastError() != "failed" {
+	if summary := firstSchedulers.Msg.GetSchedulers()[0]; summary.GetEnabled() || summary.GetRunCount() != 3 || !summary.GetLatestRunAt().AsTime().Equal(time.Unix(10, 0)) || summary.GetLastError() != "failed" || summary.GetDisplayName() != "每日巡检" || summary.GetDescription() != "每天汇总巡检结果" {
 		t.Fatalf("ListSchedulers summary=%#v", summary)
 	}
 	secondSchedulers, err := projectHandler.ListSchedulers(ctx, connect.NewRequest(&agentcomposev2.ListSchedulersRequest{Limit: 1, Cursor: firstSchedulers.Msg.GetNextCursor()}))

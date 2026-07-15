@@ -109,6 +109,7 @@ func NewAgentDefinitionFromSpec(project domain.ProjectRecord, revision int64, ag
 	return domain.AgentDefinition{
 		ID:                     managedAgentID,
 		Name:                   agent.Name,
+		Description:            agent.Description,
 		Enabled:                agentEnabled(agent),
 		Provider:               agent.Provider,
 		Model:                  agent.Model,
@@ -124,6 +125,13 @@ func NewAgentDefinitionFromSpec(project domain.ProjectRecord, revision int64, ag
 		ManagedProjectRevision: revision,
 		ManagedAgentName:       agent.Name,
 	}, nil
+}
+
+func projectAgentDisplayName(agent compose.NormalizedAgentSpec) string {
+	if displayName := strings.TrimSpace(agent.DisplayName); displayName != "" {
+		return displayName
+	}
+	return strings.TrimSpace(agent.Name)
 }
 
 func agentEnabled(agent compose.NormalizedAgentSpec) bool {
@@ -188,7 +196,8 @@ func NewManagedLoaderFromScheduler(project domain.ProjectRecord, scheduler domai
 	return domain.Loader{
 		Summary: domain.LoaderSummary{
 			ID:                 scheduler.ManagedLoaderID,
-			Name:               fmt.Sprintf("%s/%s scheduler", project.Name, agent.Name),
+			Name:               managedSchedulerDisplayName(project.Name, agent),
+			Description:        strings.TrimSpace(agent.Scheduler.Description),
 			Enabled:            scheduler.Enabled,
 			Runtime:            domain.LoaderRuntimeScheduler,
 			AgentID:            managedAgentID,
@@ -208,6 +217,13 @@ func NewManagedLoaderFromScheduler(project domain.ProjectRecord, scheduler domai
 		EnvItems: SandboxEnvItemsFromCompose(agent.Env),
 		Volumes:  VolumeMountSpecsFromCompose(agent.Volumes),
 	}, nil
+}
+
+func managedSchedulerDisplayName(projectName string, agent compose.NormalizedAgentSpec) string {
+	if displayName := strings.TrimSpace(agent.Scheduler.DisplayName); displayName != "" {
+		return displayName
+	}
+	return fmt.Sprintf("%s/%s scheduler", projectName, agent.Name)
 }
 
 func VolumeMountSpecsFromCompose(values []compose.NormalizedVolumeMountSpec) []domain.VolumeMountSpec {

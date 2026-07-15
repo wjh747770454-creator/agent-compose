@@ -82,7 +82,7 @@ func ProjectRevisionToProto(revision domain.ProjectRevisionRecord, spec *agentco
 func ProjectAgentsToProto(agents []domain.ProjectAgentRecord) []*agentcomposev2.ProjectAgent {
 	items := make([]*agentcomposev2.ProjectAgent, 0, len(agents))
 	for _, agent := range agents {
-		status, specErr := projectAgentSpecStatus(agent.SpecJSON)
+		status, displayName, description, specErr := projectAgentSpecMetadata(agent.SpecJSON)
 		enabled := status != agentcomposev2.AgentStatus_AGENT_STATUS_DISABLED
 		availability := agentcomposev2.ProjectAgentAvailability_PROJECT_AGENT_AVAILABILITY_AVAILABLE
 		health := agentcomposev2.ProjectAgentHealth_PROJECT_AGENT_HEALTH_HEALTHY
@@ -95,6 +95,8 @@ func ProjectAgentsToProto(agents []domain.ProjectAgentRecord) []*agentcomposev2.
 		items = append(items, &agentcomposev2.ProjectAgent{
 			ProjectId:        agent.ProjectID,
 			AgentName:        agent.AgentName,
+			DisplayName:      displayName,
+			Description:      description,
 			ManagedAgentId:   agent.ManagedAgentID,
 			Provider:         agent.Provider,
 			Model:            agent.Model,
@@ -107,46 +109,64 @@ func ProjectAgentsToProto(agents []domain.ProjectAgentRecord) []*agentcomposev2.
 	return items
 }
 
-func projectAgentSpecStatus(specJSON string) (agentcomposev2.AgentStatus, error) {
+func projectAgentSpecMetadata(specJSON string) (agentcomposev2.AgentStatus, string, string, error) {
 	var raw struct {
-		Status json.RawMessage `json:"status"`
+		Status      json.RawMessage `json:"status"`
+		DisplayName string          `json:"display_name"`
+		Description string          `json:"description"`
 	}
 	if err := json.Unmarshal([]byte(specJSON), &raw); err != nil {
-		return agentcomposev2.AgentStatus_AGENT_STATUS_UNSPECIFIED, err
+		return agentcomposev2.AgentStatus_AGENT_STATUS_UNSPECIFIED, "", "", err
 	}
+	displayName := strings.TrimSpace(raw.DisplayName)
+	description := strings.TrimSpace(raw.Description)
 	if len(raw.Status) == 0 || string(raw.Status) == "null" {
-		return agentcomposev2.AgentStatus_AGENT_STATUS_UNSPECIFIED, nil
+		return agentcomposev2.AgentStatus_AGENT_STATUS_UNSPECIFIED, displayName, description, nil
 	}
 	var status string
 	if err := json.Unmarshal(raw.Status, &status); err == nil {
 		switch strings.ToLower(strings.TrimSpace(status)) {
 		case "", "enabled":
-			return agentcomposev2.AgentStatus_AGENT_STATUS_ENABLED, nil
+			return agentcomposev2.AgentStatus_AGENT_STATUS_ENABLED, displayName, description, nil
 		case "disabled":
-			return agentcomposev2.AgentStatus_AGENT_STATUS_DISABLED, nil
+			return agentcomposev2.AgentStatus_AGENT_STATUS_DISABLED, displayName, description, nil
 		default:
-			return agentcomposev2.AgentStatus_AGENT_STATUS_UNSPECIFIED, fmt.Errorf("decode project agent spec: unknown agent status %q", status)
+			return agentcomposev2.AgentStatus_AGENT_STATUS_UNSPECIFIED, displayName, description, fmt.Errorf("decode project agent spec: unknown agent status %q", status)
 		}
 	}
 	var spec agentcomposev2.AgentSpec
 	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
-		return agentcomposev2.AgentStatus_AGENT_STATUS_UNSPECIFIED, err
+		return agentcomposev2.AgentStatus_AGENT_STATUS_UNSPECIFIED, displayName, description, err
 	}
-	return spec.GetStatus(), nil
+	return spec.GetStatus(), displayName, description, nil
 }
 
 func ProjectSchedulersToProto(schedulers []domain.ProjectSchedulerRecord) []*agentcomposev2.ProjectScheduler {
 	items := make([]*agentcomposev2.ProjectScheduler, 0, len(schedulers))
 	for _, scheduler := range schedulers {
+		displayName, description := projectSchedulerPresentation(scheduler.SpecJSON)
 		items = append(items, &agentcomposev2.ProjectScheduler{
 			ProjectId:    scheduler.ProjectID,
 			AgentName:    scheduler.AgentName,
 			SchedulerId:  scheduler.SchedulerID,
 			Enabled:      scheduler.Enabled,
 			TriggerCount: uint32(scheduler.TriggerCount),
+			DisplayName:  displayName,
+			Description:  description,
 		})
 	}
 	return items
+}
+
+func projectSchedulerPresentation(specJSON string) (string, string) {
+	var presentation struct {
+		DisplayName string `json:"display_name"`
+		Description string `json:"description"`
+	}
+	if json.Unmarshal([]byte(specJSON), &presentation) != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(presentation.DisplayName), strings.TrimSpace(presentation.Description)
 }
 
 func ProjectApplyChanges(project domain.ProjectRecord, existing domain.ProjectRecord, found bool, revision domain.ProjectRevisionRecord, revisionCreated bool) []*agentcomposev2.ProjectChange {
@@ -260,6 +280,8 @@ func AgentSpecsToProto(agents []compose.NormalizedAgentSpec) []*agentcomposev2.A
 	for _, agent := range agents {
 		items = append(items, &agentcomposev2.AgentSpec{
 			Name:         agent.Name,
+			DisplayName:  agent.DisplayName,
+			Description:  agent.Description,
 			Provider:     agent.Provider,
 			Model:        agent.Model,
 			SystemPrompt: agent.SystemPrompt,
@@ -467,6 +489,8 @@ func SchedulerSpecToProto(scheduler *compose.NormalizedSchedulerSpec) *agentcomp
 		Triggers:      triggers,
 		Script:        scheduler.Script,
 		SandboxPolicy: scheduler.SandboxPolicy,
+		DisplayName:   scheduler.DisplayName,
+		Description:   scheduler.Description,
 	}
 }
 
@@ -587,6 +611,12 @@ func AgentYAMLMap(agents []*agentcomposev2.AgentSpec) (map[string]any, []*agentc
 			return nil, []*agentcomposev2.ProjectValidationIssue{ProjectValidationIssue(fmt.Sprintf("agents[%d].name", i), fmt.Sprintf("duplicate agent %q", name))}
 		}
 		raw := map[string]any{}
+		if strings.TrimSpace(agent.GetDisplayName()) != "" {
+			raw["display_name"] = agent.GetDisplayName()
+		}
+		if strings.TrimSpace(agent.GetDescription()) != "" {
+			raw["description"] = agent.GetDescription()
+		}
 		switch agent.GetStatus() {
 		case agentcomposev2.AgentStatus_AGENT_STATUS_ENABLED:
 			raw["status"] = "enabled"
@@ -878,6 +908,12 @@ func SchedulerYAMLShape(scheduler *agentcomposev2.SchedulerSpec) map[string]any 
 		return nil
 	}
 	raw := map[string]any{"enabled": scheduler.GetEnabled()}
+	if strings.TrimSpace(scheduler.GetDisplayName()) != "" {
+		raw["display_name"] = scheduler.GetDisplayName()
+	}
+	if strings.TrimSpace(scheduler.GetDescription()) != "" {
+		raw["description"] = scheduler.GetDescription()
+	}
 	if scheduler.GetSandboxPolicy() != "" {
 		raw["sandbox_policy"] = scheduler.GetSandboxPolicy()
 	}

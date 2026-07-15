@@ -413,6 +413,8 @@ message ProjectAgent {
   ProjectAgentHealth health = 11;
   ProjectAgentCurrentRun current_run = 12;
   ProjectAgentLatestRun latest_run = 13;
+  string display_name = 14;
+  string description = 15;
 }
 
 message ProjectAgentCurrentRun {
@@ -437,6 +439,8 @@ message ProjectScheduler {
   string scheduler_id = 3;
   bool enabled = 5;
   uint32 trigger_count = 6;
+  string display_name = 7;
+  string description = 8;
 }
 
 message GetSchedulerRequest {
@@ -475,6 +479,8 @@ message SchedulerSummary {
   uint32 run_count = 6;
   google.protobuf.Timestamp latest_run_at = 7;
   string last_error = 8;
+  string display_name = 9;
+  string description = 10;
 }
 
 message ListSchedulersResponse {
@@ -575,6 +581,8 @@ message AgentSpec {
   repeated MCPServerSpec mcp_servers = 14;
   repeated SkillSpec skills = 15;
   AgentStatus status = 16;
+  string display_name = 17;
+  string description = 18;
 }
 
 message MCPServerSpec {
@@ -644,6 +652,8 @@ message SchedulerSpec {
   repeated TriggerSpec triggers = 2;
   string script = 3;
   string sandbox_policy = 4;
+  string display_name = 5;
+  string description = 6;
 }
 
 message TriggerSpec {

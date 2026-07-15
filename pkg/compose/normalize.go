@@ -49,6 +49,8 @@ type NormalizedProjectSpec struct {
 type NormalizedAgentSpec struct {
 	Name         string                             `yaml:"name" json:"name"`
 	Status       string                             `yaml:"status,omitempty" json:"status,omitempty"`
+	DisplayName  string                             `yaml:"display_name,omitempty" json:"display_name,omitempty"`
+	Description  string                             `yaml:"description,omitempty" json:"description,omitempty"`
 	Provider     string                             `yaml:"provider,omitempty" json:"provider,omitempty"`
 	Model        string                             `yaml:"model,omitempty" json:"model,omitempty"`
 	SystemPrompt string                             `yaml:"system_prompt,omitempty" json:"system_prompt,omitempty"`
@@ -122,6 +124,8 @@ type NormalizedDriverSpec struct {
 type NormalizedSchedulerSpec struct {
 	Enabled       bool                    `yaml:"enabled" json:"enabled"`
 	SandboxPolicy string                  `yaml:"sandbox_policy" json:"sandbox_policy"`
+	DisplayName   string                  `yaml:"display_name,omitempty" json:"display_name,omitempty"`
+	Description   string                  `yaml:"description,omitempty" json:"description,omitempty"`
 	Script        string                  `yaml:"script,omitempty" json:"script,omitempty"`
 	Triggers      []NormalizedTriggerSpec `yaml:"triggers,omitempty" json:"triggers,omitempty"`
 
@@ -284,6 +288,8 @@ func normalizeAgent(name string, agent AgentSpec, options NormalizeOptions, proj
 	return NormalizedAgentSpec{
 		Name:         name,
 		Status:       status,
+		DisplayName:  strings.TrimSpace(agent.DisplayName),
+		Description:  strings.TrimSpace(agent.Description),
 		Provider:     strings.TrimSpace(agent.Provider),
 		Model:        model,
 		SystemPrompt: agent.SystemPrompt,
@@ -1084,7 +1090,13 @@ func normalizeSchedulerSpec(path string, scheduler *SchedulerSpec, options Norma
 	if err != nil {
 		return nil, err
 	}
-	normalized := &NormalizedSchedulerSpec{Enabled: enabled, SandboxPolicy: sandboxPolicy, Script: script}
+	normalized := &NormalizedSchedulerSpec{
+		Enabled:       enabled,
+		SandboxPolicy: sandboxPolicy,
+		DisplayName:   strings.TrimSpace(scheduler.DisplayName),
+		Description:   strings.TrimSpace(scheduler.Description),
+		Script:        script,
+	}
 	if scriptURL != "" {
 		if !options.ResolveScriptURLs {
 			normalized.scriptURL = scriptURL

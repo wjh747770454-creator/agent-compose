@@ -2419,6 +2419,8 @@ type ProjectAgent struct {
 	Health           ProjectAgentHealth       `protobuf:"varint,11,opt,name=health,proto3,enum=agentcompose.v2.ProjectAgentHealth" json:"health,omitempty"`
 	CurrentRun       *ProjectAgentCurrentRun  `protobuf:"bytes,12,opt,name=current_run,json=currentRun,proto3" json:"current_run,omitempty"`
 	LatestRun        *ProjectAgentLatestRun   `protobuf:"bytes,13,opt,name=latest_run,json=latestRun,proto3" json:"latest_run,omitempty"`
+	DisplayName      string                   `protobuf:"bytes,14,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Description      string                   `protobuf:"bytes,15,opt,name=description,proto3" json:"description,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -2542,6 +2544,20 @@ func (x *ProjectAgent) GetLatestRun() *ProjectAgentLatestRun {
 		return x.LatestRun
 	}
 	return nil
+}
+
+func (x *ProjectAgent) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *ProjectAgent) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
 }
 
 type ProjectAgentCurrentRun struct {
@@ -2679,6 +2695,8 @@ type ProjectScheduler struct {
 	SchedulerId   string                 `protobuf:"bytes,3,opt,name=scheduler_id,json=schedulerId,proto3" json:"scheduler_id,omitempty"`
 	Enabled       bool                   `protobuf:"varint,5,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	TriggerCount  uint32                 `protobuf:"varint,6,opt,name=trigger_count,json=triggerCount,proto3" json:"trigger_count,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,7,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Description   string                 `protobuf:"bytes,8,opt,name=description,proto3" json:"description,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2746,6 +2764,20 @@ func (x *ProjectScheduler) GetTriggerCount() uint32 {
 		return x.TriggerCount
 	}
 	return 0
+}
+
+func (x *ProjectScheduler) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *ProjectScheduler) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
 }
 
 type GetSchedulerRequest struct {
@@ -3022,6 +3054,8 @@ type SchedulerSummary struct {
 	RunCount      uint32                 `protobuf:"varint,6,opt,name=run_count,json=runCount,proto3" json:"run_count,omitempty"`
 	LatestRunAt   *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=latest_run_at,json=latestRunAt,proto3" json:"latest_run_at,omitempty"`
 	LastError     string                 `protobuf:"bytes,8,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,9,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Description   string                 `protobuf:"bytes,10,opt,name=description,proto3" json:"description,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3108,6 +3142,20 @@ func (x *SchedulerSummary) GetLatestRunAt() *timestamppb.Timestamp {
 func (x *SchedulerSummary) GetLastError() string {
 	if x != nil {
 		return x.LastError
+	}
+	return ""
+}
+
+func (x *SchedulerSummary) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *SchedulerSummary) GetDescription() string {
+	if x != nil {
+		return x.Description
 	}
 	return ""
 }
@@ -3906,6 +3954,8 @@ type AgentSpec struct {
 	McpServers    []*MCPServerSpec       `protobuf:"bytes,14,rep,name=mcp_servers,json=mcpServers,proto3" json:"mcp_servers,omitempty"`
 	Skills        []*SkillSpec           `protobuf:"bytes,15,rep,name=skills,proto3" json:"skills,omitempty"`
 	Status        AgentStatus            `protobuf:"varint,16,opt,name=status,proto3,enum=agentcompose.v2.AgentStatus" json:"status,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,17,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Description   string                 `protobuf:"bytes,18,opt,name=description,proto3" json:"description,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4050,6 +4100,20 @@ func (x *AgentSpec) GetStatus() AgentStatus {
 		return x.Status
 	}
 	return AgentStatus_AGENT_STATUS_UNSPECIFIED
+}
+
+func (x *AgentSpec) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *AgentSpec) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
 }
 
 type MCPServerSpec struct {
@@ -4650,6 +4714,8 @@ type SchedulerSpec struct {
 	Triggers      []*TriggerSpec         `protobuf:"bytes,2,rep,name=triggers,proto3" json:"triggers,omitempty"`
 	Script        string                 `protobuf:"bytes,3,opt,name=script,proto3" json:"script,omitempty"`
 	SandboxPolicy string                 `protobuf:"bytes,4,opt,name=sandbox_policy,json=sandboxPolicy,proto3" json:"sandbox_policy,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,5,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Description   string                 `protobuf:"bytes,6,opt,name=description,proto3" json:"description,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4708,6 +4774,20 @@ func (x *SchedulerSpec) GetScript() string {
 func (x *SchedulerSpec) GetSandboxPolicy() string {
 	if x != nil {
 		return x.SandboxPolicy
+	}
+	return ""
+}
+
+func (x *SchedulerSpec) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *SchedulerSpec) GetDescription() string {
+	if x != nil {
+		return x.Description
 	}
 	return ""
 }
@@ -15671,7 +15751,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\tspec_hash\x18\x03 \x01(\tR\bspecHash\x120\n" +
 	"\x04spec\x18\x04 \x01(\v2\x1c.agentcompose.v2.ProjectSpecR\x04spec\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\x05 \x01(\tR\tcreatedAt\"\xba\x04\n" +
+	"created_at\x18\x05 \x01(\tR\tcreatedAt\"\xff\x04\n" +
 	"\fProjectAgent\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
@@ -15690,7 +15770,9 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\vcurrent_run\x18\f \x01(\v2'.agentcompose.v2.ProjectAgentCurrentRunR\n" +
 	"currentRun\x12E\n" +
 	"\n" +
-	"latest_run\x18\r \x01(\v2&.agentcompose.v2.ProjectAgentLatestRunR\tlatestRun\"\x97\x01\n" +
+	"latest_run\x18\r \x01(\v2&.agentcompose.v2.ProjectAgentLatestRunR\tlatestRun\x12!\n" +
+	"\fdisplay_name\x18\x0e \x01(\tR\vdisplayName\x12 \n" +
+	"\vdescription\x18\x0f \x01(\tR\vdescription\"\x97\x01\n" +
 	"\x16ProjectAgentCurrentRun\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12*\n" +
 	"\x11running_run_count\x18\x02 \x01(\rR\x0frunningRunCount\x12=\n" +
@@ -15699,7 +15781,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x122\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x1a.agentcompose.v2.RunStatusR\x06status\x122\n" +
 	"\x06source\x18\x03 \x01(\x0e2\x1a.agentcompose.v2.RunSourceR\x06source\x12*\n" +
-	"\x02at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"\xcb\x01\n" +
+	"\x02at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"\x90\x02\n" +
 	"\x10ProjectScheduler\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
@@ -15707,7 +15789,9 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"agent_name\x18\x02 \x01(\tR\tagentName\x12!\n" +
 	"\fscheduler_id\x18\x03 \x01(\tR\vschedulerId\x12\x18\n" +
 	"\aenabled\x18\x05 \x01(\bR\aenabled\x12#\n" +
-	"\rtrigger_count\x18\x06 \x01(\rR\ftriggerCountJ\x04\b\x04\x10\x05R\x11managed_loader_id\"k\n" +
+	"\rtrigger_count\x18\x06 \x01(\rR\ftriggerCount\x12!\n" +
+	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\x12 \n" +
+	"\vdescription\x18\b \x01(\tR\vdescriptionJ\x04\b\x04\x10\x05R\x11managed_loader_id\"k\n" +
 	"\x13GetSchedulerRequest\x125\n" +
 	"\aproject\x18\x01 \x01(\v2\x1b.agentcompose.v2.ProjectRefR\aproject\x12\x1d\n" +
 	"\n" +
@@ -15733,7 +15817,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x15ListSchedulersRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\rR\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x03 \x01(\tR\x06cursor\"\xae\x02\n" +
+	"\x06cursor\x18\x03 \x01(\tR\x06cursor\"\xf3\x02\n" +
 	"\x10SchedulerSummary\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
@@ -15745,7 +15829,10 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\trun_count\x18\x06 \x01(\rR\brunCount\x12>\n" +
 	"\rlatest_run_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\vlatestRunAt\x12\x1d\n" +
 	"\n" +
-	"last_error\x18\b \x01(\tR\tlastError\"|\n" +
+	"last_error\x18\b \x01(\tR\tlastError\x12!\n" +
+	"\fdisplay_name\x18\t \x01(\tR\vdisplayName\x12 \n" +
+	"\vdescription\x18\n" +
+	" \x01(\tR\vdescription\"|\n" +
 	"\x16ListSchedulersResponse\x12A\n" +
 	"\n" +
 	"schedulers\x18\x01 \x03(\v2!.agentcompose.v2.SchedulerSummaryR\n" +
@@ -15816,7 +15903,7 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"mcpServersJ\x04\b\x03\x10\x04R\tworkspace\"f\n" +
 	"\x12NamedWorkspaceSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12<\n" +
-	"\tworkspace\x18\x02 \x01(\v2\x1e.agentcompose.v2.WorkspaceSpecR\tworkspace\"\xdc\x05\n" +
+	"\tworkspace\x18\x02 \x01(\v2\x1e.agentcompose.v2.WorkspaceSpecR\tworkspace\"\xa1\x06\n" +
 	"\tAgentSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x14\n" +
@@ -15836,7 +15923,9 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\vmcp_servers\x18\x0e \x03(\v2\x1e.agentcompose.v2.MCPServerSpecR\n" +
 	"mcpServers\x122\n" +
 	"\x06skills\x18\x0f \x03(\v2\x1a.agentcompose.v2.SkillSpecR\x06skills\x124\n" +
-	"\x06status\x18\x10 \x01(\x0e2\x1c.agentcompose.v2.AgentStatusR\x06status\"\xfb\x01\n" +
+	"\x06status\x18\x10 \x01(\x0e2\x1c.agentcompose.v2.AgentStatusR\x06status\x12!\n" +
+	"\fdisplay_name\x18\x11 \x01(\tR\vdisplayName\x12 \n" +
+	"\vdescription\x18\x12 \x01(\tR\vdescription\"\xfb\x01\n" +
 	"\rMCPServerSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1c\n" +
@@ -15895,12 +15984,14 @@ const file_agentcompose_v2_agentcompose_proto_rawDesc = "" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12\x12\n" +
 	"\x04name\x18\x05 \x01(\tR\x04name\"!\n" +
 	"\vNetworkSpec\x12\x12\n" +
-	"\x04mode\x18\x01 \x01(\tR\x04mode\"\xa2\x01\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\"\xe7\x01\n" +
 	"\rSchedulerSpec\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x128\n" +
 	"\btriggers\x18\x02 \x03(\v2\x1c.agentcompose.v2.TriggerSpecR\btriggers\x12\x16\n" +
 	"\x06script\x18\x03 \x01(\tR\x06script\x12%\n" +
-	"\x0esandbox_policy\x18\x04 \x01(\tR\rsandboxPolicy\"\xf7\x01\n" +
+	"\x0esandbox_policy\x18\x04 \x01(\tR\rsandboxPolicy\x12!\n" +
+	"\fdisplay_name\x18\x05 \x01(\tR\vdisplayName\x12 \n" +
+	"\vdescription\x18\x06 \x01(\tR\vdescription\"\xf7\x01\n" +
 	"\vTriggerSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +

@@ -119,7 +119,16 @@ func (h *ProjectHandler) ListSchedulers(ctx context.Context, req *connect.Reques
 		if err != nil {
 			return nil, err
 		}
-		summary := &agentcomposev2.SchedulerSummary{ProjectId: scheduler.ProjectID, AgentName: scheduler.AgentName, SchedulerId: scheduler.SchedulerID, Enabled: enabled, TriggerCount: uint32(scheduler.TriggerCount)}
+		displayName, description := projectSchedulerPresentation(scheduler.SpecJSON)
+		summary := &agentcomposev2.SchedulerSummary{
+			ProjectId:    scheduler.ProjectID,
+			AgentName:    scheduler.AgentName,
+			SchedulerId:  scheduler.SchedulerID,
+			Enabled:      enabled,
+			TriggerCount: uint32(scheduler.TriggerCount),
+			DisplayName:  displayName,
+			Description:  description,
+		}
 		summary.RunCount = uint32(scheduler.RunCount)
 		summary.LatestRunAt = projectTimestamp(scheduler.LatestRunAt)
 		summary.LastError = scheduler.LastError
