@@ -2155,6 +2155,12 @@ func runComposeSchedulerLogsCommand(cmd *cobra.Command, cli cliOptions, options 
 		}
 		runRef = args[0]
 	}
+	if options.Tail < -1 {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler logs --tail must be -1 or greater")}
+	}
+	if runRef != "" && (strings.TrimSpace(options.AgentName) != "" || strings.TrimSpace(options.Trigger) != "") {
+		return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler logs --agent and --trigger can only be used when selecting the latest run")}
+	}
 	var selected *composeSchedulerRunItem
 	if runRef != "" {
 		selected, err = getComposeSchedulerRun(cmd.Context(), clients.run, projectID, runRef)
@@ -2213,22 +2219,34 @@ func runComposeSchedulerInspectCommand(cmd *cobra.Command, cli cliOptions, args 
 		setSchedulerTriggerInspectOutput(&output, trigger)
 	} else {
 		ref := strings.TrimSpace(args[0])
-		if run, runErr := getComposeSchedulerRun(cmd.Context(), clients.run, projectID, ref); runErr == nil {
-			output.Resource = "run"
-			output.AgentName = run.AgentName
-			output.Run = run
-		} else if scheduler, schedulerErr := resolveComposeScheduler(normalized, projectID, ref); schedulerErr == nil {
-			output.Resource = "scheduler"
-			output.AgentName = scheduler.AgentName
-			output.Scheduler = scheduler
-		} else {
+		if shouldResolveComposeLogResourceRef(ref) {
+			run, runErr := getComposeSchedulerRun(cmd.Context(), clients.run, projectID, ref)
+			if runErr == nil {
+				output.Resource = "run"
+				output.AgentName = run.AgentName
+				output.Run = run
+			} else if !isSchedulerResourceNotFound(runErr) {
+				return runErr
+			}
+		}
+		if output.Resource == "" {
+			scheduler, schedulerErr := resolveComposeScheduler(normalized, projectID, ref)
+			if schedulerErr == nil {
+				output.Resource = "scheduler"
+				output.AgentName = scheduler.AgentName
+				output.Scheduler = scheduler
+			} else if !isSchedulerResourceNotFound(schedulerErr) {
+				return schedulerErr
+			}
+		}
+		if output.Resource == "" {
 			triggers, listErr := listComposeSchedulerTriggers(cmd.Context(), clients, normalized, projectID, "")
 			if listErr != nil {
 				return listErr
 			}
 			trigger, triggerErr := resolveSchedulerTriggerFromItems(triggers, ref)
 			if triggerErr != nil {
-				return commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler resource %q not found", ref)}
+				return commandExitError{Code: exitCodeUsage, Err: triggerErr}
 			}
 			setSchedulerTriggerInspectOutput(&output, *trigger)
 		}
@@ -2243,14 +2261,31 @@ func runComposeSchedulerInspectCommand(cmd *cobra.Command, cli cliOptions, args 
 	return writeSchedulerInspectText(cmd.OutOrStdout(), output)
 }
 
+type schedulerResourceNotFoundError struct {
+	kind string
+	ref  string
+}
+
+func (e schedulerResourceNotFoundError) Error() string {
+	return fmt.Sprintf("scheduler %s %q not found", e.kind, e.ref)
+}
+
+func isSchedulerResourceNotFound(err error) bool {
+	var target schedulerResourceNotFoundError
+	return errors.As(err, &target)
+}
+
 func getComposeSchedulerRun(ctx context.Context, client agentcomposev2connect.RunServiceClient, projectID, runRef string) (*composeSchedulerRunItem, error) {
 	resp, err := client.GetRun(ctx, connect.NewRequest(&agentcomposev2.GetRunRequest{ProjectId: projectID, RunId: strings.TrimSpace(runRef)}))
 	if err != nil {
+		if connect.CodeOf(err) == connect.CodeNotFound {
+			return nil, schedulerResourceNotFoundError{kind: "run", ref: runRef}
+		}
 		return nil, commandExitErrorForConnect(fmt.Errorf("get scheduler run %s: %w", runRef, err))
 	}
 	summary := resp.Msg.GetRun().GetSummary()
 	if summary == nil || summary.GetSource() != agentcomposev2.RunSource_RUN_SOURCE_SCHEDULER {
-		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler run %q not found", runRef)}
+		return nil, schedulerResourceNotFoundError{kind: "run", ref: runRef}
 	}
 	loaderID, idErr := domain.StableManagedLoaderID(projectID, summary.GetAgentName(), "")
 	if idErr != nil {
@@ -2351,7 +2386,10 @@ func listComposeSchedulerRuns(ctx context.Context, clients cliServiceClients, no
 	if limit == 0 {
 		limit = 20
 	}
-	status = strings.ToLower(strings.TrimSpace(status))
+	runStatus, statusText, statusErr := parseSchedulerRunStatusFilter(status)
+	if statusErr != nil {
+		return nil, statusErr
+	}
 	triggerRef = strings.TrimSpace(triggerRef)
 	items := make([]composeSchedulerRunItem, 0)
 	for _, agent := range normalized.Agents {
@@ -2371,6 +2409,7 @@ func listComposeSchedulerRuns(ctx context.Context, clients cliServiceClients, no
 			AgentName:   agent.Name,
 			SchedulerId: schedulerID,
 			Source:      agentcomposev2.RunSource_RUN_SOURCE_SCHEDULER,
+			Status:      runStatus,
 			Limit:       limit,
 		}))
 		if listErr != nil {
@@ -2384,7 +2423,7 @@ func listComposeSchedulerRuns(ctx context.Context, clients cliServiceClients, no
 			}
 		}
 		for _, run := range runsResp.Msg.GetRuns() {
-			if status != "" && strings.ToLower(runStatusText(run.GetStatus())) != status {
+			if statusText != "" && strings.ToLower(runStatusText(run.GetStatus())) != statusText {
 				continue
 			}
 			if triggerRef != "" && !resourceRefMatches(triggerRef, run.GetTriggerId()) {
@@ -2412,6 +2451,23 @@ func listComposeSchedulerRuns(ctx context.Context, clients cliServiceClients, no
 		items = items[:limit]
 	}
 	return items, nil
+}
+
+func parseSchedulerRunStatusFilter(value string) (agentcomposev2.RunStatus, string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	statuses := map[string]agentcomposev2.RunStatus{
+		"":          agentcomposev2.RunStatus_RUN_STATUS_UNSPECIFIED,
+		"pending":   agentcomposev2.RunStatus_RUN_STATUS_PENDING,
+		"running":   agentcomposev2.RunStatus_RUN_STATUS_RUNNING,
+		"succeeded": agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
+		"failed":    agentcomposev2.RunStatus_RUN_STATUS_FAILED,
+		"canceled":  agentcomposev2.RunStatus_RUN_STATUS_CANCELED,
+	}
+	status, ok := statuses[value]
+	if !ok {
+		return agentcomposev2.RunStatus_RUN_STATUS_UNSPECIFIED, "", commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler runs --status must be pending, running, succeeded, failed, or canceled")}
+	}
+	return status, value, nil
 }
 
 func schedulerRunItem(agentName, schedulerID, loaderID string, run *agentcomposev2.RunSummary) composeSchedulerRunItem {
@@ -2493,7 +2549,7 @@ func resolveComposeScheduler(normalized *compose.NormalizedProjectSpec, projectI
 	if len(matches) > 1 {
 		return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler reference %q is ambiguous", ref)}
 	}
-	return nil, commandExitError{Code: exitCodeUsage, Err: fmt.Errorf("scheduler %q not found", ref)}
+	return nil, schedulerResourceNotFoundError{kind: "resource", ref: ref}
 }
 
 func resolveSchedulerTriggerFromItems(items []composeSchedulerTriggerItem, ref string) (*composeSchedulerTriggerItem, error) {
@@ -2509,7 +2565,7 @@ func resolveSchedulerTriggerFromItems(items []composeSchedulerTriggerItem, ref s
 	if len(matches) > 1 {
 		return nil, fmt.Errorf("scheduler trigger reference %q is ambiguous", ref)
 	}
-	return nil, fmt.Errorf("scheduler trigger %q not found", ref)
+	return nil, schedulerResourceNotFoundError{kind: "trigger", ref: ref}
 }
 
 func resourceRefMatches(ref string, values ...string) bool {

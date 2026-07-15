@@ -3152,8 +3152,10 @@ agents:
           cron: "0 2 * * *"
           prompt: review nightly
 `)
-	runID := "scheduler-run-1234567890"
-	sandboxID := "sandbox-scheduler-1234567890"
+	runID := identity.NewRandomID(identity.ResourceRun)
+	errorRunID := identity.NewRandomID(identity.ResourceRun)
+	sandboxID := identity.NewRandomID(identity.ResourceSandbox)
+	getRunCalls := 0
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		project: projectServiceStub{
 			getProject: func(ctx context.Context, req *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error) {
@@ -3162,6 +3164,10 @@ agents:
 		},
 		run: runServiceStub{
 			getRun: func(_ context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
+				getRunCalls++
+				if req.Msg.GetRunId() == errorRunID {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("run store unavailable"))
+				}
 				if req.Msg.GetRunId() != runID[:12] {
 					return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("run not found"))
 				}
@@ -3188,7 +3194,7 @@ agents:
 	defer server.Close()
 
 	stdout, stderr, _, exitCode := executeCLICommand("scheduler", "runs", "--host", server.URL, "--file", composePath)
-	if exitCode != 0 || stderr != "" || !strings.Contains(stdout, "scheduler-") || !strings.Contains(stdout, "sandbox-") || !strings.Contains(stdout, "reviewer") {
+	if exitCode != 0 || stderr != "" || !strings.Contains(stdout, shortOpaqueID(runID)) || !strings.Contains(stdout, shortOpaqueID(sandboxID)) || !strings.Contains(stdout, "reviewer") {
 		t.Fatalf("scheduler runs code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
 	}
 
@@ -3210,6 +3216,29 @@ agents:
 	jsonOut, jsonErr, _, jsonCode = executeCLICommand("scheduler", "inspect", "reviewer", "--json", "--host", server.URL, "--file", composePath)
 	if jsonCode != 0 || jsonErr != "" || !strings.Contains(jsonOut, `"resource": "scheduler"`) || !strings.Contains(jsonOut, `"agent_name": "reviewer"`) {
 		t.Fatalf("scheduler inspect scheduler code/stdout/stderr = %d / %q / %q", jsonCode, jsonOut, jsonErr)
+	}
+	if getRunCalls != 2 {
+		t.Fatalf("GetRun calls = %d, want 2; scheduler name inspection must not probe runs", getRunCalls)
+	}
+
+	_, stderr, _, exitCode = executeCLICommand("scheduler", "inspect", errorRunID, "--host", server.URL, "--file", composePath)
+	if exitCode == 0 || !strings.Contains(stderr, "run store unavailable") || strings.Contains(stderr, "not found") {
+		t.Fatalf("scheduler inspect backend error code/stderr = %d / %q", exitCode, stderr)
+	}
+
+	_, stderr, _, exitCode = executeCLICommand("scheduler", "runs", "--status", "unknown", "--host", server.URL, "--file", composePath)
+	if exitCode != exitCodeUsage || !strings.Contains(stderr, "--status must be") {
+		t.Fatalf("scheduler runs invalid status code/stderr = %d / %q", exitCode, stderr)
+	}
+
+	_, stderr, _, exitCode = executeCLICommand("scheduler", "logs", runID, "--tail", "-2", "--host", server.URL, "--file", composePath)
+	if exitCode != exitCodeUsage || !strings.Contains(stderr, "--tail must be") {
+		t.Fatalf("scheduler logs invalid tail code/stderr = %d / %q", exitCode, stderr)
+	}
+
+	_, stderr, _, exitCode = executeCLICommand("scheduler", "logs", runID, "--agent", "reviewer", "--host", server.URL, "--file", composePath)
+	if exitCode != exitCodeUsage || !strings.Contains(stderr, "selecting the latest run") {
+		t.Fatalf("scheduler logs explicit run filters code/stderr = %d / %q", exitCode, stderr)
 	}
 }
 
