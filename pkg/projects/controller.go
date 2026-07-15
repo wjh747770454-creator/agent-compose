@@ -30,6 +30,11 @@ type NormalizedProject struct {
 	Spec       *compose.NormalizedProjectSpec
 	SpecHash   string
 	SourcePath string
+
+	// managedLoaderOverrides is populated only by the legacy-v1 compatibility
+	// projection. It lets that boundary adopt an existing loader ID so runs,
+	// events, trigger state, and enablement survive the project migration.
+	managedLoaderOverrides map[string]domain.Loader
 }
 
 type ProjectRef struct {
@@ -166,7 +171,7 @@ func (c *Controller) ApplyProject(ctx context.Context, req ApplyRequest) (ApplyR
 	if issues := c.validateManagedSchedulers(ctx, normalized); len(issues) > 0 {
 		return ApplyResult{Issues: issues, RevisionSpec: normalized.Spec}, nil
 	}
-	agentRecords, agentDefinitions, schedulerRecords, managedLoaders, err := c.projectArtifacts(ctx, project, 0, normalized.Spec)
+	agentRecords, agentDefinitions, schedulerRecords, managedLoaders, err := c.projectArtifacts(ctx, project, 0, normalized)
 	if err != nil {
 		return ApplyResult{}, fmt.Errorf("%w: apply project %s: %w", ErrInvalidRequest, normalized.Spec.Name, err)
 	}
@@ -213,7 +218,7 @@ func (c *Controller) ApplyProject(ctx context.Context, req ApplyRequest) (ApplyR
 		return ApplyResult{}, fmt.Errorf("apply project %s: reload project: %w", normalized.Spec.Name, err)
 	}
 
-	agentRecords, agentDefinitions, schedulerRecords, managedLoaders, err = c.projectArtifacts(ctx, project, revision.Revision, normalized.Spec)
+	agentRecords, agentDefinitions, schedulerRecords, managedLoaders, err = c.projectArtifacts(ctx, project, revision.Revision, normalized)
 	if err != nil {
 		return ApplyResult{}, fmt.Errorf("%w: apply project %s: %w", ErrInvalidRequest, normalized.Spec.Name, err)
 	}
@@ -424,7 +429,8 @@ func (c *Controller) resolveProjectRef(ctx context.Context, ref ProjectRef, incl
 	return matches[0], nil
 }
 
-func (c *Controller) projectArtifacts(ctx context.Context, project domain.ProjectRecord, revision int64, spec *compose.NormalizedProjectSpec) ([]domain.ProjectAgentRecord, []domain.AgentDefinition, []domain.ProjectSchedulerRecord, []domain.Loader, error) {
+func (c *Controller) projectArtifacts(ctx context.Context, project domain.ProjectRecord, revision int64, normalized NormalizedProject) ([]domain.ProjectAgentRecord, []domain.AgentDefinition, []domain.ProjectSchedulerRecord, []domain.Loader, error) {
+	spec := normalized.Spec
 	agentRecords, err := NewAgentRecordsFromSpec(project.ID, revision, spec)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -437,6 +443,11 @@ func (c *Controller) projectArtifacts(ctx context.Context, project domain.Projec
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	schedulerRecords, managedLoaders, err = applyManagedLoaderOverrides(project, revision, schedulerRecords, managedLoaders, normalized.managedLoaderOverrides)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	syncProjectAgentSchedulerState(agentRecords, schedulerRecords)
 	return agentRecords, agentDefinitions, schedulerRecords, managedLoaders, nil
 }
 
@@ -486,6 +497,10 @@ func (c *Controller) validateManagedSchedulers(ctx context.Context, normalized N
 	builds, err := c.projectManagedSchedulerBuildsFromSpec(ctx, project, 0, normalized.Spec)
 	if err != nil {
 		return []ValidationIssue{managedSchedulerBuildIssue(err)}
+	}
+	builds, err = applyManagedLoaderOverrideBuilds(project, 0, builds, normalized.managedLoaderOverrides)
+	if err != nil {
+		return []ValidationIssue{{Path: "schedulers", Message: err.Error()}}
 	}
 	loaderRecords := SchedulerLoaders(builds)
 	for _, loader := range loaderRecords {

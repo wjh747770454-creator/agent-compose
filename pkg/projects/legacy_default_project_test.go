@@ -1,8 +1,10 @@
 package projects
 
 import (
+	"strings"
 	"testing"
 
+	"agent-compose/pkg/compose"
 	domain "agent-compose/pkg/model"
 )
 
@@ -25,7 +27,7 @@ func TestLegacyDefaultNormalizedProjectPreservesAgentConfiguration(t *testing.T)
 		{ID: "agent-a", Name: "worker-a-Z", Enabled: true, Provider: "codex", ConfigJSON: "{}"},
 	}
 
-	project, err := legacyDefaultNormalizedProject(agents)
+	project, err := legacyDefaultNormalizedProject(agents, nil)
 	if err != nil {
 		t.Fatalf("legacyDefaultNormalizedProject returned error: %v", err)
 	}
@@ -43,7 +45,7 @@ func TestLegacyDefaultNormalizedProjectPreservesAgentConfiguration(t *testing.T)
 		t.Fatalf("worker configuration = %#v", worker)
 	}
 
-	reversed, err := legacyDefaultNormalizedProject([]domain.AgentDefinition{agents[1], agents[0]})
+	reversed, err := legacyDefaultNormalizedProject([]domain.AgentDefinition{agents[1], agents[0]}, nil)
 	if err != nil {
 		t.Fatalf("reversed project returned error: %v", err)
 	}
@@ -53,13 +55,192 @@ func TestLegacyDefaultNormalizedProjectPreservesAgentConfiguration(t *testing.T)
 }
 
 func TestLegacyDefaultNormalizedProjectRejectsLossyMappings(t *testing.T) {
-	_, err := legacyDefaultNormalizedProject([]domain.AgentDefinition{{ID: "agent-1", Name: "worker", Enabled: true, Provider: "codex", WorkspaceID: "workspace-1"}})
+	_, err := legacyDefaultNormalizedProject([]domain.AgentDefinition{{ID: "agent-1", Name: "worker", Enabled: true, Provider: "codex", WorkspaceID: "workspace-1"}}, nil)
 	if err == nil {
 		t.Fatal("expected workspace preset compatibility error")
 	}
+}
 
-	_, err = legacyDefaultNormalizedProject([]domain.AgentDefinition{{ID: "agent-1", Name: "worker", Enabled: true}, {ID: "agent-2", Name: "worker", Enabled: true}})
-	if err == nil {
-		t.Fatal("expected duplicate agent name error")
+func TestLegacyDefaultNormalizedProjectUsesStableCompatibilityNames(t *testing.T) {
+	agents := []domain.AgentDefinition{
+		{ID: "agent-chinese", Name: "ai资讯推送", Enabled: true, Provider: "codex"},
+		{ID: "agent-duplicate-b", Name: "worker", Enabled: true, Provider: "codex"},
+		{ID: "agent-duplicate-a", Name: "worker", Enabled: true, Provider: "codex"},
+		{ID: "agent-valid", Name: "Reviewer-Z", Enabled: true, Provider: "codex"},
 	}
+
+	project, err := legacyDefaultNormalizedProject(agents, nil)
+	if err != nil {
+		t.Fatalf("legacyDefaultNormalizedProject returned error: %v", err)
+	}
+	if len(project.Spec.Agents) != len(agents) {
+		t.Fatalf("project agents = %#v", project.Spec.Agents)
+	}
+	names := make(map[string]struct{}, len(project.Spec.Agents))
+	var compatibilityName string
+	duplicateCount := 0
+	for _, agent := range project.Spec.Agents {
+		if !domain.IsProjectStableIdentifier(agent.Name) {
+			t.Fatalf("projected agent name %q is not a stable identifier", agent.Name)
+		}
+		if _, exists := names[agent.Name]; exists {
+			t.Fatalf("duplicate projected agent name %q", agent.Name)
+		}
+		names[agent.Name] = struct{}{}
+		if strings.HasPrefix(agent.Name, "legacy-agent-") {
+			compatibilityName = agent.Name
+		}
+		if strings.HasPrefix(agent.Name, "worker-") {
+			duplicateCount++
+		}
+	}
+	if compatibilityName == "" || duplicateCount != 2 {
+		t.Fatalf("compatibility names = %#v", names)
+	}
+	if _, exists := names["reviewer-z"]; !exists {
+		t.Fatalf("valid normalized name missing from %#v", names)
+	}
+
+	reversed := append([]domain.AgentDefinition(nil), agents...)
+	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+		reversed[left], reversed[right] = reversed[right], reversed[left]
+	}
+	reversedProject, err := legacyDefaultNormalizedProject(reversed, nil)
+	if err != nil {
+		t.Fatalf("reversed project returned error: %v", err)
+	}
+	if reversedProject.SpecHash != project.SpecHash {
+		t.Fatalf("hash depends on input order: %s != %s", reversedProject.SpecHash, project.SpecHash)
+	}
+
+	renamed, err := legacyDefaultNormalizedProject([]domain.AgentDefinition{{ID: "agent-chinese", Name: "另一个中文名", Enabled: true, Provider: "codex"}}, nil)
+	if err != nil {
+		t.Fatalf("renamed invalid agent returned error: %v", err)
+	}
+	if renamed.Spec.Agents[0].Name != compatibilityName {
+		t.Fatalf("compatibility name changed after display-name edit: %q != %q", renamed.Spec.Agents[0].Name, compatibilityName)
+	}
+}
+
+func TestLegacyDefaultNormalizedProjectAdoptsLegacyLoaders(t *testing.T) {
+	agents := []domain.AgentDefinition{{
+		ID:         "agent-1",
+		Name:       "worker",
+		Enabled:    true,
+		Provider:   "codex",
+		Driver:     "docker",
+		GuestImage: "guest:latest",
+	}}
+	loaders := []domain.Loader{
+		{
+			Summary: domain.LoaderSummary{
+				ID:                "loader-b",
+				Name:              "Second task",
+				Enabled:           true,
+				Runtime:           domain.LoaderRuntimeScheduler,
+				AgentID:           "agent-1",
+				DefaultAgent:      "codex",
+				SandboxPolicy:     domain.LoaderSandboxPolicyNew,
+				ConcurrencyPolicy: domain.LoaderConcurrencyPolicyParallel,
+			},
+			Script: "scheduler.on('topic.b', 'event-b', function eventB() {});",
+			Triggers: []domain.LoaderTrigger{{
+				ID: "event-b", Kind: domain.LoaderTriggerKindEvent, Topic: "topic.b", Enabled: true,
+			}},
+		},
+		{
+			Summary: domain.LoaderSummary{
+				ID:            "loader-a",
+				Name:          "First task",
+				Enabled:       false,
+				Runtime:       domain.LoaderRuntimeScheduler,
+				AgentID:       "agent-1",
+				DefaultAgent:  "codex",
+				SandboxPolicy: domain.LoaderSandboxPolicySticky,
+			},
+			Script: "scheduler.interval('interval-a', function intervalA() {}, 60000);",
+			Triggers: []domain.LoaderTrigger{{
+				ID: "interval-a", Kind: domain.LoaderTriggerKindInterval, IntervalMs: 60000, Enabled: false,
+			}},
+		},
+	}
+
+	project, err := legacyDefaultNormalizedProject(agents, loaders)
+	if err != nil {
+		t.Fatalf("legacyDefaultNormalizedProject returned error: %v", err)
+	}
+	if len(project.Spec.Agents) != 2 || len(project.managedLoaderOverrides) != 2 {
+		t.Fatalf("project agents/overrides = %#v/%#v", project.Spec.Agents, project.managedLoaderOverrides)
+	}
+	worker := findLegacyProjectAgent(t, project, "worker")
+	if worker.Scheduler == nil || worker.Scheduler.Enabled || worker.Scheduler.Script != loaders[1].Script {
+		t.Fatalf("worker scheduler = %#v", worker.Scheduler)
+	}
+	workerLoader := project.managedLoaderOverrides["worker"]
+	if workerLoader.Summary.ID != "loader-a" || workerLoader.Summary.Enabled || len(workerLoader.Triggers) != 1 || workerLoader.Triggers[0].Enabled {
+		t.Fatalf("worker loader override = %#v", workerLoader)
+	}
+
+	var clonedName string
+	for _, agent := range project.Spec.Agents {
+		if strings.HasPrefix(agent.Name, "worker-loader-") {
+			clonedName = agent.Name
+			if agent.Scheduler == nil || !agent.Scheduler.Enabled || agent.Scheduler.Script != loaders[0].Script {
+				t.Fatalf("cloned scheduler = %#v", agent.Scheduler)
+			}
+		}
+	}
+	if clonedName == "" || project.managedLoaderOverrides[clonedName].Summary.ID != "loader-b" {
+		t.Fatalf("second loader was not projected: name=%q overrides=%#v", clonedName, project.managedLoaderOverrides)
+	}
+
+	reversedProject, err := legacyDefaultNormalizedProject(agents, []domain.Loader{loaders[1], loaders[0]})
+	if err != nil {
+		t.Fatalf("reversed loaders returned error: %v", err)
+	}
+	if reversedProject.SpecHash != project.SpecHash {
+		t.Fatalf("loader projection hash depends on input order: %s != %s", reversedProject.SpecHash, project.SpecHash)
+	}
+}
+
+func TestLegacyDefaultNormalizedProjectKeepsUnboundLoaderVisibleButDisabled(t *testing.T) {
+	loader := domain.Loader{
+		Summary: domain.LoaderSummary{
+			ID:           "loader-unbound",
+			Name:         "Unbound task",
+			Enabled:      true,
+			Runtime:      domain.LoaderRuntimeScheduler,
+			DefaultAgent: "codex",
+		},
+		Script: "scheduler.on('topic', 'event', function event() {});",
+		Triggers: []domain.LoaderTrigger{{
+			ID: "event", Kind: domain.LoaderTriggerKindEvent, Topic: "topic", Enabled: true,
+		}},
+	}
+
+	project, err := legacyDefaultNormalizedProject(nil, []domain.Loader{loader})
+	if err != nil {
+		t.Fatalf("legacyDefaultNormalizedProject returned error: %v", err)
+	}
+	if len(project.Spec.Agents) != 1 || !strings.HasPrefix(project.Spec.Agents[0].Name, "legacy-loader-") {
+		t.Fatalf("compatibility agent = %#v", project.Spec.Agents)
+	}
+	agent := project.Spec.Agents[0]
+	if agent.Status != "disabled" || agent.Scheduler == nil || agent.Scheduler.Enabled {
+		t.Fatalf("unbound compatibility agent = %#v", agent)
+	}
+	if adopted := project.managedLoaderOverrides[agent.Name]; adopted.Summary.ID != loader.Summary.ID || adopted.Summary.Enabled {
+		t.Fatalf("unbound loader override = %#v", adopted)
+	}
+}
+
+func findLegacyProjectAgent(t *testing.T, project NormalizedProject, name string) compose.NormalizedAgentSpec {
+	t.Helper()
+	for _, agent := range project.Spec.Agents {
+		if agent.Name == name {
+			return agent
+		}
+	}
+	t.Fatalf("agent %q not found in %#v", name, project.Spec.Agents)
+	return compose.NormalizedAgentSpec{}
 }

@@ -4,33 +4,41 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
 	"agent-compose/pkg/compose"
+	"agent-compose/pkg/identity"
 	domain "agent-compose/pkg/model"
 )
 
 const LegacyDefaultProjectName = "legacy-v1-default"
 
-var legacyAgentNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
-
 type legacyAgentDefinitionStore interface {
 	ListAgentDefinitions(context.Context, domain.AgentDefinitionListOptions) (domain.AgentDefinitionListResult, error)
 }
 
-// SyncLegacyDefaultProject projects active standalone v1 agents into one
-// deterministic v2 project without changing the source AgentDefinitions.
+type legacyLoaderStore interface {
+	ListLoaders(context.Context) ([]domain.Loader, error)
+}
+
+// SyncLegacyDefaultProject projects active standalone v1 agents and loaders
+// into one deterministic v2 project. Source AgentDefinitions remain unchanged;
+// legacy loaders are adopted in place so their history and trigger state stay
+// attached to the task shown by the project APIs.
 func (c *Controller) SyncLegacyDefaultProject(ctx context.Context) (ApplyResult, error) {
 	agents, err := c.listStandaloneAgents(ctx)
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	if len(agents) == 0 {
+	legacyLoaders, err := c.listLegacyDefaultLoaders(ctx)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if len(agents) == 0 && len(legacyLoaders) == 0 {
 		return ApplyResult{}, nil
 	}
-	normalized, err := legacyDefaultNormalizedProject(agents)
+	normalized, err := legacyDefaultNormalizedProject(agents, legacyLoaders)
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -68,7 +76,33 @@ func (c *Controller) listStandaloneAgents(ctx context.Context) ([]domain.AgentDe
 	return standalone, nil
 }
 
-func legacyDefaultNormalizedProject(agents []domain.AgentDefinition) (NormalizedProject, error) {
+func (c *Controller) listLegacyDefaultLoaders(ctx context.Context) ([]domain.Loader, error) {
+	if c == nil || c.store == nil {
+		return nil, fmt.Errorf("sync legacy default project: config store is required")
+	}
+	store, ok := c.store.(legacyLoaderStore)
+	if !ok {
+		return nil, fmt.Errorf("sync legacy default project: loader store is required")
+	}
+	projectID, err := domain.StableProjectID(LegacyDefaultProjectName, "")
+	if err != nil {
+		return nil, fmt.Errorf("resolve legacy default project id: %w", err)
+	}
+	items, err := store.ListLoaders(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list legacy loaders: %w", err)
+	}
+	legacy := make([]domain.Loader, 0, len(items))
+	for _, loader := range items {
+		managedProjectID := strings.TrimSpace(loader.Summary.ManagedProjectID)
+		if managedProjectID == "" || managedProjectID == projectID {
+			legacy = append(legacy, loader)
+		}
+	}
+	return legacy, nil
+}
+
+func legacyDefaultNormalizedProject(agents []domain.AgentDefinition, legacyLoaders []domain.Loader) (NormalizedProject, error) {
 	spec := &compose.NormalizedProjectSpec{Name: LegacyDefaultProjectName}
 	agents = append([]domain.AgentDefinition(nil), agents...)
 	sort.Slice(agents, func(i, j int) bool {
@@ -77,42 +111,208 @@ func legacyDefaultNormalizedProject(agents []domain.AgentDefinition) (Normalized
 		}
 		return agents[i].Name < agents[j].Name
 	})
-	seen := make(map[string]string, len(agents))
-	for _, definition := range agents {
-		name, err := legacyProjectAgentName(definition.Name)
-		if err != nil {
-			return NormalizedProject{}, fmt.Errorf("legacy agent %s: %w", definition.ID, err)
-		}
-		if name == "" {
-			return NormalizedProject{}, fmt.Errorf("legacy agent %s has no name", definition.ID)
-		}
-		if existingID, exists := seen[name]; exists {
-			return NormalizedProject{}, fmt.Errorf("legacy agents %s and %s share name %q", existingID, definition.ID, name)
-		}
-		seen[name] = definition.ID
+	names := legacyProjectAgentNames(agents)
+	agentByLegacyID := make(map[string]int, len(agents))
+	agentByName := make(map[string]int, len(agents)+len(legacyLoaders))
+	usedNames := make(map[string]struct{}, len(agents)+len(legacyLoaders))
+	for index, definition := range agents {
 		agent, err := normalizedAgentFromLegacy(definition)
 		if err != nil {
 			return NormalizedProject{}, err
 		}
-		agent.Name = name
+		agent.Name = names[index]
+		if legacyID := strings.TrimSpace(definition.ID); legacyID != "" {
+			agentByLegacyID[legacyID] = len(spec.Agents)
+		}
+		agentByName[agent.Name] = len(spec.Agents)
+		usedNames[agent.Name] = struct{}{}
 		spec.Agents = append(spec.Agents, agent)
 	}
+
+	overrides := projectLegacyLoaders(spec, legacyLoaders, agentByLegacyID, agentByName, usedNames)
+	sort.Slice(spec.Agents, func(i, j int) bool { return spec.Agents[i].Name < spec.Agents[j].Name })
 	hash, err := spec.Hash()
 	if err != nil {
 		return NormalizedProject{}, fmt.Errorf("hash legacy default project: %w", err)
 	}
-	return NormalizedProject{Spec: spec, SpecHash: hash}, nil
+	return NormalizedProject{Spec: spec, SpecHash: hash, managedLoaderOverrides: overrides}, nil
 }
 
-func legacyProjectAgentName(name string) (string, error) {
+func legacyCanonicalAgentName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return "", nil
+	if !domain.IsProjectStableIdentifier(name) {
+		return ""
 	}
-	if !legacyAgentNamePattern.MatchString(name) {
-		return "", fmt.Errorf("legacy agent name %q cannot be converted to a stable v2 identifier", name)
+	return name
+}
+
+func legacyProjectAgentNames(agents []domain.AgentDefinition) []string {
+	bases := make([]string, len(agents))
+	counts := make(map[string]int, len(agents))
+	for index, agent := range agents {
+		bases[index] = legacyCanonicalAgentName(agent.Name)
+		if bases[index] != "" {
+			counts[bases[index]]++
+		}
 	}
-	return name, nil
+
+	names := make([]string, len(agents))
+	used := make(map[string]struct{}, len(agents))
+	// Reserve unique, already-valid names first. A generated compatibility name
+	// must never force a valid legacy name to change.
+	for index, base := range bases {
+		if base != "" && counts[base] == 1 {
+			names[index] = base
+			used[base] = struct{}{}
+		}
+	}
+	for index, agent := range agents {
+		if names[index] != "" {
+			continue
+		}
+		prefix := bases[index]
+		if prefix == "" {
+			prefix = "legacy-agent"
+		}
+		names[index] = reserveLegacyStableName(prefix, identity.ResourceAgent, agent.ID, agent.Name, used)
+	}
+	return names
+}
+
+func projectLegacyLoaders(spec *compose.NormalizedProjectSpec, legacyLoaders []domain.Loader, agentByLegacyID, agentByName map[string]int, usedNames map[string]struct{}) map[string]domain.Loader {
+	legacyLoaders = append([]domain.Loader(nil), legacyLoaders...)
+	sort.Slice(legacyLoaders, func(i, j int) bool {
+		iManaged := strings.TrimSpace(legacyLoaders[i].Summary.ManagedAgentName) != ""
+		jManaged := strings.TrimSpace(legacyLoaders[j].Summary.ManagedAgentName) != ""
+		if iManaged != jManaged {
+			return iManaged
+		}
+		if legacyLoaders[i].Summary.ID != legacyLoaders[j].Summary.ID {
+			return legacyLoaders[i].Summary.ID < legacyLoaders[j].Summary.ID
+		}
+		return legacyLoaders[i].Summary.Name < legacyLoaders[j].Summary.Name
+	})
+
+	scheduledAgents := make(map[string]struct{}, len(legacyLoaders))
+	overrides := make(map[string]domain.Loader, len(legacyLoaders))
+	for _, loader := range legacyLoaders {
+		sourceIndex, sourceFound := agentByLegacyID[strings.TrimSpace(loader.Summary.AgentID)]
+		managedName := legacyCanonicalAgentName(loader.Summary.ManagedAgentName)
+		trustedManagedBinding := managedName != ""
+		targetIndex := -1
+
+		if managedName != "" {
+			if index, exists := agentByName[managedName]; exists {
+				if _, scheduled := scheduledAgents[managedName]; !scheduled {
+					targetIndex = index
+				}
+			} else {
+				targetIndex = appendLegacyLoaderAgent(spec, loader, managedName, sourceIndex, sourceFound, true)
+				agentByName[managedName] = targetIndex
+				usedNames[managedName] = struct{}{}
+			}
+		}
+		if targetIndex < 0 && sourceFound {
+			sourceName := spec.Agents[sourceIndex].Name
+			if _, scheduled := scheduledAgents[sourceName]; !scheduled {
+				targetIndex = sourceIndex
+			}
+		}
+		associated := sourceFound || trustedManagedBinding
+		if targetIndex < 0 {
+			prefix := "legacy-loader"
+			if sourceFound {
+				prefix = spec.Agents[sourceIndex].Name + "-loader"
+			}
+			targetName := reserveLegacyStableName(prefix, identity.ResourceLoader, loader.Summary.ID, loader.Summary.Name, usedNames)
+			targetIndex = appendLegacyLoaderAgent(spec, loader, targetName, sourceIndex, sourceFound, associated)
+			agentByName[targetName] = targetIndex
+		}
+
+		targetName := spec.Agents[targetIndex].Name
+		projected := loader
+		projected.Triggers = append([]domain.LoaderTrigger(nil), loader.Triggers...)
+		projected.EnvItems = append([]domain.SandboxEnvVar(nil), loader.EnvItems...)
+		projected.Volumes = append([]domain.VolumeMountSpec(nil), loader.Volumes...)
+		projected.Summary.CapsetIDs = append([]string(nil), loader.Summary.CapsetIDs...)
+		projected.Script = strings.ReplaceAll(loader.Script, "\r\n", "\n")
+		if !associated {
+			// An unbound global loader has no lossless project-agent target. Keep it
+			// visible, but do not let migration unexpectedly execute it.
+			projected.Summary.Enabled = false
+		}
+		spec.Agents[targetIndex].Scheduler = &compose.NormalizedSchedulerSpec{
+			Enabled:       projected.Summary.Enabled,
+			SandboxPolicy: domain.NormalizeLoaderSandboxPolicy(projected.Summary.SandboxPolicy),
+			Script:        projected.Script,
+		}
+		scheduledAgents[targetName] = struct{}{}
+		overrides[targetName] = projected
+	}
+	if len(overrides) == 0 {
+		return nil
+	}
+	return overrides
+}
+
+func appendLegacyLoaderAgent(spec *compose.NormalizedProjectSpec, loader domain.Loader, name string, sourceIndex int, sourceFound, associated bool) int {
+	var agent compose.NormalizedAgentSpec
+	if sourceFound {
+		agent = spec.Agents[sourceIndex]
+		agent.Scheduler = nil
+	} else {
+		status := "disabled"
+		if associated {
+			status = "enabled"
+		}
+		agent = compose.NormalizedAgentSpec{
+			Status:    status,
+			Provider:  legacyLoaderProvider(loader.Summary.DefaultAgent),
+			Image:     strings.TrimSpace(loader.Summary.GuestImage),
+			Driver:    legacyDriver(loader.Summary.Driver),
+			Env:       legacyEnv(loader.EnvItems),
+			CapsetIDs: append([]string(nil), loader.Summary.CapsetIDs...),
+			Volumes:   legacyVolumes(loader.Volumes),
+		}
+	}
+	agent.Name = name
+	spec.Agents = append(spec.Agents, agent)
+	return len(spec.Agents) - 1
+}
+
+func legacyLoaderProvider(provider string) string {
+	provider = domain.NormalizeAgentKind(provider)
+	switch provider {
+	case "codex", "claude", "gemini", "opencode":
+		return provider
+	default:
+		return domain.DefaultAgentProvider
+	}
+}
+
+func reserveLegacyStableName(prefix string, kind identity.ResourceKind, id, fallback string, used map[string]struct{}) string {
+	seed := strings.TrimSpace(id)
+	if seed == "" {
+		seed = strings.TrimSpace(fallback)
+	}
+	digest := identity.NewID(kind, LegacyDefaultProjectName, seed)
+	for length := 12; length <= len(digest); length += 4 {
+		if length > len(digest) {
+			length = len(digest)
+		}
+		candidate := prefix + "-" + digest[:length]
+		if _, exists := used[candidate]; !exists {
+			used[candidate] = struct{}{}
+			return candidate
+		}
+	}
+	for sequence := 2; ; sequence++ {
+		candidate := fmt.Sprintf("%s-%s-%d", prefix, digest, sequence)
+		if _, exists := used[candidate]; !exists {
+			used[candidate] = struct{}{}
+			return candidate
+		}
+	}
 }
 
 func normalizedAgentFromLegacy(definition domain.AgentDefinition) (compose.NormalizedAgentSpec, error) {
