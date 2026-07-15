@@ -240,7 +240,7 @@ sandbox a scoped token instead of your real API key, so provider keys never ente
 the guest. When that token pins an upstream provider, the model in each runtime
 request is forwarded to that provider and does not need to be listed in
 agent-compose first; an unsupported model returns the upstream provider's error.
-Legacy compatibility tokens without a provider keep the existing configured
+Compatibility tokens without a provider keep the existing configured
 model/provider resolution behavior.
 
 Set the variables for the backend family your agents use. **OpenAI-family**
