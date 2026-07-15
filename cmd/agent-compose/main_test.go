@@ -3143,6 +3143,30 @@ func TestNormalizeComposeSchedulerTriggerOptionsPayload(t *testing.T) {
 	}
 }
 
+func TestLegacySchedulerRunIDValidation(t *testing.T) {
+	tests := []struct {
+		name  string
+		runID string
+		want  bool
+	}{
+		{name: "canonical UUID", runID: "550e8400-e29b-41d4-a716-446655440000", want: true},
+		{name: "uppercase UUID", runID: "550E8400-E29B-41D4-A716-446655440000"},
+		{name: "surrounding whitespace", runID: " 550e8400-e29b-41d4-a716-446655440000 ", want: true},
+		{name: "UUID without hyphens", runID: "550e8400e29b41d4a716446655440000"},
+		{name: "braced UUID", runID: "{550e8400-e29b-41d4-a716-446655440000}"},
+		{name: "SHA-256 resource ID", runID: identity.NewRandomID(identity.ResourceRun)},
+		{name: "invalid UUID", runID: "550e8400-e29b-41d4-a716-invalid"},
+		{name: "empty", runID: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLegacySchedulerRunID(tt.runID); got != tt.want {
+				t.Fatalf("isLegacySchedulerRunID(%q) = %t, want %t", tt.runID, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIntegrationCLISchedulerRunsLogsAndInspectResources(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-scheduler-observability

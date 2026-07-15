@@ -2347,7 +2347,7 @@ func resolveSchedulerRunID(ctx context.Context, client agentcomposev2connect.Res
 func isLegacySchedulerRunID(runID string) bool {
 	runID = strings.TrimSpace(runID)
 	parsed, err := uuid.Parse(runID)
-	return err == nil && parsed.String() == strings.ToLower(runID)
+	return err == nil && parsed.String() == runID
 }
 
 func shouldResolveSchedulerRunRef(ref string) bool {
