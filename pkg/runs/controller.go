@@ -2148,6 +2148,9 @@ func (c *Controller) startProjectRunSandbox(ctx context.Context, sandbox *domain
 	}
 	domain.RestoreSandboxTransientFields(loaded, sandbox)
 	*sandbox = *loaded
+	if c.capTokens != nil {
+		c.capTokens.IndexSandbox(loaded)
+	}
 	return nil
 }
 
@@ -2207,7 +2210,10 @@ func (c *Controller) cleanupProjectRunSandboxByPolicy(ctx context.Context, sandb
 	sandbox := sandboxResult.Sandbox
 	if CleanupPolicyRemovesSandbox(policy) && sandboxResult.Created {
 		if c.removal != nil {
-			_, err := c.removal.Remove(ctx, sandbox.Summary.ID, true)
+			result, err := c.removal.Remove(ctx, sandbox.Summary.ID, true)
+			if err == nil && result.Removed && c.capTokens != nil {
+				c.capTokens.RevokeSandbox(sandbox.Summary.ID)
+			}
 			return err
 		}
 		if err := c.stopProjectRunSandbox(ctx, sandbox); err != nil {
@@ -2242,6 +2248,9 @@ func (c *Controller) stopProjectRunSandbox(ctx context.Context, sandbox *domain.
 		return err
 	}
 	if loaded.Summary.VMStatus != domain.VMStatusRunning {
+		if c.capTokens != nil {
+			c.capTokens.RevokeSandbox(loaded.Summary.ID)
+		}
 		return nil
 	}
 	if c.driver == nil {
@@ -2253,6 +2262,9 @@ func (c *Controller) stopProjectRunSandbox(ctx context.Context, sandbox *domain.
 	loaded.Summary.VMStatus = domain.VMStatusStopped
 	if err := c.store.UpdateSandbox(ctx, loaded); err != nil {
 		return err
+	}
+	if c.capTokens != nil {
+		c.capTokens.RevokeSandbox(loaded.Summary.ID)
 	}
 	event := domain.SandboxEvent{ID: uuid.NewString(), Type: "sandbox.stopped", Level: "info", Message: "sandbox stopped", CreatedAt: time.Now().UTC()}
 	_ = c.store.AddEvent(ctx, loaded.Summary.ID, event)
