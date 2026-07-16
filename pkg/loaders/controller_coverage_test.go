@@ -63,7 +63,7 @@ func TestControllerCoverageWorkflow(t *testing.T) {
 	if _, _, err := controller.LoadLoaderForRun(ctx, created.Summary.ID, "missing"); err == nil {
 		t.Fatalf("expected missing trigger error")
 	}
-	manualRun, err := controller.RunNow(ctx, created.Summary.ID, "trigger-1", `{"manual":true}`, time.Millisecond)
+	manualRun, err := controller.RunNow(ctx, created.Summary.ID, "trigger-1", `{"manual":true}`, time.Second)
 	if err != nil || manualRun.Status != domain.LoaderRunStatusSucceeded || manualRun.ResultJSON == "" {
 		t.Fatalf("RunNow run=%#v err=%v", manualRun, err)
 	}

@@ -148,11 +148,39 @@ func TestRuntimeHostProjectAgentPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Project Agent returned error: %v", err)
 	}
-	if result.Text != "project output" || projectRunner.request.ProjectID != "project-1" || projectRunner.request.ClientRequestID != run.ID {
+	if result.Text != "project output" || projectRunner.request.ProjectID != "project-1" || projectRunner.request.ClientRequestID != run.ID+":agent:1" {
 		t.Fatalf("project result/request = %#v/%#v", result, projectRunner.request)
 	}
 	if !events.contains("loader.agent.completed") || len(publisher.events) != 1 || publisher.events[0].payload["projectRunId"] != "project-run" {
 		t.Fatalf("events/publisher = %#v/%#v", events.types(), publisher.events)
+	}
+}
+
+func TestRuntimeHostProjectAgentUsesUniqueRequestIDs(t *testing.T) {
+	loader := domain.Loader{Summary: domain.LoaderSummary{
+		ID:               "loader-project",
+		ManagedProjectID: "project-1",
+		ManagedAgentName: "reviewer",
+	}}
+	run := &domain.LoaderRunSummary{ID: "run-project", LoaderID: loader.Summary.ID, TriggerID: "trigger-1"}
+	projectRunner := &hostProjectAgentRunnerFake{run: domain.ProjectRunRecord{
+		RunID:     "project-run",
+		ProjectID: "project-1",
+		AgentName: "reviewer",
+		Status:    domain.ProjectRunStatusSucceeded,
+	}}
+	host := loaders.NewRuntimeHost(loaders.RunHostDependencies{
+		ProjectAgentRunner: projectRunner,
+	}, loader, run, loaders.TriggerEventMetadata{})
+
+	for range 2 {
+		if _, err := host.Agent(context.Background(), "review", domain.LoaderAgentRequest{}); err != nil {
+			t.Fatalf("Project Agent returned error: %v", err)
+		}
+	}
+
+	if len(projectRunner.requests) != 2 || projectRunner.requests[0].ClientRequestID != run.ID+":agent:1" || projectRunner.requests[1].ClientRequestID != run.ID+":agent:2" {
+		t.Fatalf("project request IDs = %#v", projectRunner.requests)
 	}
 }
 
@@ -482,14 +510,16 @@ func (e *hostCommandExecutorFake) ExecuteLoaderCommand(context.Context, *domain.
 }
 
 type hostProjectAgentRunnerFake struct {
-	request loaders.HostProjectAgentRequest
-	run     domain.ProjectRunRecord
-	execErr error
-	err     error
+	request  loaders.HostProjectAgentRequest
+	requests []loaders.HostProjectAgentRequest
+	run      domain.ProjectRunRecord
+	execErr  error
+	err      error
 }
 
 func (r *hostProjectAgentRunnerFake) RunProjectAgent(_ context.Context, request loaders.HostProjectAgentRequest) (domain.ProjectRunRecord, error, error) {
 	r.request = request
+	r.requests = append(r.requests, request)
 	return r.run, r.execErr, r.err
 }
 

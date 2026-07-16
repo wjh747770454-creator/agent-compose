@@ -164,7 +164,13 @@ func (e *RunExecutor) Execute(ctx context.Context, prepared PreparedRun) (domain
 	completedAt := time.Now().UTC()
 	run.CompletedAt = completedAt
 	run.DurationMs = completedAt.Sub(run.StartedAt).Milliseconds()
-	if execErr != nil {
+	if cancelCause := context.Cause(ctx); cancelCause != nil {
+		run.Status = domain.LoaderRunStatusCanceled
+		run.Error = cancelCause.Error()
+		_ = e.writeArtifact(run.ArtifactsDir, "error.txt", run.Error)
+		_ = e.deps.Store.UpdateLoaderLastError(writeCtx, prepared.Loader.Summary.ID, run.Error)
+		_ = e.addLoaderEvent(writeCtx, prepared.Loader.Summary.ID, run.ID, run.TriggerID, "loader.run.canceled", "warn", run.Error, nil, "", "", "")
+	} else if execErr != nil {
 		run.Status = domain.LoaderRunStatusFailed
 		run.Error = execErr.Error()
 		_ = e.writeArtifact(run.ArtifactsDir, "error.txt", run.Error)

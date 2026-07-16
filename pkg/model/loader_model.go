@@ -27,6 +27,7 @@ const (
 	LoaderRunStatusRunning   = "running"
 	LoaderRunStatusSucceeded = "succeeded"
 	LoaderRunStatusFailed    = "failed"
+	LoaderRunStatusCanceled  = "canceled"
 	LoaderRunStatusSkipped   = "skipped"
 )
 
@@ -297,6 +298,8 @@ func NormalizeLoaderRunStatus(status string) string {
 		return LoaderRunStatusSucceeded
 	case LoaderRunStatusFailed:
 		return LoaderRunStatusFailed
+	case LoaderRunStatusCanceled:
+		return LoaderRunStatusCanceled
 	case LoaderRunStatusSkipped:
 		return LoaderRunStatusSkipped
 	default:

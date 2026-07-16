@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"agent-compose/pkg/execution"
 	domain "agent-compose/pkg/model"
-
-	"github.com/google/uuid"
 )
 
 type HostStore interface {
@@ -55,23 +54,6 @@ type HostCommandExecutor interface {
 	ExecuteLoaderCommand(ctx context.Context, session *domain.Sandbox, request domain.LoaderCommandRequest) (domain.LoaderCommandResult, error)
 }
 
-type HostProjectAgentRequest struct {
-	LoaderID         string
-	ProjectID        string
-	AgentName        string
-	Prompt           string
-	SchedulerID      string
-	TriggerID        string
-	OutputSchemaJSON string
-	ClientRequestID  string
-	Volumes          []domain.VolumeMountSpec
-	SandboxPolicy    string
-}
-
-type HostProjectAgentRunner interface {
-	RunProjectAgent(ctx context.Context, request HostProjectAgentRequest) (domain.ProjectRunRecord, error, error)
-}
-
 type HostLLMRunner interface {
 	Generate(ctx context.Context, prompt, model, outputSchema string) (domain.LoaderLLMResult, error)
 }
@@ -105,9 +87,10 @@ type RuntimeHost struct {
 	run          *domain.LoaderRunSummary
 	triggerEvent TriggerEventMetadata
 
-	commandSessionIDs      map[string]struct{}
-	commandSessionIDOrder  []string
-	commandReusableSession *domain.Sandbox
+	commandSessionIDs       map[string]struct{}
+	commandSessionIDOrder   []string
+	commandReusableSession  *domain.Sandbox
+	projectAgentRunSequence atomic.Uint64
 }
 
 func NewRuntimeHost(deps RunHostDependencies, loader domain.Loader, run *domain.LoaderRunSummary, triggerEvent TriggerEventMetadata) *RuntimeHost {
@@ -258,48 +241,6 @@ func (h *RuntimeHost) Agent(ctx context.Context, prompt string, request domain.L
 	return result, nil
 }
 
-func (h *RuntimeHost) ProjectAgent(ctx context.Context, prompt string, request domain.LoaderAgentRequest) (domain.LoaderAgentResult, error) {
-	sandboxPolicy := domain.LoaderSandboxPolicyNew
-	if strings.TrimSpace(h.loader.Summary.SandboxPolicy) != "" {
-		sandboxPolicy = domain.NormalizeLoaderSandboxPolicy(h.loader.Summary.SandboxPolicy)
-	}
-	if strings.TrimSpace(domain.LoaderAgentSandboxPolicy(request)) != "" {
-		sandboxPolicy = domain.NormalizeLoaderSandboxPolicy(domain.LoaderAgentSandboxPolicy(request))
-	}
-	run, execErr, err := h.deps.ProjectAgentRunner.RunProjectAgent(ctx, HostProjectAgentRequest{
-		LoaderID:         h.loader.Summary.ID,
-		ProjectID:        h.loader.Summary.ManagedProjectID,
-		AgentName:        h.loader.Summary.ManagedAgentName,
-		Prompt:           prompt,
-		SchedulerID:      h.loader.Summary.ManagedSchedulerID,
-		TriggerID:        h.run.TriggerID,
-		OutputSchemaJSON: request.OutputSchema,
-		ClientRequestID:  firstHostNonEmpty(h.run.ID, uuid.NewString()),
-		Volumes:          request.Volumes,
-		SandboxPolicy:    sandboxPolicy,
-	})
-	if err != nil {
-		return domain.LoaderAgentResult{}, err
-	}
-	result, jsonErr := AgentResultFromProjectRun(run, request.OutputSchema)
-	if jsonErr != nil && execErr == nil {
-		execErr = jsonErr
-	}
-	level := "info"
-	eventName := "loader.agent.completed"
-	if execErr != nil || run.Status != domain.ProjectRunStatusSucceeded {
-		level = "error"
-		eventName = "loader.agent.failed"
-		result.Text = firstHostNonEmpty(result.Text, run.Error, execErrString(execErr))
-	}
-	_ = h.addLinkedLoaderEvent(ctx, eventName, level, firstHostNonEmpty(result.Text, fmt.Sprintf("%s completed", result.Agent)), result, result.SandboxID, result.CellID, result.AgentThreadID)
-	h.publishAgentCompleted(result, &run)
-	if execErr != nil {
-		return result, execErr
-	}
-	return result, nil
-}
-
 func (h *RuntimeHost) Command(ctx context.Context, request domain.LoaderCommandRequest) (domain.LoaderCommandResult, error) {
 	cleanupSession := h.commandRequiresCleanup(request)
 	agentRequest := domain.LoaderAgentRequest{
@@ -362,16 +303,6 @@ func (h *RuntimeHost) CleanupCommandSessions(ctx context.Context) {
 		}
 		_ = h.addLinkedLoaderEvent(ctx, "loader.sandbox.stopped", "info", "loader command sandbox stopped after run", map[string]any{"sandboxId": sessionID}, sessionID, "", "")
 	}
-}
-
-func (h *RuntimeHost) useProjectManagedAgentRun(request domain.LoaderAgentRequest) bool {
-	if strings.TrimSpace(h.loader.Summary.ManagedProjectID) == "" || strings.TrimSpace(h.loader.Summary.ManagedAgentName) == "" {
-		return false
-	}
-	if strings.TrimSpace(request.Agent) != "" || request.Timeout > 0 {
-		return false
-	}
-	return !AgentRequestOverridesSession(request, true)
 }
 
 func (h *RuntimeHost) ensureCommandSession(ctx context.Context, request domain.LoaderAgentRequest, cleanupSession bool) (*domain.Sandbox, string, error) {

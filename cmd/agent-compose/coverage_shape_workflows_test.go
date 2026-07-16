@@ -30,7 +30,7 @@ func TestE2ECLISchedulerPublicContractWorkflow(t *testing.T) {
 	TestIntegrationCLIUpAppliesInlineSchedulerScriptAndPSJSON(t)
 	TestIntegrationCLISchedulerList(t)
 	TestIntegrationCLISchedulerRunsLogsAndInspectResources(t)
-	TestIntegrationCLISchedulerTriggerUsesRunAgentTriggerID(t)
+	TestIntegrationCLISchedulerTriggerUsesSchedulerRunAPI(t)
 	TestIntegrationCLISchedulerInspectDeclarativeTriggerYAML(t)
 	TestIntegrationCLISchedulerInspectLoaderRegisteredTrigger(t)
 	TestIntegrationCLIInspectProjectAgentRunSandboxSessionJSON(t)

@@ -3122,20 +3122,19 @@ func TestComposeUpUsesDistinctStableTriggerIDs(t *testing.T) {
 
 func TestNormalizeComposeSchedulerTriggerOptionsPayload(t *testing.T) {
 	options, err := normalizeComposeSchedulerTriggerOptions(composeSchedulerTriggerOptions{
-		Prompt:      " override prompt ",
 		PayloadJSON: " { \"topic\" : \"nightly\" } ",
 	})
 	if err != nil {
 		t.Fatalf("normalize payload returned error: %v", err)
-	}
-	if options.Prompt != "override prompt" {
-		t.Fatalf("prompt = %q", options.Prompt)
 	}
 	if options.PayloadJSON != `{"topic":"nightly"}` {
 		t.Fatalf("payload = %q", options.PayloadJSON)
 	}
 	if _, err := normalizeComposeSchedulerTriggerOptions(composeSchedulerTriggerOptions{PayloadJSON: "{bad"}); err == nil {
 		t.Fatalf("invalid payload returned nil error")
+	}
+	if _, err := normalizeComposeSchedulerTriggerOptions(composeSchedulerTriggerOptions{Prompt: "override"}); err == nil || !strings.Contains(err.Error(), "unsupported for complete scheduler runs") {
+		t.Fatalf("unsupported prompt error = %v", err)
 	}
 }
 
@@ -3285,7 +3284,7 @@ agents:
 	}
 }
 
-func TestIntegrationCLISchedulerTriggerUsesRunAgentTriggerID(t *testing.T) {
+func TestIntegrationCLISchedulerTriggerUsesSchedulerRunAPI(t *testing.T) {
 	composePath := writeComposeFile(t, t.TempDir(), `
 name: cli-scheduler-trigger
 agents:
@@ -3297,37 +3296,25 @@ agents:
           cron: "0 2 * * *"
           prompt: review nightly
 `)
-	var requestedSandboxIDs []string
 	var requestedPayloads []string
-	var requestedPrompts []string
+	var requestedTriggerIDs []string
 	server := newComposeServiceStubServer(t, composeServiceStubs{
 		project: projectServiceStub{
-			getProject: func(ctx context.Context, req *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error) {
-				return connect.NewResponse(&agentcomposev2.GetProjectResponse{Project: testCLIProject(req.Msg.GetProject().GetProjectId(), "cli-scheduler-trigger", composePath)}), nil
-			},
-		},
-		run: runServiceStub{
-			runAgentStream: func(ctx context.Context, req *connect.Request[agentcomposev2.RunAgentRequest], stream *connect.ServerStream[agentcomposev2.RunAgentStreamResponse]) error {
-				requestedSandboxIDs = append(requestedSandboxIDs, req.Msg.GetSandboxId())
+			runScheduler: func(ctx context.Context, req *connect.Request[agentcomposev2.RunSchedulerRequest]) (*connect.Response[agentcomposev2.RunSchedulerResponse], error) {
 				requestedPayloads = append(requestedPayloads, req.Msg.GetPayloadJson())
-				requestedPrompts = append(requestedPrompts, req.Msg.GetPrompt())
-				if req.Msg.GetAgentName() != "reviewer" || !identity.IsID(req.Msg.GetTriggerId()) || req.Msg.GetCommand() != "" || req.Msg.GetSource() != agentcomposev2.RunSource_RUN_SOURCE_MANUAL {
-					t.Fatalf("RunAgentStream scheduler trigger request = %#v", req.Msg)
+				requestedTriggerIDs = append(requestedTriggerIDs, req.Msg.GetTriggerId())
+				if req.Msg.GetAgentName() != "reviewer" || !identity.IsID(req.Msg.GetTriggerId()) {
+					t.Fatalf("RunScheduler request = %#v", req.Msg)
 				}
-				return stream.Send(&agentcomposev2.RunAgentStreamResponse{
-					EventType: agentcomposev2.RunAgentStreamEventType_RUN_AGENT_STREAM_EVENT_TYPE_COMPLETED,
-					RunId:     "run-scheduler-trigger",
-					Run: &agentcomposev2.RunSummary{
-						RunId:     "run-scheduler-trigger",
-						ProjectId: req.Msg.GetProjectId(),
-						AgentName: "reviewer",
-						Status:    agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED,
-						SandboxId: "sandbox-scheduler-trigger",
-					},
-				})
-			},
-			getRun: func(ctx context.Context, req *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
-				return connect.NewResponse(&agentcomposev2.GetRunResponse{Run: testRunDetail(req.Msg.GetProjectId(), "run-scheduler-trigger", "reviewer", "sandbox-scheduler-trigger", agentcomposev2.RunStatus_RUN_STATUS_SUCCEEDED, 0, "")}), nil
+				return connect.NewResponse(&agentcomposev2.RunSchedulerResponse{Run: &agentcomposev2.SchedulerRun{
+					RunId:       "scheduler-run-1",
+					ProjectId:   req.Msg.GetProject().GetProjectId(),
+					AgentName:   req.Msg.GetAgentName(),
+					TriggerId:   req.Msg.GetTriggerId(),
+					Status:      agentcomposev2.SchedulerRunStatus_SCHEDULER_RUN_STATUS_SUCCEEDED,
+					ResultJson:  `{"ok":true}`,
+					PayloadJson: req.Msg.GetPayloadJson(),
+				}}), nil
 			},
 		},
 	})
@@ -3337,33 +3324,28 @@ agents:
 		name      string
 		extraArgs []string
 	}{
-		{name: "creates sandbox"},
-		{name: "reuses sandbox", extraArgs: []string{"--sandbox", "sandbox-existing"}},
+		{name: "runs trigger"},
 		{name: "passes payload", extraArgs: []string{"--payload", `{"topic":"nightly"}`}},
-		{name: "passes prompt", extraArgs: []string{"--prompt", "review override"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := []string{"scheduler", "trigger", "--host", server.URL, "--file", composePath}
 			args = append(args, tc.extraArgs...)
 			args = append(args, "reviewer", "nightly")
 			stdout, stderr, _, exitCode := executeCLICommand(args...)
-			if exitCode != 0 || stdout != "" || stderr != "" {
+			if exitCode != 0 || !strings.Contains(stdout, "Status: succeeded") || !strings.Contains(stdout, `Result: {"ok":true}`) || stderr != "" {
 				t.Fatalf("scheduler trigger code/stdout/stderr = %d / %q / %q", exitCode, stdout, stderr)
 			}
 		})
 	}
-	if !reflect.DeepEqual(requestedSandboxIDs, []string{"", "sandbox-existing", "", ""}) {
-		t.Fatalf("scheduler trigger sandbox IDs = %#v", requestedSandboxIDs)
-	}
-	if !reflect.DeepEqual(requestedPayloads, []string{"", "", `{"topic":"nightly"}`, ""}) {
+	if !reflect.DeepEqual(requestedPayloads, []string{"", `{"topic":"nightly"}`}) {
 		t.Fatalf("scheduler trigger payloads = %#v", requestedPayloads)
 	}
-	if !reflect.DeepEqual(requestedPrompts, []string{"", "", "", "review override"}) {
-		t.Fatalf("scheduler trigger prompts = %#v", requestedPrompts)
+	if len(requestedTriggerIDs) != 2 || requestedTriggerIDs[0] != requestedTriggerIDs[1] {
+		t.Fatalf("scheduler trigger IDs = %#v", requestedTriggerIDs)
 	}
 }
 
-func TestRunComposeSchedulerTriggerPromptRequiresValue(t *testing.T) {
+func TestRunComposeSchedulerTriggerRejectsUnsupportedPrompt(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("prompt", "", "")
 	if err := cmd.Flags().Set("prompt", " "); err != nil {
@@ -3371,7 +3353,7 @@ func TestRunComposeSchedulerTriggerPromptRequiresValue(t *testing.T) {
 	}
 	err := runComposeSchedulerTriggerCommand(cmd, cliOptions{}, composeSchedulerTriggerOptions{Prompt: " "}, "reviewer", "nightly")
 	var exitErr commandExitError
-	if !errors.As(err, &exitErr) || exitErr.Code != exitCodeUsage || !strings.Contains(err.Error(), "--prompt requires a non-empty prompt") {
+	if !errors.As(err, &exitErr) || exitErr.Code != exitCodeUsage || !strings.Contains(err.Error(), "--prompt is unsupported for complete scheduler runs") {
 		t.Fatalf("prompt error = %#v", err)
 	}
 }
@@ -8821,6 +8803,9 @@ agents:
 				getProject: func(context.Context, *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error) {
 					return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("project missing"))
 				},
+				getSchedulerRun: func(context.Context, *connect.Request[agentcomposev2.GetSchedulerRunRequest]) (*connect.Response[agentcomposev2.GetSchedulerRunResponse], error) {
+					return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("run missing"))
+				},
 			},
 			run: runServiceStub{
 				getRun: func(context.Context, *connect.Request[agentcomposev2.GetRunRequest]) (*connect.Response[agentcomposev2.GetRunResponse], error) {
@@ -9679,6 +9664,11 @@ type projectServiceStub struct {
 	removeProject       func(context.Context, *connect.Request[agentcomposev2.RemoveProjectRequest]) (*connect.Response[agentcomposev2.RemoveProjectResponse], error)
 	getScheduler        func(context.Context, *connect.Request[agentcomposev2.GetSchedulerRequest]) (*connect.Response[agentcomposev2.GetSchedulerResponse], error)
 	listSchedulerEvents func(context.Context, *connect.Request[agentcomposev2.ListSchedulerEventsRequest]) (*connect.Response[agentcomposev2.ListSchedulerEventsResponse], error)
+	runScheduler        func(context.Context, *connect.Request[agentcomposev2.RunSchedulerRequest]) (*connect.Response[agentcomposev2.RunSchedulerResponse], error)
+	startSchedulerRun   func(context.Context, *connect.Request[agentcomposev2.StartSchedulerRunRequest]) (*connect.Response[agentcomposev2.StartSchedulerRunResponse], error)
+	getSchedulerRun     func(context.Context, *connect.Request[agentcomposev2.GetSchedulerRunRequest]) (*connect.Response[agentcomposev2.GetSchedulerRunResponse], error)
+	listSchedulerRuns   func(context.Context, *connect.Request[agentcomposev2.ListSchedulerRunsRequest]) (*connect.Response[agentcomposev2.ListSchedulerRunsResponse], error)
+	stopSchedulerRun    func(context.Context, *connect.Request[agentcomposev2.StopSchedulerRunRequest]) (*connect.Response[agentcomposev2.StopSchedulerRunResponse], error)
 
 	agentcomposev2connect.UnimplementedProjectServiceHandler
 }
@@ -9702,6 +9692,41 @@ func (s projectServiceStub) GetScheduler(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("GetScheduler stub is not configured"))
 	}
 	return s.getScheduler(ctx, req)
+}
+
+func (s projectServiceStub) RunScheduler(ctx context.Context, req *connect.Request[agentcomposev2.RunSchedulerRequest]) (*connect.Response[agentcomposev2.RunSchedulerResponse], error) {
+	if s.runScheduler == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("RunScheduler stub is not configured"))
+	}
+	return s.runScheduler(ctx, req)
+}
+
+func (s projectServiceStub) StartSchedulerRun(ctx context.Context, req *connect.Request[agentcomposev2.StartSchedulerRunRequest]) (*connect.Response[agentcomposev2.StartSchedulerRunResponse], error) {
+	if s.startSchedulerRun == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("StartSchedulerRun stub is not configured"))
+	}
+	return s.startSchedulerRun(ctx, req)
+}
+
+func (s projectServiceStub) GetSchedulerRun(ctx context.Context, req *connect.Request[agentcomposev2.GetSchedulerRunRequest]) (*connect.Response[agentcomposev2.GetSchedulerRunResponse], error) {
+	if s.getSchedulerRun == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("GetSchedulerRun stub is not configured"))
+	}
+	return s.getSchedulerRun(ctx, req)
+}
+
+func (s projectServiceStub) ListSchedulerRuns(ctx context.Context, req *connect.Request[agentcomposev2.ListSchedulerRunsRequest]) (*connect.Response[agentcomposev2.ListSchedulerRunsResponse], error) {
+	if s.listSchedulerRuns == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("ListSchedulerRuns stub is not configured"))
+	}
+	return s.listSchedulerRuns(ctx, req)
+}
+
+func (s projectServiceStub) StopSchedulerRun(ctx context.Context, req *connect.Request[agentcomposev2.StopSchedulerRunRequest]) (*connect.Response[agentcomposev2.StopSchedulerRunResponse], error) {
+	if s.stopSchedulerRun == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("StopSchedulerRun stub is not configured"))
+	}
+	return s.stopSchedulerRun(ctx, req)
 }
 
 func (s projectServiceStub) GetProject(ctx context.Context, req *connect.Request[agentcomposev2.GetProjectRequest]) (*connect.Response[agentcomposev2.GetProjectResponse], error) {
@@ -10080,7 +10105,7 @@ func sandboxStubWithSessionCompatibility(sandbox sandboxServiceStub, session ses
 func newComposeServiceStubServer(t *testing.T, stubs composeServiceStubs) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	if stubs.project.applyProject != nil || stubs.project.getProject != nil || stubs.project.listProjects != nil || stubs.project.removeProject != nil || stubs.project.getScheduler != nil || stubs.project.listSchedulerEvents != nil {
+	if stubs.project.applyProject != nil || stubs.project.getProject != nil || stubs.project.listProjects != nil || stubs.project.removeProject != nil || stubs.project.getScheduler != nil || stubs.project.listSchedulerEvents != nil || stubs.project.runScheduler != nil || stubs.project.startSchedulerRun != nil || stubs.project.getSchedulerRun != nil || stubs.project.listSchedulerRuns != nil || stubs.project.stopSchedulerRun != nil {
 		path, handler := agentcomposev2connect.NewProjectServiceHandler(stubs.project)
 		mux.Handle(path, handler)
 	}

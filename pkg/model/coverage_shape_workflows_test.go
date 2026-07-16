@@ -112,7 +112,7 @@ func testModelBranchCoverageWorkflows(t *testing.T) {
 	if domain.NormalizeLoaderConcurrencyPolicy("allow") != domain.LoaderConcurrencyPolicyParallel || domain.NormalizeLoaderConcurrencyPolicy("bad") != domain.LoaderConcurrencyPolicySkip {
 		t.Fatalf("NormalizeLoaderConcurrencyPolicy returned unexpected values")
 	}
-	for _, status := range []string{domain.LoaderRunStatusRunning, domain.LoaderRunStatusSucceeded, domain.LoaderRunStatusFailed, domain.LoaderRunStatusSkipped} {
+	for _, status := range []string{domain.LoaderRunStatusRunning, domain.LoaderRunStatusSucceeded, domain.LoaderRunStatusFailed, domain.LoaderRunStatusCanceled, domain.LoaderRunStatusSkipped} {
 		if domain.NormalizeLoaderRunStatus(status) != status {
 			t.Fatalf("NormalizeLoaderRunStatus(%q) changed", status)
 		}
