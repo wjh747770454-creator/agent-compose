@@ -61,10 +61,12 @@ type ProjectHandler struct {
 	delegate      ProjectDelegate
 	store         ProjectStore
 	loaderRuntime ProjectLoaderRuntime
+	schedulerRuns ProjectSchedulerRunRuntime
 }
 
 func NewProjectHandler(delegate ProjectDelegate, store ProjectStore, loaderRuntime ProjectLoaderRuntime) *ProjectHandler {
-	return &ProjectHandler{delegate: delegate, store: store, loaderRuntime: loaderRuntime}
+	schedulerRuns, _ := loaderRuntime.(ProjectSchedulerRunRuntime)
+	return &ProjectHandler{delegate: delegate, store: store, loaderRuntime: loaderRuntime, schedulerRuns: schedulerRuns}
 }
 
 func (h *ProjectHandler) ValidateProject(ctx context.Context, req *connect.Request[agentcomposev2.ValidateProjectRequest]) (*connect.Response[agentcomposev2.ValidateProjectResponse], error) {
