@@ -182,7 +182,7 @@ See the [command line manual](docs/pages/command-line-manual.md) for the full fi
 | `agent-compose exec <sandbox>` | Execute a command or prompt in a running sandbox. |
 | `agent-compose ps` / `stats` | List project sandboxes / show sandbox resource stats. |
 | `agent-compose logs` | Print project run logs; a project, agent, run, or sandbox ID can be passed without its resource type. |
-| `agent-compose scheduler ls\|trigger\|inspect` | List, run, or inspect scheduler triggers. |
+| `agent-compose scheduler ls\|runs\|logs\|trigger\|inspect` | List triggers and runs, read scheduler logs, manually run triggers, or inspect scheduler resources. |
 | `agent-compose sandbox ls\|stop\|resume\|rm\|prune` | Manage project sandboxes. |
 | `agent-compose images\|pull\|build\|rmi\|inspect` | Manage daemon images and build agent images. |
 | `agent-compose volume ls\|create\|inspect\|rm\|prune` | Manage daemon volumes. |

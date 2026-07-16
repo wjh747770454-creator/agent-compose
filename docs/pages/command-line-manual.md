@@ -207,15 +207,19 @@ Rules:
 
 ```bash
 agent-compose scheduler ls [agent]
+agent-compose scheduler runs [scheduler] [--agent <agent>] [--trigger <trigger>] [--status <status>] [--limit <n>]
+agent-compose scheduler logs [run] [--run <run>] [--agent <agent>] [--trigger <trigger>] [--tail <n>]
 agent-compose scheduler trigger <agent> <trigger>
-agent-compose scheduler inspect <agent> <trigger>
+agent-compose scheduler inspect <name-or-id> [trigger]
 ```
 
 - `scheduler ls` lists triggers from declarative scheduler config and triggers registered by scheduler scripts.
+- `scheduler runs` lists scheduler runs in the current project and the sandboxes linked to each run.
+- `scheduler logs` prints the structured event log for a scheduler run; without a run argument it selects the latest matching run.
 - `scheduler trigger` manually runs the selected trigger through the existing project run flow.
 - `scheduler trigger --prompt "..."` overrides the trigger's agent prompt for this manual run.
 - `scheduler trigger --payload '{"key":"value"}'` passes a JSON payload to the scheduler trigger handler.
-- `scheduler inspect` prints the YAML trigger definition for declarative triggers, or the registered loader trigger fields for scheduler-script triggers.
+- `scheduler inspect` accepts a scheduler name/ID, trigger name/ID, or scheduler run ID. The legacy `<agent> <trigger>` form remains supported.
 
 ## `ps`: List Sandboxes
 

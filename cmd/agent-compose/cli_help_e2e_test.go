@@ -34,7 +34,7 @@ func TestE2ECLIHelpCoversUserWorkflowCommandSurface(t *testing.T) {
 		{
 			name: "scheduler",
 			args: []string{"scheduler", "--help"},
-			want: []string{"List, trigger, and inspect project scheduler triggers", "trigger", "inspect"},
+			want: []string{"Inspect and operate project schedulers, runs, logs, and triggers", "runs", "logs", "trigger", "inspect"},
 		},
 		{
 			name: "scheduler trigger",

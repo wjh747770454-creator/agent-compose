@@ -212,15 +212,19 @@ agent-compose run reviewer --jupyter --jupyter-expose --prompt "Inspect the note
 
 ```bash
 agent-compose scheduler ls [agent]
+agent-compose scheduler runs [scheduler] [--agent <agent>] [--trigger <trigger>] [--status <status>] [--limit <n>]
+agent-compose scheduler logs [run] [--run <run>] [--agent <agent>] [--trigger <trigger>] [--tail <n>]
 agent-compose scheduler trigger <agent> <trigger>
-agent-compose scheduler inspect <agent> <trigger>
+agent-compose scheduler inspect <name-or-id> [trigger]
 ```
 
 - `scheduler ls` 同时列出声明式 scheduler 配置的 trigger 和 scheduler script 注册到系统中的 trigger。
+- `scheduler runs` 列出当前 project 的 scheduler run，以及每次 run 关联的 sandbox。
+- `scheduler logs` 输出 scheduler run 的结构化事件日志；不指定 run 时选择最新的匹配 run。
 - `scheduler trigger` 通过现有 project run 流程手动执行指定 trigger。
 - `scheduler trigger --prompt "..."` 覆盖本次手动运行使用的 agent prompt。
 - `scheduler trigger --payload '{"key":"value"}'` 将 JSON payload 传给 scheduler trigger handler。
-- `scheduler inspect` 对声明式 trigger 输出 YAML 中对应 trigger 定义；对 scheduler script trigger 输出系统中注册到 loader trigger 的字段。
+- `scheduler inspect` 可接受 scheduler 名称/ID、trigger 名称/ID 或 scheduler run ID；原有 `<agent> <trigger>` 形式继续兼容。
 
 ## `ps`：查看 sandbox
 

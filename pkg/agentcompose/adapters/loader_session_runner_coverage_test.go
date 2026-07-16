@@ -227,7 +227,7 @@ func TestLoaderSandboxRunnerResolvesVolumeMounts(t *testing.T) {
 		t.Fatalf("UpsertProjectVolume returned error: %v", err)
 	}
 	loader := domain.Loader{
-		Summary: domain.LoaderSummary{ID: "loader-1", Name: "Loader", Driver: driverpkg.RuntimeDriverDocker, ManagedProjectID: "project-1"},
+		Summary: domain.LoaderSummary{ID: "loader-1", Name: "Loader", Driver: driverpkg.RuntimeDriverDocker, ManagedProjectID: "project-1", ManagedAgentName: "reviewer", ManagedSchedulerID: "scheduler-1"},
 		Volumes: []domain.VolumeMountSpec{{
 			Type:   domain.VolumeMountTypeVolume,
 			Source: "loader-cache",
@@ -260,6 +260,13 @@ func TestLoaderSandboxRunnerResolvesVolumeMounts(t *testing.T) {
 	}
 	if len(session.VolumeMounts) != 1 || session.VolumeMounts[0].HostPath != hostPath {
 		t.Fatalf("session volume mounts = %#v", session.VolumeMounts)
+	}
+	tags := make(map[string]string)
+	for _, tag := range session.Summary.Tags {
+		tags[tag.Name] = tag.Value
+	}
+	if tags["origin"] != "scheduler" || tags["project_id"] != "project-1" || tags["agent"] != "reviewer" || tags["scheduler_id"] != "scheduler-1" {
+		t.Fatalf("managed scheduler sandbox tags = %#v", tags)
 	}
 	events, err := bridge.store.ListEvents(ctx, session.Summary.ID)
 	if err != nil {

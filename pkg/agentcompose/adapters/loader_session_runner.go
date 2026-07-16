@@ -126,7 +126,18 @@ func (r *LoaderSandboxRunner) Ensure(ctx context.Context, loader domain.Loader, 
 	envItems = llms.FilterPersistedRuntimeEnv(envItems)
 	capabilityVars, capabilityTags := capabilities.BuildGatewaySandboxVars(capabilities.ProxyTarget(r.Cap), loader.Summary.CapsetIDs)
 	envItems = domain.MergeEnvItems(envItems, capabilityVars)
-	tags := []domain.SandboxTag{{Name: "origin", Value: "loader"}, {Name: "loader_id", Value: loader.Summary.ID}, {Name: "loader_name", Value: loader.Summary.Name}}
+	origin := "loader"
+	if strings.TrimSpace(loader.Summary.ManagedProjectID) != "" {
+		origin = "scheduler"
+	}
+	tags := []domain.SandboxTag{{Name: "origin", Value: origin}, {Name: "loader_id", Value: loader.Summary.ID}, {Name: "loader_name", Value: loader.Summary.Name}}
+	if origin == "scheduler" {
+		tags = append(tags,
+			domain.SandboxTag{Name: "project_id", Value: loader.Summary.ManagedProjectID},
+			domain.SandboxTag{Name: "agent", Value: loader.Summary.ManagedAgentName},
+			domain.SandboxTag{Name: "scheduler_id", Value: loader.Summary.ManagedSchedulerID},
+		)
+	}
 	tags = append(tags, capabilityTags...)
 
 	workspaceID := r.workspaceID(loader, request, agentDefinition)
