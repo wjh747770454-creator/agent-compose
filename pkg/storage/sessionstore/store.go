@@ -53,8 +53,14 @@ type (
 )
 
 type Store struct {
-	config       *appconfig.Config
-	sandboxLocks sync.Map
+	config                *appconfig.Config
+	sandboxLocks          sync.Map
+	cacheDependencyMu     sync.RWMutex
+	cacheDependencyLocker CacheDependencyLocker
+}
+
+type CacheDependencyLocker interface {
+	WithLockContext(context.Context, func() error) error
 }
 
 func NewStore(di do.Injector) (*Store, error) {
@@ -96,7 +102,27 @@ func (s *Store) CreateSandbox(ctx context.Context, title, baseWorkspace, driver,
 	return s.CreateSandboxWithOptions(ctx, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource, workspace, envItems, tags, CreateSandboxOptions{})
 }
 
-func (s *Store) CreateSandboxWithOptions(_ context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SandboxWorkspace, envItems []SandboxEnvVar, tags []SandboxTag, options CreateSandboxOptions) (*Sandbox, error) {
+func (s *Store) CreateSandboxWithOptions(ctx context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SandboxWorkspace, envItems []SandboxEnvVar, tags []SandboxTag, options CreateSandboxOptions) (*Sandbox, error) {
+	return s.createSandboxWithCacheDependencyLock(ctx, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource, workspace, envItems, tags, options)
+}
+
+func (s *Store) createSandboxWithCacheDependencyLock(ctx context.Context, title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SandboxWorkspace, envItems []SandboxEnvVar, tags []SandboxTag, options CreateSandboxOptions) (*Sandbox, error) {
+	s.cacheDependencyMu.RLock()
+	locker := s.cacheDependencyLocker
+	s.cacheDependencyMu.RUnlock()
+	if locker == nil {
+		return s.createSandboxWithOptions(title, baseWorkspace, driver, guestImage, workspaceID, triggerSource, workspace, envItems, tags, options)
+	}
+	var sandbox *Sandbox
+	err := locker.WithLockContext(ctx, func() error {
+		var err error
+		sandbox, err = s.createSandboxWithOptions(title, baseWorkspace, driver, guestImage, workspaceID, triggerSource, workspace, envItems, tags, options)
+		return err
+	})
+	return sandbox, err
+}
+
+func (s *Store) createSandboxWithOptions(title, baseWorkspace, driver, guestImage, workspaceID, triggerSource string, workspace *SandboxWorkspace, envItems []SandboxEnvVar, tags []SandboxTag, options CreateSandboxOptions) (*Sandbox, error) {
 	now := time.Now().UTC()
 	workspaceID = strings.TrimSpace(workspaceID)
 	id := identity.NewRandomID(identity.ResourceSandbox)
@@ -226,6 +252,12 @@ func (s *Store) CreateSandboxWithOptions(_ context.Context, title, baseWorkspace
 	}
 
 	return session, nil
+}
+
+func (s *Store) SetCacheDependencyLocker(locker CacheDependencyLocker) {
+	s.cacheDependencyMu.Lock()
+	defer s.cacheDependencyMu.Unlock()
+	s.cacheDependencyLocker = locker
 }
 
 func (s *Store) GetSandbox(_ context.Context, id string) (*Sandbox, error) {

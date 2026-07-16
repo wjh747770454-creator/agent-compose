@@ -94,6 +94,7 @@ func (c *Cache) Pull(ctx context.Context, req PullRequest) (PullResult, error) {
 		return PullResult{Progress: progress}, NewError(ErrorKindInternal, "pull", req.Reference, err)
 	}
 
+	now := time.Now().UTC()
 	image, err := NewImageMetadata(MetadataInput{
 		RequestedRef:    req.Reference,
 		ManifestDigest:  manifestDigest.String(),
@@ -103,7 +104,7 @@ func (c *Cache) Pull(ctx context.Context, req PullRequest) (PullResult, error) {
 		Labels:          configFile.Config.Labels,
 		SizeBytes:       sizeBytes,
 		CreatedAt:       configFile.Created.Time,
-		PulledAt:        time.Now().UTC(),
+		PulledAt:        now,
 		LayoutCachePath: c.OCILayoutPath(),
 		DefaultRegistry: c.config.DefaultRegistry,
 	})
@@ -111,6 +112,7 @@ func (c *Cache) Pull(ctx context.Context, req PullRequest) (PullResult, error) {
 		progress := finishProgress(progressCh, progressDone)
 		return PullResult{Progress: progress}, err
 	}
+	image.LastUsedAt = now
 
 	metadata, err := c.LoadMetadata()
 	if err != nil {

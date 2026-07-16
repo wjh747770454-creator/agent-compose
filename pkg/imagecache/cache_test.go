@@ -1,6 +1,7 @@
 package imagecache
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -111,6 +112,29 @@ func TestCacheLockTempDirAndReadyFlag(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatalf("WithLock returned error: %v", err)
+	}
+}
+
+func TestLockContextStopsWaitingWhenCanceled(t *testing.T) {
+	cache := newTestCache(t)
+	unlock, err := cache.Lock()
+	if err != nil {
+		t.Fatalf("Lock returned error: %v", err)
+	}
+	defer func() {
+		if err := unlock(); err != nil {
+			t.Errorf("unlock cache: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = cache.LockContext(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("LockContext error = %v, want context.Canceled", err)
+	}
+	if !IsKind(err, ErrorKindUnavailable) {
+		t.Fatalf("LockContext error kind = %q, want %q", Kind(err), ErrorKindUnavailable)
 	}
 }
 

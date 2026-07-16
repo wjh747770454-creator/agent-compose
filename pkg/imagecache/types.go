@@ -45,6 +45,7 @@ type ImageMetadata struct {
 	SizeBytes       int64             `json:"size_bytes,omitempty"`
 	CreatedAt       time.Time         `json:"created_at,omitempty"`
 	PulledAt        time.Time         `json:"pulled_at,omitempty"`
+	LastUsedAt      time.Time         `json:"last_used_at,omitempty"`
 	LayoutCachePath string            `json:"layout_cache_path,omitempty"`
 	RootFSCachePath string            `json:"rootfs_cache_path,omitempty"`
 }

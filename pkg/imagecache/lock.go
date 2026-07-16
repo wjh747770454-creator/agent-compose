@@ -1,6 +1,8 @@
 package imagecache
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +13,13 @@ import (
 type UnlockFunc func() error
 
 func (c *Cache) Lock() (UnlockFunc, error) {
+	return c.LockContext(context.Background())
+}
+
+func (c *Cache) LockContext(ctx context.Context) (UnlockFunc, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, NewError(ErrorKindUnavailable, "lock", c.config.Root, err)
+	}
 	if err := c.Ensure(); err != nil {
 		return nil, err
 	}
@@ -19,9 +28,21 @@ func (c *Cache) Lock() (UnlockFunc, error) {
 	if err != nil {
 		return nil, NewError(ErrorKindInternal, "lock", lockPath, err)
 	}
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		_ = lockFile.Close()
-		return nil, NewError(ErrorKindInternal, "lock", lockPath, err)
+	for {
+		err = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			_ = lockFile.Close()
+			return nil, NewError(ErrorKindInternal, "lock", lockPath, err)
+		}
+		select {
+		case <-ctx.Done():
+			_ = lockFile.Close()
+			return nil, NewError(ErrorKindUnavailable, "lock", lockPath, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	return func() error {
 		unlockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
@@ -33,13 +54,21 @@ func (c *Cache) Lock() (UnlockFunc, error) {
 	}, nil
 }
 
-func (c *Cache) WithLock(fn func() error) error {
-	unlock, err := c.Lock()
+func (c *Cache) WithLockContext(ctx context.Context, fn func() error) (returnErr error) {
+	unlock, err := c.LockContext(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = unlock() }()
+	defer func() {
+		if err := unlock(); err != nil {
+			returnErr = errors.Join(returnErr, err)
+		}
+	}()
 	return fn()
+}
+
+func (c *Cache) WithLock(fn func() error) error {
+	return c.WithLockContext(context.Background(), fn)
 }
 
 func (c *Cache) TempDir(name string) (string, error) {
