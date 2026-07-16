@@ -91,6 +91,7 @@ type Controller struct {
 	loaders         map[string]domain.Loader
 	running         map[string]int
 	runExecutor     *RunExecutor
+	schedulerRuns   *schedulerRunSupervisor
 	scheduler       *Scheduler
 	eventDispatcher *EventDispatcher
 }
@@ -139,6 +140,17 @@ func (c *Controller) init() {
 			UpdateTriggerEventDelivery: c.UpdateTriggerEventDelivery,
 			Notify:                     c.notify,
 			Refresh:                    c.Refresh,
+		})
+	}
+	if c.schedulerRuns == nil {
+		runStore, _ := c.deps.Store.(schedulerRunStore)
+		c.schedulerRuns = newSchedulerRunSupervisor(schedulerRunSupervisorDependencies{
+			RootCtx:          c.deps.RootCtx,
+			Store:            runStore,
+			LoadLoaderForRun: c.LoadLoaderForRun,
+			Prepare:          c.Prepare,
+			Execute:          c.Execute,
+			RunTimeout:       c.runTimeout,
 		})
 	}
 	if c.scheduler == nil {
@@ -436,6 +448,9 @@ func (c *Controller) UpdateTriggerEventDelivery(ctx context.Context, run domain.
 	case domain.LoaderRunStatusSucceeded:
 		status = domain.EventDeliveryStatusRunSucceeded
 	case domain.LoaderRunStatusFailed:
+		status = domain.EventDeliveryStatusRunFailed
+		errText = run.Error
+	case domain.LoaderRunStatusCanceled:
 		status = domain.EventDeliveryStatusRunFailed
 		errText = run.Error
 	case domain.LoaderRunStatusSkipped:
