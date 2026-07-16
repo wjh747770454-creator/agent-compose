@@ -46,12 +46,14 @@
     "build:types": "tsc -p tsconfig.types.json",
     "prepack": "npm run build",
     "test": "npm run build && vitest run",
+    "test:coverage": "vitest run --coverage",
     "pack:runtime-bundle": "node scripts/pack-runtime-bundle.mjs",
     "test:packaging": "node scripts/verify-offline-install.mjs",
     "typecheck": "tsc -p tsconfig.esm.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.0"
   },

@@ -136,6 +136,7 @@ tasks:
     desc: Run all test shapes with coverage quality gates
     cmds:
       - task: test:deploy
+      - GOCACHE={{.GO_BUILD_CACHE_DIR}} {{.GO_TOOLCHAIN_ENV}} ./scripts/test-coverage-contract.sh
       - GOCACHE={{.GO_BUILD_CACHE_DIR}} {{.GO_TOOLCHAIN_ENV}} ./scripts/test-coverage.sh
 
   test:deploy:

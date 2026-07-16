@@ -150,6 +150,27 @@ of unit, integration, and E2E percentages. When a line, branch, function, or
 statement is covered by more than one test shape, it should count once in the
 combined coverage result.
 
+Go coverage uses the native coverage data emitted by Go 1.26. Each test shape
+writes to an independent coverage-data directory, and `go tool covdata textfmt`
+produces the shape profiles. The combined Go profile is generated directly from
+all three native data directories, so matching source statements keep one
+denominator entry and coverage from different shapes is unioned. Every filtered
+profile is validated with `go tool cover -func`; malformed overlapping ranges or
+inconsistent statement counts fail the gate.
+
+The guest JavaScript runtime and runtime SDK contribute statement counts to the
+same four project metrics. Both Vitest projects use a fixed source include for
+unit, integration, E2E, and combined runs. A shape with no SDK tests still emits
+the complete SDK source denominator with zero covered statements; the combined
+SDK result comes from an `all` run rather than adding shape summaries.
+
+Tests in the Go packages under `cmd`, `pkg`, and the maintained protobuf package
+set are classified by the `Integration` and `E2E` markers in top-level test
+names. The dedicated `test/e2e` package is classified as E2E at package level,
+so every ordinary `Test*` in that package runs in the E2E shape even when its
+name does not repeat the `E2E` marker. Environment-gated daemon and Docker tests
+may still skip when their documented opt-in variables are absent.
+
 Generated protocol clients, vendored code, build artifacts, and test fixtures
 should be excluded from coverage calculations unless the project intentionally
 treats them as maintained source code. Any exclusions must be documented in the

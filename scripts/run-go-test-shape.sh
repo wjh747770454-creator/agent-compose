@@ -9,6 +9,13 @@ fi
 
 shape="${1:?usage: run-go-test-shape.sh <unit|integration|e2e> [go-test-args...]}"
 shift || true
+go_coverage_dir="${GO_COVERAGE_DIR:-}"
+
+coverage_binary_args=()
+if [[ -n "$go_coverage_dir" ]]; then
+  mkdir -p "$go_coverage_dir"
+  coverage_binary_args=("-test.gocoverdir=$go_coverage_dir")
+fi
 
 extra_packages=()
 base_packages=(./cmd/... ./pkg/... ./proto/health/v1 ./proto/health/v1/healthv1connect ./proto/agentcompose/v2 ./proto/agentcompose/v2/agentcomposev2connect)
@@ -52,8 +59,8 @@ if [[ -z "$tests" ]]; then
 fi
 
 pattern="^($(printf '%s\n' "$tests" | paste -sd '|' -))$"
-go test -run "$pattern" "$@" "${packages[@]}"
+go test -run "$pattern" "$@" "${packages[@]}" "${coverage_binary_args[@]}"
 
 if [[ ${#extra_packages[@]} -gt 0 ]]; then
-  go test -run '^TestE2E' "${extra_packages[@]}"
+  go test -run '^Test' "$@" "${extra_packages[@]}" "${coverage_binary_args[@]}"
 fi

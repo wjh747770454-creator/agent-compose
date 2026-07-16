@@ -11,30 +11,10 @@ coverage_root="${COVERAGE_DIR:-${AGENT_COMPOSE_COVERAGE_DIR:-"$root/.cache/cover
 go_cache="${GOCACHE:-"$root/.cache/go-build"}"
 go_cgo_enabled="${CGO_ENABLED:-0}"
 go_coverpkg="${GO_COVERPKG:-${AGENT_COMPOSE_GO_COVERPKG:-./cmd/...,./pkg/...}}"
-go_cover_packages=(./cmd/... ./pkg/... ./proto/health/v1 ./proto/health/v1/healthv1connect ./proto/agentcompose/v2 ./proto/agentcompose/v2/agentcomposev2connect)
 go_exclude_regex="${GO_COVER_EXCLUDE_REGEX:-${AGENT_COMPOSE_GO_COVER_EXCLUDE_REGEX:-/(boxlite|boxlite_cgo|boxlite_guest_cgo|boxlite_runtime|boxlite_stub|docker_runtime|microsandbox_runtime|microsandbox_runtime_stub|local_docker_oci|env_path)\\.go:|/proto/.*/.*(\\.pb|\\.connect)\\.go:}}"
 
 mkdir -p "$coverage_root" "$go_cache"
 rm -rf "$coverage_root"/*
-
-run_shape() {
-  local shape="$1"
-  echo "==> Running $shape tests with coverage"
-  (
-    cd "$root"
-    CGO_ENABLED="$go_cgo_enabled" GOCACHE="$go_cache" ./scripts/run-go-test-shape.sh "$shape" \
-      -covermode=count \
-      -coverpkg="$go_coverpkg" \
-      -coverprofile="$coverage_root/go-$shape.raw.out"
-    filter_go_profile "$coverage_root/go-$shape.raw.out" "$coverage_root/go-$shape.out"
-  )
-  (
-    cd "$root/runtime/javascript"
-    TEST_SHAPE="$shape" \
-      COVERAGE_DIR="$coverage_root/js-$shape" \
-      npm run test
-  )
-}
 
 filter_go_profile() {
   local input="$1"
@@ -54,13 +34,68 @@ filter_go_profile() {
   ' "$input" > "$output"
 }
 
-run_combined_js_coverage() {
-  echo "==> Calculating combined JavaScript coverage"
+write_go_profile() {
+  local covdata_dirs="$1"
+  local name="$2"
+  local raw_profile="$coverage_root/go-$name.raw.out"
+  local profile="$coverage_root/go-$name.out"
+
+  go tool covdata textfmt -i="$covdata_dirs" -o "$raw_profile"
+  filter_go_profile "$raw_profile" "$profile"
+  "$root/scripts/validate-go-coverprofile.sh" "$profile"
+}
+
+run_sdk_build() {
+  echo "==> Building runtime SDK for coverage"
+  (
+    cd "$root/runtime/agent-compose-runtime-sdk"
+    npm run build
+  )
+}
+
+run_shape() {
+  local shape="$1"
+  local go_covdata_dir="$coverage_root/go-$shape-covdata"
+
+  mkdir -p "$go_covdata_dir"
+  echo "==> Running $shape tests with coverage"
+  (
+    cd "$root"
+    CGO_ENABLED="$go_cgo_enabled" \
+      GOCACHE="$go_cache" \
+      GO_COVERAGE_DIR="$go_covdata_dir" \
+      ./scripts/run-go-test-shape.sh "$shape" \
+      -covermode=count \
+      -coverpkg="$go_coverpkg"
+  )
+  write_go_profile "$go_covdata_dir" "$shape"
+  (
+    cd "$root/runtime/javascript"
+    TEST_SHAPE="$shape" \
+      COVERAGE_DIR="$coverage_root/js-$shape" \
+      npm run test
+  )
+  (
+    cd "$root/runtime/agent-compose-runtime-sdk"
+    TEST_SHAPE="$shape" \
+      COVERAGE_DIR="$coverage_root/sdk-$shape" \
+      npm run test:coverage
+  )
+}
+
+run_combined_runtime_coverage() {
+  echo "==> Calculating combined runtime coverage"
   (
     cd "$root/runtime/javascript"
     TEST_SHAPE=all \
       COVERAGE_DIR="$coverage_root/js-combined" \
       npm run test
+  )
+  (
+    cd "$root/runtime/agent-compose-runtime-sdk"
+    TEST_SHAPE=all \
+      COVERAGE_DIR="$coverage_root/sdk-combined" \
+      npm run test:coverage
   )
 }
 
@@ -69,25 +104,18 @@ go_counts() {
   awk '
     /^mode:/ { next }
     {
-      key = $1
-      statements[key] = $2 + 0
+      total += $2 + 0
       if (($3 + 0) > 0) {
-        covered[key] = 1
+        covered += $2 + 0
       }
     }
     END {
-      for (key in statements) {
-        total += statements[key]
-        if (covered[key]) {
-          covered_total += statements[key]
-        }
-      }
-      printf "%d %d\n", covered_total, total
+      printf "%d %d\n", covered, total
     }
   ' "$profile"
 }
 
-js_counts() {
+runtime_counts() {
   local summary="$1"
   node -e '
     const fs = require("node:fs");
@@ -95,43 +123,6 @@ js_counts() {
     const statements = summary.total.statements;
     console.log(`${statements.covered} ${statements.total}`);
   ' "$summary"
-}
-
-combined_go_counts() {
-  local profiles=("$@")
-  awk '
-    /^mode:/ { next }
-    {
-      key = $1
-      statements[key] = $2 + 0
-      if (($3 + 0) > 0) {
-        covered[key] = 1
-      }
-    }
-    END {
-      for (key in statements) {
-        total += statements[key]
-        if (covered[key]) {
-          covered_total += statements[key]
-        }
-      }
-      printf "%d %d\n", covered_total, total
-    }
-  ' "${profiles[@]}"
-}
-
-combined_js_counts() {
-  node -e '
-    const fs = require("node:fs");
-    let covered = 0;
-    let total = 0;
-    for (const file of process.argv.slice(1)) {
-      const summary = JSON.parse(fs.readFileSync(file, "utf8"));
-      covered += summary.total.statements.covered;
-      total += summary.total.statements.total;
-    }
-    console.log(`${covered} ${total}`);
-  ' "$@"
 }
 
 format_pct() {
@@ -159,29 +150,28 @@ assert_pct() {
   ' "$name" "$pct" "$baseline"
 }
 
-shape_coverage() {
+coverage_pct() {
   local shape="$1"
   read -r go_covered go_total < <(go_counts "$coverage_root/go-$shape.out")
-  read -r js_covered js_total < <(js_counts "$coverage_root/js-$shape/coverage-summary.json")
-  local covered=$((go_covered + js_covered))
-  local total=$((go_total + js_total))
+  read -r js_covered js_total < <(runtime_counts "$coverage_root/js-$shape/coverage-summary.json")
+  read -r sdk_covered sdk_total < <(runtime_counts "$coverage_root/sdk-$shape/coverage-summary.json")
+  local covered=$((go_covered + js_covered + sdk_covered))
+  local total=$((go_total + js_total + sdk_total))
   format_pct "$covered" "$total"
 }
 
+run_sdk_build
 run_shape unit
 run_shape integration
 run_shape e2e
-run_combined_js_coverage
 
-unit_pct="$(shape_coverage unit)"
-integration_pct="$(shape_coverage integration)"
-e2e_pct="$(shape_coverage e2e)"
+write_go_profile "$coverage_root/go-unit-covdata,$coverage_root/go-integration-covdata,$coverage_root/go-e2e-covdata" combined
+run_combined_runtime_coverage
 
-read -r go_combined_covered go_combined_total < <(combined_go_counts "$coverage_root/go-unit.out" "$coverage_root/go-integration.out" "$coverage_root/go-e2e.out")
-read -r js_combined_covered js_combined_total < <(js_counts "$coverage_root/js-combined/coverage-summary.json")
-combined_covered=$((go_combined_covered + js_combined_covered))
-combined_total=$((go_combined_total + js_combined_total))
-combined_pct="$(format_pct "$combined_covered" "$combined_total")"
+unit_pct="$(coverage_pct unit)"
+integration_pct="$(coverage_pct integration)"
+e2e_pct="$(coverage_pct e2e)"
+combined_pct="$(coverage_pct combined)"
 
 cat <<EOF
 

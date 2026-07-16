@@ -60,10 +60,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: runtime/javascript/package-lock.json
-      - name: Install runtime test dependencies
-        working-directory: runtime/javascript
-        run: npm ci
+          cache-dependency-path: |
+            runtime/agent-compose-runtime-sdk/package-lock.json
+            runtime/javascript/package-lock.json
+      - name: Install runtime coverage dependencies
+        run: |
+          for directory in runtime/agent-compose-runtime-sdk runtime/javascript; do
+            (cd "$directory" && npm ci)
+          done
+      - name: Validate coverage contract
+        run: ./scripts/test-coverage-contract.sh
       - name: Run coverage thresholds
         run: ./scripts/test-coverage.sh
 
