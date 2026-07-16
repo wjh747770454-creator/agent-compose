@@ -116,9 +116,6 @@ curl -i http://127.0.0.1:8000/ | head
 curl -i http://127.0.0.1:8000/ui/ | head
 ```
 
-If nginx basic auth is configured, a `401` response without credentials is also
-a valid signal that the frontend service responded.
-
 ### 3. Verify v1 SessionService Compatibility API Access
 
 ```bash

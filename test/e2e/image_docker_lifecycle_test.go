@@ -351,7 +351,6 @@ func startImageDockerLifecycleDaemon(t *testing.T, ctx context.Context, dockerCl
 			"DEFAULT_IMAGE=" + guestImage,
 			"DOCKER_DEFAULT_IMAGE=" + guestImage,
 			"DOCKER_HOST=unix:///var/run/docker.sock",
-			"HTTP_BASIC_AUTH=",
 			"HTTP_LISTEN=0.0.0.0:7410",
 			"LLM_API_ENDPOINT=",
 			"LLM_API_KEY=",

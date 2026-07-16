@@ -32,20 +32,11 @@ agent-compose -f /path/to/project/agent-compose.yaml ps --all
 agent-compose --host http://10.0.0.12:7410 ls --json
 ```
 
-Remote daemon authentication example:
-
-```bash
-export AUTH_USERNAME=admin
-export AUTH_PASSWORD=change-me
-agent-compose --host http://10.0.0.12:7410 ls
-```
-
 Rules:
 
 - Without `-f`, the CLI looks for `agent-compose.yml` or `agent-compose.yaml` in the current directory.
 - With `-f`, the CLI can operate on a project from any working directory.
 - `--host` only selects the daemon. Sandboxes run in the daemon environment.
-- When connecting to an HTTP(S) daemon through `--host` or `AGENT_COMPOSE_HOST`, the CLI reads Basic Auth credentials from local `AUTH_USERNAME` and `AUTH_PASSWORD`; local Unix socket connections do not use this authentication path.
 - Automation should use `--json` and avoid parsing human-readable tables.
 
 ### Project environment files

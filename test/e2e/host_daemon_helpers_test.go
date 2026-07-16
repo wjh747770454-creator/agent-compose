@@ -57,7 +57,6 @@ func startE2EDaemon(t *testing.T, binary, repoRoot, testRoot, listenAddress, ima
 		"DOCKER_DEFAULT_IMAGE":     image,
 		"DOCKER_HOST_SANDBOX_ROOT": filepath.Join(testRoot, "sandboxes"),
 		"DOCKER_HOST_SESSION_ROOT": "",
-		"HTTP_BASIC_AUTH":          "",
 		"HTTP_LISTEN":              listenAddress,
 		"JUPYTER_PROXY_BASE":       "/jupyter",
 		"JUPYTER_READY_TIMEOUT":    "2m",

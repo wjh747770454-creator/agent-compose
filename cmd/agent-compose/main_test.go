@@ -382,29 +382,6 @@ func testCLIClientConfigPriority(t *testing.T) {
 	}
 }
 
-func TestCLIClientConfigRemoteAuthFromEnvironment(t *testing.T) {
-	t.Setenv("AUTH_USERNAME", "reviewer")
-	t.Setenv("AUTH_PASSWORD", "secret")
-	clientConfig, err := resolveCLIClientConfig("https://flag.example")
-	if err != nil {
-		t.Fatalf("resolveCLIClientConfig returned error: %v", err)
-	}
-	if clientConfig.AuthUsername != "reviewer" || clientConfig.AuthPassword != "secret" {
-		t.Fatalf("remote auth config = %#v", clientConfig)
-	}
-
-	t.Setenv("AGENT_COMPOSE_HOST", "")
-	socketPath := filepath.Join(t.TempDir(), "agent-compose.sock")
-	t.Setenv("AGENT_COMPOSE_SOCKET", socketPath)
-	clientConfig, err = resolveCLIClientConfig("")
-	if err != nil {
-		t.Fatalf("resolveCLIClientConfig returned error: %v", err)
-	}
-	if clientConfig.AuthUsername != "" || clientConfig.AuthPassword != "" {
-		t.Fatalf("unix socket auth config = %#v, want empty auth", clientConfig)
-	}
-}
-
 func TestCLIClientConfigRejectsInvalidHost(t *testing.T) {
 	testCLIClientConfigRejectsInvalidHost(t)
 }
@@ -486,32 +463,6 @@ func TestStatusCommandJSONPrintsRawDaemonResponse(t *testing.T) {
 	}
 	if stderr != "" {
 		t.Fatalf("status --json stderr = %q, want empty", stderr)
-	}
-	if runCount != 0 {
-		t.Fatalf("daemon runner called %d times, want 0", runCount)
-	}
-}
-
-func TestStatusCommandUsesRemoteAuthFromEnvironment(t *testing.T) {
-	t.Setenv("AUTH_USERNAME", "reviewer")
-	t.Setenv("AUTH_PASSWORD", "secret")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		username, password, ok := r.BasicAuth()
-		if !ok || username != "reviewer" || password != "secret" {
-			t.Fatalf("BasicAuth = %q/%q/%v", username, password, ok)
-		}
-		_, _ = w.Write([]byte(`{"err":null,"msg":"OK","data":{"timestamp":1783501631.2438176,"timezone":"CST","timezone_offset":28800,"version":"test"}}`))
-	}))
-	defer server.Close()
-
-	stdout, stderr, runCount, exitCode := executeCLICommand("status", "--host", server.URL)
-	if exitCode != 0 || stderr != "" {
-		t.Fatalf("status auth code/stderr = %d / %q", exitCode, stderr)
-	}
-	for _, want := range []string{"STATUS", "UPTIME", "VERSION", "OK", "2026-07-08 17:07:11 CST +0800", "test"} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("status auth stdout = %q, want %q", stdout, want)
-		}
 	}
 	if runCount != 0 {
 		t.Fatalf("daemon runner called %d times, want 0", runCount)

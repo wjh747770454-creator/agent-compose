@@ -119,8 +119,6 @@ type cliClientConfig struct {
 	Source        string
 	SourceValue   string
 	UseUnixSocket bool
-	AuthUsername  string
-	AuthPassword  string
 }
 
 func NewEcho(di do.Injector) (*echo.Echo, error) {
@@ -9022,7 +9020,6 @@ func resolveCLIClientConfig(hostFlag string) (cliClientConfig, error) {
 			Source:      "--host",
 			SourceValue: hostFlag,
 		}
-		applyCLIAuthFromEnv(&config)
 		return config, nil
 	}
 
@@ -9036,7 +9033,6 @@ func resolveCLIClientConfig(hostFlag string) (cliClientConfig, error) {
 			Source:      "AGENT_COMPOSE_HOST",
 			SourceValue: envHost,
 		}
-		applyCLIAuthFromEnv(&config)
 		return config, nil
 	}
 
@@ -9051,11 +9047,6 @@ func resolveCLIClientConfig(hostFlag string) (cliClientConfig, error) {
 		SourceValue:   socketPath,
 		UseUnixSocket: true,
 	}, nil
-}
-
-func applyCLIAuthFromEnv(config *cliClientConfig) {
-	config.AuthUsername = os.Getenv("AUTH_USERNAME")
-	config.AuthPassword = os.Getenv("AUTH_PASSWORD")
 }
 
 func normalizeCLIHost(name, value string) (string, error) {
@@ -9181,16 +9172,8 @@ func newDaemonAttachHTTPClient(clientConfig cliClientConfig) *http.Client {
 }
 
 func newDaemonHTTPClientWithTimeout(clientConfig cliClientConfig, timeout time.Duration) *http.Client {
-	roundTripper := http.RoundTripper(newDaemonBaseRoundTripper(clientConfig))
-	if !clientConfig.UseUnixSocket && (clientConfig.AuthUsername != "" || clientConfig.AuthPassword != "") {
-		roundTripper = basicAuthRoundTripper{
-			username: clientConfig.AuthUsername,
-			password: clientConfig.AuthPassword,
-			next:     roundTripper,
-		}
-	}
 	return &http.Client{
-		Transport: roundTripper,
+		Transport: newDaemonBaseRoundTripper(clientConfig),
 		Timeout:   timeout,
 	}
 }
@@ -9238,16 +9221,4 @@ func (t daemonAttachRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 
 func isAttachRPCPath(path string) bool {
 	return path == agentcomposev2connect.RunServiceRunAttachProcedure || path == agentcomposev2connect.ExecServiceExecAttachProcedure
-}
-
-type basicAuthRoundTripper struct {
-	username string
-	password string
-	next     http.RoundTripper
-}
-
-func (t basicAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	cloned := req.Clone(req.Context())
-	cloned.SetBasicAuth(t.username, t.password)
-	return t.next.RoundTrip(cloned)
 }

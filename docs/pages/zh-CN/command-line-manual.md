@@ -32,20 +32,11 @@ agent-compose -f /path/to/project/agent-compose.yaml ps --all
 agent-compose --host http://10.0.0.12:7410 ls --json
 ```
 
-远程 daemon 认证示例：
-
-```bash
-export AUTH_USERNAME=admin
-export AUTH_PASSWORD=change-me
-agent-compose --host http://10.0.0.12:7410 ls
-```
-
 使用规则：
 
 - 未指定 `-f` 时，CLI 在当前目录查找 `agent-compose.yml` 或 `agent-compose.yaml`。
 - 使用 `-f` 时，不需要切换到 project root。
 - `--host` 只决定 CLI 连接哪个 daemon；sandbox 实际运行在 daemon 所在环境中。
-- 使用 `--host` 或 `AGENT_COMPOSE_HOST` 连接 HTTP(S) daemon 时，CLI 会从本机环境变量 `AUTH_USERNAME` 和 `AUTH_PASSWORD` 读取 Basic Auth 凭据；Unix socket 本地连接不使用该认证。
 - daemon 不再消费浏览器登录用的 `AUTH_*` / `OAUTH_*` 配置；UI 浏览器认证由 agent-compose-ui server 处理。
 - 自动化场景应使用 `--json`，不要解析人类可读表格。
 

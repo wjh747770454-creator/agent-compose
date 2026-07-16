@@ -304,7 +304,6 @@ BoxLite、Microsandbox 的 runtime path、library path 和 image registry 继续
 | ID | 场景 | Driver/Topology |
 | --- | --- | --- |
 | `DAE-001` | 宿主机 daemon 通过 Unix socket 和 TCP 返回 status、version、health | 控制面一次 |
-| `DAE-002` | TCP BasicAuth 拒绝缺失/错误凭证并接受正确凭证；本地 Unix socket 保持可信访问语义 | 控制面一次 |
 | `DAE-003` | daemon 优雅退出后从相同 data root 重启，project/run/sandbox 查询保持一致 | 三 driver |
 | `DAE-004` | 容器化 daemon 完成 health、command、Jupyter、stop/resume 和 restart | 三 driver |
 
