@@ -258,7 +258,11 @@ func (l Lifecycle) StopLoaded(ctx context.Context, session *domain.Sandbox) (*do
 	if session.Summary.VMStatus == domain.VMStatusDeleting {
 		return nil, false, fmt.Errorf("sandbox is being deleted")
 	}
-	if session.Summary.VMStatus != domain.VMStatusRunning {
+	stopRequired, err := l.stopRequired(session)
+	if err != nil {
+		return nil, false, err
+	}
+	if !stopRequired {
 		return session, false, nil
 	}
 	if err := l.Driver.StopSandboxVM(ctx, session); err != nil {
@@ -283,6 +287,18 @@ func (l Lifecycle) StopLoaded(ctx context.Context, session *domain.Sandbox) (*do
 		return nil, false, err
 	}
 	return loaded, true, nil
+}
+
+func (l Lifecycle) stopRequired(session *domain.Sandbox) (bool, error) {
+	if session.Summary.VMStatus == domain.VMStatusRunning {
+		return true, nil
+	}
+	vmState, err := l.Store.GetVMState(session.Summary.ID)
+	if err != nil {
+		return false, err
+	}
+	latestStartRecorded := !vmState.StartedAt.IsZero() || !vmState.StartAttemptedAt.IsZero()
+	return latestStartRecorded && !vmStopIsCurrent(vmState), nil
 }
 
 func (l Lifecycle) publishSandboxUpdated(summary *domain.SandboxSummary) {

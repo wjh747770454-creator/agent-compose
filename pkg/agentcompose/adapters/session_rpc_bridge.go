@@ -272,10 +272,6 @@ func (b *SandboxRPCBridge) stopSandbox(ctx context.Context, sandboxID, source st
 	} else {
 		session = reconciled
 	}
-	if session.Summary.VMStatus != domain.VMStatusRunning {
-		b.revokeCapabilitySandbox(session.Summary.ID)
-		return session, nil
-	}
 	loaded, stopped, err := b.sessionLifecycle().StopLoaded(ctx, session)
 	if err != nil {
 		return nil, api.ConnectErrorForDomain(err)

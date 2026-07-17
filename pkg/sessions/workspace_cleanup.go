@@ -141,13 +141,18 @@ func (c *WorkspaceCleaner) workspaceEligibleAt(sandbox *domain.Sandbox) (time.Ti
 	if vmState.StoppedAt.IsZero() {
 		return time.Time{}, false, nil
 	}
-	if !vmState.StartedAt.IsZero() && vmState.StoppedAt.Before(vmState.StartedAt) {
-		return time.Time{}, false, nil
-	}
-	if !vmState.StartAttemptedAt.IsZero() && vmState.StoppedAt.Before(vmState.StartAttemptedAt) {
+	if !vmStopIsCurrent(vmState) {
 		return time.Time{}, false, nil
 	}
 	return vmState.StoppedAt.UTC(), true, nil
+}
+
+func vmStopIsCurrent(vmState domain.VMState) bool {
+	if vmState.StoppedAt.IsZero() {
+		return false
+	}
+	return (vmState.StartedAt.IsZero() || !vmState.StoppedAt.Before(vmState.StartedAt)) &&
+		(vmState.StartAttemptedAt.IsZero() || !vmState.StoppedAt.Before(vmState.StartAttemptedAt))
 }
 
 func (c *WorkspaceCleaner) safeWorkspacePath(sandbox *domain.Sandbox) (string, error) {

@@ -78,6 +78,42 @@ func TestLifecycleReconcileRuntimeStateEarlyReturns(t *testing.T) {
 	}
 }
 
+func TestLifecycleStopLoadedConfirmsUnresolvedStartAttempt(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	session := lifecycleTestSession("session-start-attempt", driverpkg.RuntimeDriverDocker, domain.VMStatusStopped)
+	store := &fakeLifecycleStore{session: session, vmState: domain.VMState{
+		StoppedAt: now.Add(-2 * time.Hour), StartAttemptedAt: now.Add(-time.Hour),
+	}}
+	driver := &fakeSandboxDriver{}
+	lifecycle := Lifecycle{Store: store, Driver: driver, Locks: NewLifecycleLocks()}
+
+	loaded, stopped, err := lifecycle.StopLoaded(context.Background(), session)
+	if err != nil {
+		t.Fatalf("StopLoaded returned error: %v", err)
+	}
+	if !stopped || !driver.stopped || loaded.Summary.VMStatus != domain.VMStatusStopped {
+		t.Fatalf("stopped/driver/loaded = %v/%v/%#v", stopped, driver.stopped, loaded)
+	}
+	if store.updated != 1 || store.events != 1 {
+		t.Fatalf("updates/events = %d/%d, want 1/1", store.updated, store.events)
+	}
+}
+
+func TestLifecycleStopLoadedSkipsConfirmedStoppedSandbox(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	session := lifecycleTestSession("session-confirmed-stop", driverpkg.RuntimeDriverDocker, domain.VMStatusStopped)
+	store := &fakeLifecycleStore{session: session, vmState: domain.VMState{
+		StartAttemptedAt: now.Add(-2 * time.Hour), StoppedAt: now.Add(-time.Hour),
+	}}
+	driver := &fakeSandboxDriver{}
+	lifecycle := Lifecycle{Store: store, Driver: driver, Locks: NewLifecycleLocks()}
+
+	loaded, stopped, err := lifecycle.StopLoaded(context.Background(), session)
+	if err != nil || stopped || driver.stopped || loaded != session {
+		t.Fatalf("StopLoaded confirmed stop = %#v/%v/%v, driver stopped=%v", loaded, stopped, err, driver.stopped)
+	}
+}
+
 func TestLifecycleEnsureProxyReadyBranches(t *testing.T) {
 	t.Run("running reachable fast path skips workspace ensure", func(t *testing.T) {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -584,6 +620,7 @@ type fakeSandboxDriver struct {
 	startErr    error
 	stopErr     error
 	started     bool
+	stopped     bool
 }
 
 func (d *fakeSandboxDriver) ValidateSandboxRuntime(*domain.Sandbox) error {
@@ -596,6 +633,7 @@ func (d *fakeSandboxDriver) StartSandboxVM(context.Context, *domain.Sandbox) err
 }
 
 func (d *fakeSandboxDriver) StopSandboxVM(context.Context, *domain.Sandbox) error {
+	d.stopped = true
 	return d.stopErr
 }
 
