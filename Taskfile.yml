@@ -210,6 +210,22 @@ tasks:
           GOCACHE={{.GO_BUILD_CACHE_DIR}} \
           {{.GO_TOOLCHAIN_ENV}} go test ./test/e2e -run '^TestE2EDockerFileWorkspaceResumePreservesState$' -count=1 -v
 
+  test:e2e:docker-retention:
+    desc: Run the opt-in host-daemon Docker retention cleanup E2E test
+    dir: '{{.TASKFILE_DIR}}'
+    deps: ['build:agent-compose']
+    cmds:
+      - |
+        image="${AGENT_COMPOSE_E2E_RETENTION_IMAGE:-agent-compose-guest:latest}"
+        if ! docker image inspect "$image" >/dev/null 2>&1; then
+          echo "Docker retention image $image is unavailable; run 'task image:agent-compose-guest' or set AGENT_COMPOSE_E2E_RETENTION_IMAGE" >&2
+          exit 1
+        fi
+        AGENT_COMPOSE_E2E_BINARY="$PWD/build/agent-compose" \
+          AGENT_COMPOSE_E2E_RETENTION_IMAGE="$image" \
+          GOCACHE={{.GO_BUILD_CACHE_DIR}} \
+          {{.GO_TOOLCHAIN_ENV}} go test ./test/e2e -run '^TestE2EDockerDaemonRetentionCleanup$' -count=1 -v
+
   test:e2e:docker-scheduler:
     desc: Run the opt-in Docker scheduler script E2E test
     dir: '{{.TASKFILE_DIR}}'

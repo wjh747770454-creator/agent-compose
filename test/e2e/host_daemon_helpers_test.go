@@ -44,11 +44,15 @@ type e2eDaemonProcess struct {
 }
 
 func startE2EDaemon(t *testing.T, binary, repoRoot, testRoot, listenAddress, image string) *e2eDaemonProcess {
+	return startE2EDaemonWithEnv(t, binary, repoRoot, testRoot, listenAddress, image, nil)
+}
+
+func startE2EDaemonWithEnv(t *testing.T, binary, repoRoot, testRoot, listenAddress, image string, extraEnv map[string]string) *e2eDaemonProcess {
 	t.Helper()
 	process := &e2eDaemonProcess{done: make(chan error, 1)}
 	process.cmd = exec.Command(binary, "daemon")
 	process.cmd.Dir = repoRoot
-	process.cmd.Env = overrideE2EEnv(os.Environ(), map[string]string{
+	env := map[string]string{
 		"AGENT_COMPOSE_SOCKET":     filepath.Join(testRoot, "agent-compose.sock"),
 		"AUTH_PASSWORD":            "",
 		"AUTH_USERNAME":            "",
@@ -66,7 +70,11 @@ func startE2EDaemon(t *testing.T, binary, repoRoot, testRoot, listenAddress, ima
 		"RUNTIME_DRIVER":           "docker",
 		"SANDBOX_ROOT":             filepath.Join(testRoot, "sandboxes"),
 		"SANDBOX_START_TIMEOUT":    "3m",
-	})
+	}
+	for name, value := range extraEnv {
+		env[name] = value
+	}
+	process.cmd.Env = overrideE2EEnv(os.Environ(), env)
 	process.cmd.Stdout = &process.logs
 	process.cmd.Stderr = &process.logs
 	if err := process.cmd.Start(); err != nil {

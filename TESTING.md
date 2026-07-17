@@ -87,6 +87,20 @@ daemon logs when it fails.
 This focused task is intentionally absent from `task test` and GitHub Actions
 because GitHub-hosted CI does not provide its prebuilt guest-image prerequisite.
 
+The daemon retention cleanup has a separate opt-in real Docker E2E:
+
+```bash
+task image:agent-compose-guest
+task test:e2e:docker-retention
+```
+
+Set `AGENT_COMPOSE_E2E_RETENTION_IMAGE` to use another compatible local guest
+image. The test starts the built host daemon with short cleanup intervals,
+removes an expired materialization from an isolated `IMAGE_CACHE_ROOT`, creates
+and stops a real Docker sandbox, waits for automatic workspace reclamation,
+then verifies that sandbox metadata remains available and resume is rejected.
+All daemon data and Docker resources are fixture-scoped and cleaned afterward.
+
 The real Docker scheduler script E2E is also opt-in because it starts a Docker
 sandbox and waits for a scheduler trigger. Run it with:
 
