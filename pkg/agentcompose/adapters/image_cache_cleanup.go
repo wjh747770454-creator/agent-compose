@@ -59,10 +59,14 @@ func (c *ImageCacheCleaner) protectedIdentities(ctx context.Context) ([]string, 
 			if domain.SandboxWorkspaceReclaimed(sandbox) {
 				continue
 			}
-		} else if _, err := os.Lstat(record.SandboxPath); os.IsNotExist(err) {
-			continue
-		} else if err != nil {
-			return nil, fmt.Errorf("inspect sandbox ownership path %s: %w", record.SandboxID, err)
+		} else {
+			present, err := ownershipPathPresent(record.SandboxPath, os.Lstat)
+			if err != nil {
+				return nil, err
+			}
+			if !present {
+				continue
+			}
 		}
 		for _, dependency := range record.CacheDependencies {
 			if dependency.Domain == "runtime-image" && dependency.Identity != "" {
@@ -71,4 +75,15 @@ func (c *ImageCacheCleaner) protectedIdentities(ctx context.Context) ([]string, 
 		}
 	}
 	return protected, nil
+}
+
+func ownershipPathPresent(path string, lstat func(string) (os.FileInfo, error)) (bool, error) {
+	_, err := lstat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect sandbox ownership path %s: %w", path, err)
 }

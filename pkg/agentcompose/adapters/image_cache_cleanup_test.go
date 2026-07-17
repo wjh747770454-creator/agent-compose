@@ -2,9 +2,11 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -72,6 +74,20 @@ func TestImageCacheCleanerSkipsOnlyConfirmedOrphanOwnership(t *testing.T) {
 	}
 	if slices.Contains(protected, "orphan:latest") || !slices.Contains(protected, "unreadable:latest") {
 		t.Fatalf("protected identities = %v, want only existing unreadable sandbox dependency", protected)
+	}
+}
+
+func TestOwnershipPathPresentReportsInspectedPath(t *testing.T) {
+	path := "/sandboxes/unreadable"
+	inspectErr := errors.New("permission denied")
+	_, err := ownershipPathPresent(path, func(got string) (os.FileInfo, error) {
+		if got != path {
+			t.Fatalf("inspected path = %q, want %q", got, path)
+		}
+		return nil, inspectErr
+	})
+	if err == nil || !errors.Is(err, inspectErr) || !strings.Contains(err.Error(), path) {
+		t.Fatalf("ownership path error = %v, want wrapped error containing %q", err, path)
 	}
 }
 
