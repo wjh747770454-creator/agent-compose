@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -19,6 +20,9 @@ import (
 func TestImageCacheCleanerProtectsResumableSandboxAndReleasesReclaimedSandbox(t *testing.T) {
 	root := t.TempDir()
 	sandboxID := "sandbox-1"
+	if err := os.MkdirAll(filepath.Join(root, sandboxID), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := sessions.WriteOwnershipRecord(root, sessions.OwnershipRecord{
 		SandboxID: sandboxID, SandboxPath: filepath.Join(root, sandboxID), LifecycleState: "active",
 		CacheDependencies: []sessions.CacheDependency{{Domain: "runtime-image", Identity: "sha256:guest"}},
@@ -44,6 +48,30 @@ func TestImageCacheCleanerProtectsResumableSandboxAndReleasesReclaimedSandbox(t 
 	}
 	if len(protected) != 0 {
 		t.Fatalf("reclaimed sandbox protected identities = %v", protected)
+	}
+}
+
+func TestImageCacheCleanerSkipsOnlyConfirmedOrphanOwnership(t *testing.T) {
+	root := t.TempDir()
+	for _, sandboxID := range []string{"orphan", "unreadable"} {
+		if err := sessions.WriteOwnershipRecord(root, sessions.OwnershipRecord{
+			SandboxID: sandboxID, SandboxPath: filepath.Join(root, sandboxID), LifecycleState: "active",
+			CacheDependencies: []sessions.CacheDependency{{Domain: "runtime-image", Identity: sandboxID + ":latest"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "unreadable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cleaner := &ImageCacheCleaner{Sandboxes: cleanupSandboxStoreFake{}, SandboxRoot: root}
+	protected, err := cleaner.protectedIdentities(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(protected, "orphan:latest") || !slices.Contains(protected, "unreadable:latest") {
+		t.Fatalf("protected identities = %v, want only existing unreadable sandbox dependency", protected)
 	}
 }
 

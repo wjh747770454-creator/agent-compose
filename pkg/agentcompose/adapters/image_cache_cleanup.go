@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -54,8 +55,14 @@ func (c *ImageCacheCleaner) protectedIdentities(ctx context.Context) ([]string, 
 		}
 	}
 	for _, record := range records {
-		if sandbox := byID[record.SandboxID]; sandbox != nil && domain.SandboxWorkspaceReclaimed(sandbox) {
+		if sandbox := byID[record.SandboxID]; sandbox != nil {
+			if domain.SandboxWorkspaceReclaimed(sandbox) {
+				continue
+			}
+		} else if _, err := os.Lstat(record.SandboxPath); os.IsNotExist(err) {
 			continue
+		} else if err != nil {
+			return nil, fmt.Errorf("inspect sandbox ownership path %s: %w", record.SandboxID, err)
 		}
 		for _, dependency := range record.CacheDependencies {
 			if dependency.Domain == "runtime-image" && dependency.Identity != "" {
