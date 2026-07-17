@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -920,10 +921,12 @@ func loadImageEnvCache(cacheDir string, fresh []string) []string {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		slog.Warn("agent-compose failed to read cached image env; image ENV will not be passed to guest", "cache_dir", cacheDir, "error", err)
 		return nil
 	}
 	var env []string
 	if err := json.Unmarshal(data, &env); err != nil {
+		slog.Warn("agent-compose failed to decode cached image env; image ENV will not be passed to guest", "cache_dir", cacheDir, "error", err)
 		return nil
 	}
 	return env
