@@ -42,6 +42,7 @@ type ImageMetadata struct {
 	Platform        Platform          `json:"platform,omitempty"`
 	MediaType       string            `json:"media_type,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
+	Env             []string          `json:"env,omitempty"`
 	SizeBytes       int64             `json:"size_bytes,omitempty"`
 	CreatedAt       time.Time         `json:"created_at,omitempty"`
 	PulledAt        time.Time         `json:"pulled_at,omitempty"`
@@ -101,4 +102,5 @@ type MaterializationResult struct {
 	ResolvedRef string
 	LayoutPath  string
 	RootFSPath  string
+	Env         []string
 }
