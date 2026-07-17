@@ -76,6 +76,45 @@ func TestDefaultScriptSourceResolverReadsGitFile(t *testing.T) {
 	}
 }
 
+func TestDefaultScriptSourceResolverRejectsEscapingGitSymlink(t *testing.T) {
+	repository := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.email", "agent-compose@example.test"},
+		{"config", "user.name", "Agent Compose"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repository
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+		}
+	}
+	outside := filepath.Join(t.TempDir(), "host-secret.js")
+	if err := os.WriteFile(outside, []byte("host secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(repository, "scheduler.js")); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "scheduler.js"}, {"commit", "-m", "add scheduler symlink"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repository
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+		}
+	}
+
+	data, err := NewDefaultScriptSourceResolver(nil).Resolve(context.Background(), sources.Source{
+		Provider: sources.ProviderGit,
+		URL:      repository,
+		Ref:      "main",
+		Path:     "scheduler.js",
+	})
+	if err == nil || !strings.Contains(err.Error(), "must stay within the repository") {
+		t.Fatalf("escaping git symlink data=%q err=%v", data, err)
+	}
+}
+
 func TestDefaultScriptSourceResolverHTTPFailures(t *testing.T) {
 	t.Run("status and query redaction", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

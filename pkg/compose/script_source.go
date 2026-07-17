@@ -175,7 +175,31 @@ func (r *defaultScriptSourceResolver) readGit(ctx context.Context, source source
 	if _, err := (sources.GitClient{Env: r.env}).Checkout(ctx, source, checkoutDir); err != nil {
 		return nil, err
 	}
-	return readScriptFileWithContext(ctx, filepath.Join(checkoutDir, filepath.FromSlash(source.Path)))
+	scriptPath, err := resolveGitScriptPath(checkoutDir, source.Path)
+	if err != nil {
+		return nil, err
+	}
+	return readScriptFileWithContext(ctx, scriptPath)
+}
+
+func resolveGitScriptPath(checkoutDir, sourcePath string) (string, error) {
+	root, err := filepath.EvalSymlinks(checkoutDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve git checkout directory: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(sourcePath)))
+	if err != nil {
+		return "", fmt.Errorf("resolve git script path %q: %w", sourcePath, err)
+	}
+	relative, err := filepath.Rel(root, resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolve git script path %q relative to checkout: %w", sourcePath, err)
+	}
+	parentPrefix := ".." + string(filepath.Separator)
+	if filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, parentPrefix) {
+		return "", fmt.Errorf("git script path %q must stay within the repository", sourcePath)
+	}
+	return resolved, nil
 }
 
 func readScriptFileWithContext(ctx context.Context, path string) ([]byte, error) {
