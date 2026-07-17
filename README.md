@@ -17,7 +17,7 @@
 
 > Public preview. APIs, runtime packaging, and deployment defaults may still change. It is suitable for experimentation, local development, and preview deployments — not yet a stable production platform.
 
-📖 中文文档：[GitHub Pages](https://chaitin.github.io/agent-compose/)
+📖 中文文档：[中文 README](README.zh-CN.md)
 
 ## What is agent-compose?
 
