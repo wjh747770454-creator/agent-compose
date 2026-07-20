@@ -39,11 +39,11 @@ func TestE2EInstallerLifecycle(t *testing.T) {
 		t.Fatal("installation did not persist installer and environment")
 	}
 	if strings.Join(runner.calls, "\n") != strings.Join([]string{
-		"|docker version",
-		"|docker compose version",
+		"|docker version --format {{.Server.Version}}",
+		"|docker compose version --short",
 		installDir + "|docker compose config --quiet",
-		installDir + "|docker compose pull",
-		installDir + "|docker compose up -d",
+		installDir + "|docker compose --progress plain pull",
+		installDir + "|docker compose --progress plain up -d",
 	}, "\n") {
 		t.Fatalf("install calls:\n%s", strings.Join(runner.calls, "\n"))
 	}

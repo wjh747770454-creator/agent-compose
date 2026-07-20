@@ -63,10 +63,10 @@ func (s Service) runner() CommandRunner {
 
 func (s Service) checkCompose(ctx context.Context) error {
 	s.report(EventStep, "Checking Docker and Docker Compose")
-	if err := s.runner().Run(ctx, "", "docker", "version"); err != nil {
+	if err := s.runner().Run(ctx, "", "docker", "version", "--format", "{{.Server.Version}}"); err != nil {
 		return fmt.Errorf("docker is unavailable; install Docker Engine and retry: %w", err)
 	}
-	if err := s.runner().Run(ctx, "", "docker", "compose", "version"); err != nil {
+	if err := s.runner().Run(ctx, "", "docker", "compose", "version", "--short"); err != nil {
 		return fmt.Errorf("docker compose v2 is unavailable; install the Docker Compose plugin and retry: %w", err)
 	}
 	return nil
@@ -164,7 +164,11 @@ func (s Service) installOrUpgrade(ctx context.Context, operation Operation, opti
 }
 
 func (s Service) compose(ctx context.Context, dir string, args ...string) error {
-	return s.runner().Run(ctx, dir, "docker", append([]string{"compose"}, args...)...)
+	command := []string{"compose"}
+	if len(args) > 0 && (args[0] == "pull" || args[0] == "up") {
+		command = append(command, "--progress", "plain")
+	}
+	return s.runner().Run(ctx, dir, "docker", append(command, args...)...)
 }
 
 type installPlan struct {

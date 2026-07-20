@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,9 @@ import (
 
 func TestModelSelectsLanguageAndInstallFlow(t *testing.T) {
 	m := newModel(core.Service{}, core.DefaultOptions(), "/tmp/installer")
+	if view := m.View(); !strings.Contains(view, "DECLARATIVE AGENT RUNTIME") || !strings.Contains(view, "|___/") {
+		t.Fatalf("wide TUI is missing product banner:\n%s", view)
+	}
 	press(t, m, "down")
 	press(t, m, "enter")
 	if m.language != english || m.screen != screenAction {
@@ -31,6 +35,19 @@ func TestModelSelectsLanguageAndInstallFlow(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "/opt/agent-compose") {
 		t.Fatalf("confirmation missing directory:\n%s", m.View())
+	}
+}
+
+func TestModelUsesCompactBrandOnNarrowTerminal(t *testing.T) {
+	m := newModel(core.Service{}, core.DefaultOptions(), "/tmp/installer")
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
+	m = updated.(*model)
+	view := m.View()
+	if !strings.Contains(view, "agent-compose :: installer") {
+		t.Fatalf("compact brand missing:\n%s", view)
+	}
+	if strings.Contains(view, "DECLARATIVE AGENT RUNTIME") {
+		t.Fatalf("wide tagline rendered on narrow terminal:\n%s", view)
 	}
 }
 
@@ -63,10 +80,28 @@ func TestModelRendersProgressAndResults(t *testing.T) {
 	if !strings.Contains(m.View(), "Pulling images") {
 		t.Fatalf("progress missing:\n%s", m.View())
 	}
+	updated, _ = m.Update(commandOutputMessage("layer downloaded"))
+	m = updated.(*model)
+	if !strings.Contains(m.View(), "layer downloaded") {
+		t.Fatalf("command output missing:\n%s", m.View())
+	}
 	updated, _ = m.Update(operationResult{result: core.Result{URL: "http://localhost:80", Username: "admin", GeneratedPassword: "secret"}})
 	m = updated.(*model)
 	if !strings.Contains(m.View(), "http://localhost:80") || !strings.Contains(m.View(), "secret") {
 		t.Fatalf("result missing:\n%s", m.View())
+	}
+}
+
+func TestModelBoundsVisibleCommandOutput(t *testing.T) {
+	m := newModel(core.Service{}, core.DefaultOptions(), "/tmp/installer")
+	m.screen = screenRunning
+	m.width, m.height = 120, 20
+	for i := range 20 {
+		m.appendEvent(fmt.Sprintf("line-%02d", i))
+	}
+	view := m.View()
+	if strings.Contains(view, "line-00") || !strings.Contains(view, "line-19") {
+		t.Fatalf("visible output was not bounded to its tail:\n%s", view)
 	}
 }
 

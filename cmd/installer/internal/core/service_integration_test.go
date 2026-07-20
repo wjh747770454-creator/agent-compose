@@ -83,7 +83,7 @@ func TestIntegrationInstallRollbackRestoresManagedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := &fakeRunner{failOn: "docker compose pull"}
+	runner := &fakeRunner{failOn: "docker compose --progress plain pull"}
 	options := DefaultOptions()
 	options.InstallDir = installDir
 	options.BundleDir = makeTestBundle(t, "v2")

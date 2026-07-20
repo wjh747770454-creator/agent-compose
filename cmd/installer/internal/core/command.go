@@ -23,8 +23,12 @@ func (r ExecRunner) Run(ctx context.Context, dir, name string, args ...string) e
 	cmd.Stdout = r.Output
 	cmd.Stderr = r.Output
 	cmd.Env = filteredComposeEnvironment(os.Environ())
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("run %s %s: %w", name, strings.Join(args, " "), err)
+	runErr := cmd.Run()
+	if flusher, ok := r.Output.(interface{ Flush() }); ok {
+		flusher.Flush()
+	}
+	if runErr != nil {
+		return fmt.Errorf("run %s %s: %w", name, strings.Join(args, " "), runErr)
 	}
 	return nil
 }

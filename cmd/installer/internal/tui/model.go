@@ -56,17 +56,38 @@ type model struct {
 	events        []string
 	result        core.Result
 	err           error
+	width         int
+	height        int
 }
 
 var (
+	brandStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	taglineStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
 	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 )
 
+const productBanner = `    _                    _          ____
+   / \   __ _  ___ _ __| |_       / ___|___  _ __ ___  _ __   ___  ___  ___
+  / _ \ / _' |/ _ \ '_ \ __|_____| |   / _ \| '_ ' _ \| '_ \ / _ \/ __|/ _ \
+ / ___ \ (_| |  __/ | | | ||_____| |__| (_) | | | | | | |_) | (_) \__ \  __/
+/_/   \_\__, |\___|_| |_|\__|     \____\___/|_| |_| |_| .__/ \___/|___/\___|
+        |___/                                          |_|`
+
+const productTagline = ":: DECLARATIVE AGENT RUNTIME :: INSTALLER ::"
+
 func Run(service core.Service, defaults core.Options, installerPath string) error {
 	m := newModel(service, defaults, installerPath)
 	defer m.cancel()
+	switch m.service.Runner.(type) {
+	case nil, core.ExecRunner:
+		m.service.Runner = core.ExecRunner{Output: newCommandOutputWriter(func(line string) {
+			if m.program != nil {
+				m.program.Send(commandOutputMessage(line))
+			}
+		})}
+	}
 	program := tea.NewProgram(m, tea.WithAltScreen())
 	m.program = program
 	final, err := program.Run()
@@ -80,15 +101,26 @@ func newModel(service core.Service, defaults core.Options, installerPath string)
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	ctx, cancel := context.WithCancel(context.Background())
-	return &model{service: service, ctx: ctx, cancel: cancel, options: defaults, installerPath: installerPath, screen: screenLanguage, language: chinese, spinner: sp}
+	return &model{service: service, ctx: ctx, cancel: cancel, options: defaults, installerPath: installerPath, screen: screenLanguage, language: chinese, spinner: sp, width: 100, height: 40}
 }
 
 func (m *model) Init() tea.Cmd { return nil }
 
 func (m *model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
+	case tea.WindowSizeMsg:
+		if msg.Width > 0 {
+			m.width = msg.Width
+		}
+		if msg.Height > 0 {
+			m.height = msg.Height
+		}
+		return m, nil
 	case eventMessage:
-		m.events = append(m.events, core.Event(msg).Message)
+		m.appendEvent(core.Event(msg).Message)
+		return m, nil
+	case commandOutputMessage:
+		m.appendEvent(string(msg))
 		return m, nil
 	case operationResult:
 		m.result, m.err, m.screen = msg.result, msg.err, screenDone
@@ -99,7 +131,7 @@ func (m *model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" && m.screen == screenRunning {
-			m.events = append(m.events, m.text("正在取消并回滚...", "Cancelling and rolling back..."))
+			m.appendEvent(m.text("正在取消并回滚...", "Cancelling and rolling back..."))
 			m.cancel()
 			return m, nil
 		}
@@ -251,8 +283,7 @@ func (m *model) runOperation() tea.Cmd {
 
 func (m *model) View() string {
 	var body strings.Builder
-	body.WriteString(titleStyle.Render("agent-compose Installer"))
-	body.WriteString("\n\n")
+	m.renderBrand(&body)
 	switch m.screen {
 	case screenLanguage:
 		m.renderMenu(&body, "选择语言 / Choose language", []string{string(chinese), string(english)})
@@ -266,7 +297,7 @@ func (m *model) View() string {
 		m.renderConfirm(&body)
 	case screenRunning:
 		body.WriteString(m.spinner.View() + " " + m.text("正在执行...", "Working...") + "\n\n")
-		for _, event := range m.events {
+		for _, event := range m.visibleEvents() {
 			body.WriteString("  " + event + "\n")
 		}
 	case screenDone:
@@ -275,6 +306,45 @@ func (m *model) View() string {
 	body.WriteString("\n")
 	body.WriteString(warnStyle.Render(m.text("↑/↓ 选择 · Enter 确认 · Ctrl+C 退出", "↑/↓ select · Enter confirm · Ctrl+C quit")))
 	return body.String()
+}
+
+func (m *model) appendEvent(message string) {
+	if message == "" {
+		return
+	}
+	m.events = append(m.events, message)
+	if len(m.events) > 50 {
+		m.events = append([]string(nil), m.events[len(m.events)-50:]...)
+	}
+}
+
+func (m *model) visibleEvents() []string {
+	limit := m.height - 14
+	if m.width < 80 {
+		limit = m.height - 7
+	}
+	if limit < 3 {
+		limit = 3
+	}
+	if limit > 12 {
+		limit = 12
+	}
+	if len(m.events) <= limit {
+		return m.events
+	}
+	return m.events[len(m.events)-limit:]
+}
+
+func (m *model) renderBrand(body *strings.Builder) {
+	if m.width >= 80 {
+		body.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, brandStyle.Render(productBanner)))
+		body.WriteString("\n")
+		body.WriteString(taglineStyle.Width(m.width).Align(lipgloss.Center).Render(productTagline))
+		body.WriteString("\n\n")
+		return
+	}
+	body.WriteString(titleStyle.Render("agent-compose :: installer"))
+	body.WriteString("\n\n")
 }
 
 func (m *model) renderMenu(body *strings.Builder, title string, choices []string) {
