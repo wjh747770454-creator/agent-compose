@@ -151,15 +151,17 @@ tasks:
       - ./scripts/tests/test-verify-image-manifest.sh
       - ./scripts/tests/test-binary-ci-contract.sh
       - ./scripts/tests/test-image-ci-contract.sh
+      - ./scripts/tests/test-installer-ci-contract.sh
 
   test:deploy:
     desc: Run deterministic installer, Compose, and release-asset deployment checks
     dir: '{{.TASKFILE_DIR}}'
     cmds:
-      - ./deploy/install_test.sh
-      - ./deploy/install_upgrade_test.sh
+      - go test ./cmd/installer/...
+      - ./deploy/install_bootstrap_test.sh
       - ./scripts/tests/test-compose-kvm-config.sh
       - ./scripts/tests/test-installer-assets.sh
+      - ./scripts/tests/test-installer-binaries.sh
 
   test:unit:
     desc: Run unit tests

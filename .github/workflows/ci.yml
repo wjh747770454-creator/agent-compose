@@ -47,6 +47,24 @@ jobs:
           cache: true
       - run: go test ./cmd/... ./pkg/...
 
+  installer-build:
+    name: Installer binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and verify linux installer assets
+        env:
+          VERSION: ci-${{ github.sha }}
+        run: |
+          ./scripts/build-installer-binaries.sh ./installer-assets
+          (cd installer-assets && sha256sum -c SHASUMS256.txt)
+          readelf -h installer-assets/agent-compose-installer-linux-amd64 | grep -F 'Advanced Micro Devices X86-64'
+          readelf -h installer-assets/agent-compose-installer-linux-arm64 | grep -F 'AArch64'
+
   coverage:
     name: Coverage gate
     runs-on: ubuntu-latest

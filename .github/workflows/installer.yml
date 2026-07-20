@@ -1,0 +1,52 @@
+name: Publish Installer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-installer
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test installer
+        run: go test ./cmd/installer/...
+      - name: Build linux/amd64 and linux/arm64 assets
+        env:
+          VERSION: installer-${{ github.sha }}
+        run: ./scripts/build-installer-binaries.sh ./upload-installer
+      - name: Verify binary architectures
+        run: |
+          set -euo pipefail
+          readelf -h upload-installer/agent-compose-installer-linux-amd64 | grep -F 'Advanced Micro Devices X86-64'
+          readelf -h upload-installer/agent-compose-installer-linux-arm64 | grep -F 'AArch64'
+          (cd upload-installer && sha256sum -c SHASUMS256.txt)
+      - name: Publish fixed installer release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: installer-latest
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --prerelease
+            gh release upload "$RELEASE_TAG" upload-installer/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" upload-installer/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title 'agent-compose installer' \
+              --notes 'Architecture-specific installer binaries. Updated manually.' \
+              --prerelease
+          fi

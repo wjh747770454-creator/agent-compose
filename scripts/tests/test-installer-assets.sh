@@ -59,7 +59,7 @@ cmp "$output/SHASUMS256.txt" "$second_output/SHASUMS256.txt" >/dev/null \
   || fail 'installer checksum is not reproducible'
 
 actual_payload=$(tar -tzf "$output/agent-compose-installer.tar.gz" | LC_ALL=C sort)
-expected_payload=$'agent-compose-installer/\nagent-compose-installer/.env.example\nagent-compose-installer/README.md\nagent-compose-installer/docker-compose.kvm.yml\nagent-compose-installer/docker-compose.yml\nagent-compose-installer/images/\nagent-compose-installer/images/manifest.env\nagent-compose-installer/install.sh'
+expected_payload=$'agent-compose-installer/\nagent-compose-installer/.env.example\nagent-compose-installer/docker-compose.kvm.yml\nagent-compose-installer/docker-compose.yml\nagent-compose-installer/images/\nagent-compose-installer/images/manifest.env'
 [[ $actual_payload == "$expected_payload" ]] \
   || fail "installer payload differs: $actual_payload"
 
@@ -71,17 +71,11 @@ cmp "$ROOT_DIR/docker-compose.kvm.yml" "$payload/docker-compose.kvm.yml" >/dev/n
   || fail 'KVM Compose overlay differs in archive'
 cmp "$ROOT_DIR/.env.example" "$payload/.env.example" >/dev/null \
   || fail '.env.example differs in archive'
-cmp "$ROOT_DIR/deploy/README.md" "$payload/README.md" >/dev/null \
-  || fail 'README differs in archive'
-cmp "$ROOT_DIR/deploy/install.sh" "$payload/install.sh" >/dev/null \
-  || fail 'install.sh differs in archive'
 
 assert_mode "$payload/docker-compose.yml" 644
 assert_mode "$payload/docker-compose.kvm.yml" 644
 assert_mode "$payload/.env.example" 644
-assert_mode "$payload/README.md" 644
 assert_mode "$payload/images/manifest.env" 644
-assert_mode "$payload/install.sh" 755
 
 grep -Fxq 'RUNTIME_DRIVER=docker' "$payload/.env.example" \
   || fail '.env.example must keep docker as the active runtime default'
@@ -95,7 +89,7 @@ grep -Fxq 'AUTH_PASSWORD=' "$payload/.env.example" \
 grep -Fxq 'AUTH_SECRET=' "$payload/.env.example" \
   || fail '.env.example must keep AUTH_SECRET empty'
 
-expected_manifest=$'AGENT_COMPOSE_IMAGE=registry.example/agent-compose/agent-compose:v9.8.7\nAGENT_COMPOSE_FRONTEND_VERSION=v-ui-test\nAGENT_COMPOSE_FRONTEND_IMAGE=registry.example/agent-compose/agent-compose-ui:v-ui-test\nDEFAULT_IMAGE=registry.example/agent-compose/agent-compose-guest:v9.8.7'
+expected_manifest=$'INSTALLER_PAYLOAD_VERSION=1\nAGENT_COMPOSE_IMAGE=registry.example/agent-compose/agent-compose:v9.8.7\nAGENT_COMPOSE_FRONTEND_VERSION=v-ui-test\nAGENT_COMPOSE_FRONTEND_IMAGE=registry.example/agent-compose/agent-compose-ui:v-ui-test\nDEFAULT_IMAGE=registry.example/agent-compose/agent-compose-guest:v9.8.7'
 actual_manifest=$(<"$payload/images/manifest.env")
 [[ $actual_manifest == "$expected_manifest" ]] \
   || fail "image manifest differs: $actual_manifest"

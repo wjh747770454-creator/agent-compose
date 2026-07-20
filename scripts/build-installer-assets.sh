@@ -67,9 +67,8 @@ install -m 0755 "$ROOT_DIR/deploy/install.sh" "$assets/install.sh"
 install -m 0644 "$ROOT_DIR/docker-compose.yml" "$payload/docker-compose.yml"
 install -m 0644 "$ROOT_DIR/docker-compose.kvm.yml" "$payload/docker-compose.kvm.yml"
 install -m 0644 "$ROOT_DIR/.env.example" "$payload/.env.example"
-install -m 0644 "$ROOT_DIR/deploy/README.md" "$payload/README.md"
-install -m 0755 "$ROOT_DIR/deploy/install.sh" "$payload/install.sh"
 {
+  printf 'INSTALLER_PAYLOAD_VERSION=1\n'
   printf 'AGENT_COMPOSE_IMAGE=%s/agent-compose:%s\n' "$IMAGE_PREFIX" "$VERSION"
   printf 'AGENT_COMPOSE_FRONTEND_VERSION=%s\n' "$FRONTEND_VERSION"
   printf 'AGENT_COMPOSE_FRONTEND_IMAGE=%s/agent-compose-ui:%s\n' "$IMAGE_PREFIX" "$FRONTEND_VERSION"
