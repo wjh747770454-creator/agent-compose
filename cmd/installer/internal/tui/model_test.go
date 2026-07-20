@@ -20,8 +20,17 @@ func TestModelSelectsLanguageAndInstallFlow(t *testing.T) {
 		t.Fatalf("language screen = %q, %d", m.language, m.screen)
 	}
 	press(t, m, "enter")
-	if m.operation != core.OperationInstall || m.screen != screenForm || len(m.inputs) != 4 {
+	if m.operation != core.OperationInstall || m.screen != screenForm || len(m.inputs) != 3 {
 		t.Fatalf("install form = %q, %d, %d inputs", m.operation, m.screen, len(m.inputs))
+	}
+	form := m.View()
+	for _, expected := range []string{"Configure installation", "Install directory", "Application version", "Web UI port", "╭", "Tab / ↑↓ move"} {
+		if !strings.Contains(form, expected) {
+			t.Fatalf("install form missing %q:\n%s", expected, form)
+		}
+	}
+	if strings.Contains(form, "Image prefix") {
+		t.Fatalf("advanced image prefix rendered in TUI:\n%s", form)
 	}
 	m.inputs[0].SetValue("relative")
 	press(t, m, "enter")
@@ -33,8 +42,11 @@ func TestModelSelectsLanguageAndInstallFlow(t *testing.T) {
 	if m.screen != screenConfirm {
 		t.Fatalf("screen = %d, want confirmation", m.screen)
 	}
-	if !strings.Contains(m.View(), "/opt/agent-compose") {
-		t.Fatalf("confirmation missing directory:\n%s", m.View())
+	confirmation := m.View()
+	for _, expected := range []string{"/opt/agent-compose", "latest", "80"} {
+		if !strings.Contains(confirmation, expected) {
+			t.Fatalf("confirmation missing %q:\n%s", expected, confirmation)
+		}
 	}
 }
 
@@ -119,6 +131,29 @@ func TestModelCancelsRunningOperationBeforeExit(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "回滚") {
 		t.Fatalf("cancellation state missing from view:\n%s", m.View())
+	}
+}
+
+func TestModelIgnoresKeysWhileOperationIsRunning(t *testing.T) {
+	m := newModel(core.Service{}, core.DefaultOptions(), "/tmp/installer")
+	m.screen = screenConfirm
+	m.cursor = 0
+
+	updated, command := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated != m || command == nil || m.screen != screenRunning {
+		t.Fatalf("confirmation did not start operation: screen=%d command=%v", m.screen, command)
+	}
+
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyEnter},
+		{Type: tea.KeyUp},
+		{Type: tea.KeyDown},
+		{Type: tea.KeyRunes, Runes: []rune("x")},
+	} {
+		updated, command = m.Update(key)
+		if updated != m || command != nil {
+			t.Fatalf("running key %q started another command", key.String())
+		}
 	}
 }
 

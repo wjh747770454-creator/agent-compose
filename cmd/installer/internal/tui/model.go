@@ -66,6 +66,9 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
 	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	mutedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	fieldStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1)
+	focusedField  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("42")).Padding(0, 1)
 )
 
 const productBanner = `    _                    _          ____
@@ -201,13 +204,12 @@ func (m *model) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.screen = screenRunning
 		})
+	case screenRunning:
+		return m, nil
 	case screenDone:
 		if key.String() == "enter" || key.String() == "esc" {
 			return m, tea.Quit
 		}
-	}
-	if m.screen == screenRunning {
-		return m, m.runOperation()
 	}
 	return m, nil
 }
@@ -230,12 +232,13 @@ func (m *model) updateMenu(key tea.KeyMsg, count int, selectFn func(int)) (tea.M
 func (m *model) buildInputs() {
 	values := []string{m.options.InstallDir}
 	if m.operation != core.OperationUninstall {
-		values = append(values, m.options.Version, strconv.Itoa(m.options.Port), m.options.ImagePrefix)
+		values = append(values, m.options.Version, strconv.Itoa(m.options.Port))
 	}
 	m.inputs = make([]textinput.Model, len(values))
 	for i, value := range values {
 		input := textinput.New()
 		input.SetValue(value)
+		input.Prompt = ""
 		input.CharLimit = 512
 		m.inputs[i] = input
 	}
@@ -263,7 +266,6 @@ func (m *model) readInputs() error {
 		}
 		m.options.Port = port
 		m.options.PortSet = true
-		m.options.ImagePrefix = strings.TrimSpace(m.inputs[3].Value())
 		m.options.InstallerPath = m.installerPath
 	}
 	return m.options.Validate(m.operation)
@@ -305,8 +307,23 @@ func (m *model) View() string {
 		m.renderDone(&body)
 	}
 	body.WriteString("\n")
-	body.WriteString(warnStyle.Render(m.text("↑/↓ 选择 · Enter 确认 · Ctrl+C 退出", "↑/↓ select · Enter confirm · Ctrl+C quit")))
+	body.WriteString(m.renderKeyHelp())
 	return body.String()
+}
+
+func (m *model) renderKeyHelp() string {
+	var help string
+	switch m.screen {
+	case screenForm:
+		help = m.text("Tab / ↑↓ 切换字段  ·  Enter 继续  ·  Ctrl+C 退出", "Tab / ↑↓ move  ·  Enter continue  ·  Ctrl+C quit")
+	case screenRunning:
+		help = m.text("Ctrl+C 取消并回滚", "Ctrl+C cancel and roll back")
+	case screenDone:
+		help = m.text("Enter / Esc 退出", "Enter / Esc quit")
+	default:
+		help = m.text("↑↓ 选择  ·  Enter 确认  ·  Ctrl+C 退出", "↑↓ select  ·  Enter confirm  ·  Ctrl+C quit")
+	}
+	return mutedStyle.Render(help)
 }
 
 func (m *model) appendEvent(message string) {
@@ -363,15 +380,50 @@ func (m *model) renderMenu(body *strings.Builder, title string, choices []string
 func (m *model) renderForm(body *strings.Builder) {
 	labels := []string{m.text("安装目录", "Install directory")}
 	if m.operation != core.OperationUninstall {
-		labels = append(labels, m.text("应用版本", "Application version"), m.text("Web UI 端口", "Web UI port"), m.text("镜像前缀（可选）", "Image prefix (optional)"))
+		labels = append(labels, m.text("应用版本", "Application version"), m.text("Web UI 端口", "Web UI port"))
 	}
-	body.WriteString(m.text("配置参数（Tab 切换）", "Configuration (Tab to move)") + "\n\n")
+	title, description := m.formHeading()
+	body.WriteString(titleStyle.Render(title) + "\n")
+	body.WriteString(mutedStyle.Render(description) + "\n\n")
 	for i := range m.inputs {
-		body.WriteString(labels[i] + "\n" + m.inputs[i].View() + "\n\n")
+		m.renderFormField(body, labels[i], i)
 	}
 	if m.err != nil {
-		body.WriteString(warnStyle.Render(m.err.Error()) + "\n")
+		body.WriteString(warnStyle.Render("! "+m.err.Error()) + "\n")
 	}
+}
+
+func (m *model) formHeading() (string, string) {
+	switch m.operation {
+	case core.OperationUpgrade:
+		return m.text("配置升级", "Configure upgrade"), m.text("确认安装位置和要升级到的版本", "Review the installation and target version")
+	case core.OperationUninstall:
+		return m.text("选择安装位置", "Select installation"), m.text("指定要卸载的 agent-compose 目录", "Choose the agent-compose directory to uninstall")
+	default:
+		return m.text("配置安装", "Configure installation"), m.text("确认安装位置、发布版本和访问端口", "Review the location, release, and web port")
+	}
+}
+
+func (m *model) renderFormField(body *strings.Builder, label string, index int) {
+	marker := mutedStyle.Render("○")
+	labelStyle := lipgloss.NewStyle()
+	boxStyle := fieldStyle
+	if index == m.focus {
+		marker = selectedStyle.Render("●")
+		labelStyle = selectedStyle
+		boxStyle = focusedField
+	}
+	fieldWidth := m.width - 8
+	if fieldWidth > 72 {
+		fieldWidth = 72
+	}
+	if fieldWidth < 16 {
+		fieldWidth = 16
+	}
+	input := m.inputs[index]
+	input.Width = fieldWidth - 2
+	body.WriteString(marker + " " + labelStyle.Render(label) + "\n")
+	body.WriteString(boxStyle.Width(fieldWidth).Render(input.View()) + "\n\n")
 }
 
 func (m *model) renderConfirm(body *strings.Builder) {
@@ -379,6 +431,8 @@ func (m *model) renderConfirm(body *strings.Builder) {
 	fmt.Fprintf(body, "  %s: %s\n  %s: %s\n", m.text("操作", "Operation"), m.operation, m.text("目录", "Directory"), m.options.InstallDir)
 	if m.operation == core.OperationUninstall {
 		fmt.Fprintf(body, "  %s: %t\n", m.text("删除数据", "Purge data"), m.options.Purge)
+	} else {
+		fmt.Fprintf(body, "  %s: %s\n  %s: %d\n", m.text("版本", "Version"), m.options.Version, m.text("Web UI 端口", "Web UI port"), m.options.Port)
 	}
 	body.WriteString("\n")
 	m.renderMenu(body, m.text("确认继续？", "Continue?"), []string{m.text("继续", "Continue"), m.text("返回", "Back")})
