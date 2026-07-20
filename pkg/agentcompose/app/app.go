@@ -53,8 +53,8 @@ func Register(di do.Injector) {
 
 func RegisterDependencies(di do.Injector) {
 	do.Provide(di, func(do.Injector) (*sessions.LifecycleLocks, error) { return sessions.NewLifecycleLocks(), nil })
-	do.Provide(di, sessionstore.NewStore)
 	do.Provide(di, NewConfigStore)
+	do.Provide(di, NewSandboxStore)
 	do.Provide(di, NewWorkspaceProvisioner)
 	do.MustAs[*workspaces.Provisioner, workspaces.WorkspaceEnsurer](di)
 	do.Provide(di, NewRuntimeProvider)
@@ -424,6 +424,12 @@ func NewSandboxRPCBridge(di do.Injector) (*adapters.SandboxRPCBridge, error) {
 
 func NewConfigStore(di do.Injector) (*configstore.ConfigStore, error) {
 	return configstore.NewConfigStore(di)
+}
+
+func NewSandboxStore(di do.Injector) (*sessionstore.Store, error) {
+	config := do.MustInvoke[*appconfig.Config](di)
+	configDB := do.MustInvoke[*configstore.ConfigStore](di)
+	return sessionstore.NewWithDatabase(config, configDB.DB())
 }
 
 func NewWorkspaceProvisioner(di do.Injector) (*workspaces.Provisioner, error) {

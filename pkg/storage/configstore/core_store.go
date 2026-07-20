@@ -74,7 +74,9 @@ func NewConfigStore(di do.Injector) (*ConfigStore, error) {
 	db.SetMaxIdleConns(1)
 	store := FromDB(db)
 	if err := store.initSchema(context.Background()); err != nil {
-		_ = db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close data database after schema initialization failure: %w", closeErr))
+		}
 		return nil, err
 	}
 	return store, nil
@@ -98,6 +100,14 @@ func (s *ConfigStore) DB() *sql.DB {
 		return nil
 	}
 	return s.db
+}
+
+// Shutdown closes the shared data.db connection owned by ConfigStore.
+func (s *ConfigStore) Shutdown() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.Close()
 }
 
 func (s *coreStore) InitCoreSchema(ctx context.Context) error {
