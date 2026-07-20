@@ -1,0 +1,338 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"agent-compose/cmd/installer/internal/core"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+type screen int
+
+const (
+	screenLanguage screen = iota
+	screenAction
+	screenForm
+	screenPurge
+	screenConfirm
+	screenRunning
+	screenDone
+)
+
+type language string
+
+const (
+	chinese language = "中文"
+	english language = "English"
+)
+
+type operationResult struct {
+	result core.Result
+	err    error
+}
+
+type eventMessage core.Event
+
+type model struct {
+	service       core.Service
+	ctx           context.Context
+	cancel        context.CancelFunc
+	options       core.Options
+	installerPath string
+	program       *tea.Program
+	screen        screen
+	language      language
+	cursor        int
+	operation     core.Operation
+	inputs        []textinput.Model
+	focus         int
+	spinner       spinner.Model
+	events        []string
+	result        core.Result
+	err           error
+}
+
+var (
+	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42"))
+	warnStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+)
+
+func Run(service core.Service, defaults core.Options, installerPath string) error {
+	m := newModel(service, defaults, installerPath)
+	defer m.cancel()
+	program := tea.NewProgram(m, tea.WithAltScreen())
+	m.program = program
+	final, err := program.Run()
+	if err != nil {
+		return err
+	}
+	return final.(*model).err
+}
+
+func newModel(service core.Service, defaults core.Options, installerPath string) *model {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	ctx, cancel := context.WithCancel(context.Background())
+	return &model{service: service, ctx: ctx, cancel: cancel, options: defaults, installerPath: installerPath, screen: screenLanguage, language: chinese, spinner: sp}
+}
+
+func (m *model) Init() tea.Cmd { return nil }
+
+func (m *model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := message.(type) {
+	case eventMessage:
+		m.events = append(m.events, core.Event(msg).Message)
+		return m, nil
+	case operationResult:
+		m.result, m.err, m.screen = msg.result, msg.err, screenDone
+		return m, nil
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" && m.screen == screenRunning {
+			m.events = append(m.events, m.text("正在取消并回滚...", "Cancelling and rolling back..."))
+			m.cancel()
+			return m, nil
+		}
+		if msg.String() == "ctrl+c" || (msg.String() == "q" && m.screen != screenForm) {
+			m.cancel()
+			return m, tea.Quit
+		}
+		return m.updateKey(msg)
+	}
+	return m, nil
+}
+
+func (m *model) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.screen {
+	case screenLanguage:
+		return m.updateMenu(key, 2, func(choice int) {
+			if choice == 1 {
+				m.language = english
+			}
+			m.cursor, m.screen = 0, screenAction
+		})
+	case screenAction:
+		return m.updateMenu(key, 4, func(choice int) {
+			if choice == 3 {
+				m.err = nil
+				m.screen = screenDone
+				return
+			}
+			m.operation = []core.Operation{core.OperationInstall, core.OperationUpgrade, core.OperationUninstall}[choice]
+			m.buildInputs()
+			m.cursor, m.screen = 0, screenForm
+		})
+	case screenForm:
+		if key.String() == "tab" || key.String() == "down" || key.String() == "shift+tab" || key.String() == "up" {
+			delta := 1
+			if key.String() == "shift+tab" || key.String() == "up" {
+				delta = -1
+			}
+			m.focus = (m.focus + delta + len(m.inputs)) % len(m.inputs)
+			m.focusInputs()
+			return m, nil
+		}
+		if key.String() == "enter" {
+			if err := m.readInputs(); err != nil {
+				m.err = err
+				return m, nil
+			}
+			m.err = nil
+			if m.operation == core.OperationUninstall {
+				m.screen = screenPurge
+			} else {
+				m.screen = screenConfirm
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.inputs[m.focus], cmd = m.inputs[m.focus].Update(key)
+		return m, cmd
+	case screenPurge:
+		return m.updateMenu(key, 2, func(choice int) { m.options.Purge = choice == 1; m.cursor, m.screen = 0, screenConfirm })
+	case screenConfirm:
+		return m.updateMenu(key, 2, func(choice int) {
+			if choice == 1 {
+				m.screen = screenAction
+				m.cursor = 0
+				return
+			}
+			m.screen = screenRunning
+		})
+	case screenDone:
+		if key.String() == "enter" || key.String() == "esc" {
+			return m, tea.Quit
+		}
+	}
+	if m.screen == screenRunning {
+		return m, m.runOperation()
+	}
+	return m, nil
+}
+
+func (m *model) updateMenu(key tea.KeyMsg, count int, selectFn func(int)) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "up", "k":
+		m.cursor = (m.cursor - 1 + count) % count
+	case "down", "j":
+		m.cursor = (m.cursor + 1) % count
+	case "enter":
+		selectFn(m.cursor)
+		if m.screen == screenRunning {
+			return m, tea.Batch(m.spinner.Tick, m.runOperation())
+		}
+	}
+	return m, nil
+}
+
+func (m *model) buildInputs() {
+	values := []string{m.options.InstallDir}
+	if m.operation != core.OperationUninstall {
+		values = append(values, m.options.Version, strconv.Itoa(m.options.Port), m.options.ImagePrefix)
+	}
+	m.inputs = make([]textinput.Model, len(values))
+	for i, value := range values {
+		input := textinput.New()
+		input.SetValue(value)
+		input.CharLimit = 512
+		m.inputs[i] = input
+	}
+	m.focus = 0
+	m.focusInputs()
+}
+
+func (m *model) focusInputs() {
+	for i := range m.inputs {
+		if i == m.focus {
+			m.inputs[i].Focus()
+		} else {
+			m.inputs[i].Blur()
+		}
+	}
+}
+
+func (m *model) readInputs() error {
+	m.options.InstallDir = strings.TrimSpace(m.inputs[0].Value())
+	if m.operation != core.OperationUninstall {
+		m.options.Version = strings.TrimSpace(m.inputs[1].Value())
+		port, err := core.ParsePort(m.inputs[2].Value())
+		if err != nil {
+			return err
+		}
+		m.options.Port = port
+		m.options.ImagePrefix = strings.TrimSpace(m.inputs[3].Value())
+		m.options.InstallerPath = m.installerPath
+	}
+	return m.options.Validate(m.operation)
+}
+
+func (m *model) runOperation() tea.Cmd {
+	return func() tea.Msg {
+		service := m.service
+		service.Reporter = core.ReporterFunc(func(event core.Event) {
+			if m.program != nil {
+				m.program.Send(eventMessage(event))
+			}
+		})
+		result, err := service.Apply(m.ctx, m.operation, m.options)
+		return operationResult{result: result, err: err}
+	}
+}
+
+func (m *model) View() string {
+	var body strings.Builder
+	body.WriteString(titleStyle.Render("agent-compose Installer"))
+	body.WriteString("\n\n")
+	switch m.screen {
+	case screenLanguage:
+		m.renderMenu(&body, "选择语言 / Choose language", []string{string(chinese), string(english)})
+	case screenAction:
+		m.renderMenu(&body, m.text("请选择操作", "Choose an action"), []string{m.text("安装", "Install"), m.text("升级", "Upgrade"), m.text("卸载", "Uninstall"), m.text("退出", "Quit")})
+	case screenForm:
+		m.renderForm(&body)
+	case screenPurge:
+		m.renderMenu(&body, m.text("卸载后如何处理数据？", "What should happen to data?"), []string{m.text("保留配置和数据", "Preserve configuration and data"), m.text("永久删除配置和数据", "Permanently delete configuration and data")})
+	case screenConfirm:
+		m.renderConfirm(&body)
+	case screenRunning:
+		body.WriteString(m.spinner.View() + " " + m.text("正在执行...", "Working...") + "\n\n")
+		for _, event := range m.events {
+			body.WriteString("  " + event + "\n")
+		}
+	case screenDone:
+		m.renderDone(&body)
+	}
+	body.WriteString("\n")
+	body.WriteString(warnStyle.Render(m.text("↑/↓ 选择 · Enter 确认 · Ctrl+C 退出", "↑/↓ select · Enter confirm · Ctrl+C quit")))
+	return body.String()
+}
+
+func (m *model) renderMenu(body *strings.Builder, title string, choices []string) {
+	body.WriteString(title + "\n\n")
+	for i, choice := range choices {
+		prefix := "  "
+		if i == m.cursor {
+			prefix = "› "
+			choice = selectedStyle.Render(choice)
+		}
+		body.WriteString(prefix + choice + "\n")
+	}
+}
+
+func (m *model) renderForm(body *strings.Builder) {
+	labels := []string{m.text("安装目录", "Install directory")}
+	if m.operation != core.OperationUninstall {
+		labels = append(labels, m.text("应用版本", "Application version"), m.text("Web UI 端口", "Web UI port"), m.text("镜像前缀（可选）", "Image prefix (optional)"))
+	}
+	body.WriteString(m.text("配置参数（Tab 切换）", "Configuration (Tab to move)") + "\n\n")
+	for i := range m.inputs {
+		body.WriteString(labels[i] + "\n" + m.inputs[i].View() + "\n\n")
+	}
+	if m.err != nil {
+		body.WriteString(warnStyle.Render(m.err.Error()) + "\n")
+	}
+}
+
+func (m *model) renderConfirm(body *strings.Builder) {
+	body.WriteString(m.text("执行计划", "Plan") + "\n\n")
+	fmt.Fprintf(body, "  %s: %s\n  %s: %s\n", m.text("操作", "Operation"), m.operation, m.text("目录", "Directory"), m.options.InstallDir)
+	if m.operation == core.OperationUninstall {
+		fmt.Fprintf(body, "  %s: %t\n", m.text("删除数据", "Purge data"), m.options.Purge)
+	}
+	body.WriteString("\n")
+	m.renderMenu(body, m.text("确认继续？", "Continue?"), []string{m.text("继续", "Continue"), m.text("返回", "Back")})
+}
+
+func (m *model) renderDone(body *strings.Builder) {
+	if m.err != nil {
+		body.WriteString(warnStyle.Render(m.text("操作失败：", "Failed: ")+m.err.Error()) + "\n")
+		return
+	}
+	body.WriteString(selectedStyle.Render(m.text("操作完成", "Completed")) + "\n")
+	if m.result.URL != "" {
+		body.WriteString("URL: " + m.result.URL + "\n")
+	}
+	if m.result.GeneratedPassword != "" {
+		body.WriteString("Username: " + m.result.Username + "\nPassword: " + m.result.GeneratedPassword + "\n")
+	}
+	if len(m.result.RetainedFiles) > 0 {
+		body.WriteString(m.text("保留的未知文件：", "Unknown files retained: ") + strings.Join(m.result.RetainedFiles, ", ") + "\n")
+	}
+}
+
+func (m *model) text(zh, en string) string {
+	if m.language == english {
+		return en
+	}
+	return zh
+}
