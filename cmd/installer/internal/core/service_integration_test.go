@@ -134,7 +134,7 @@ func TestIntegrationInstallRollbackRestoresManagedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := &fakeRunner{failOn: "docker compose --progress plain pull"}
+	runner := &fakeRunner{failOn: "docker compose pull"}
 	options := DefaultOptions()
 	options.InstallDir = installDir
 	options.BundleDir = makeTestBundle(t, "v2")
@@ -163,7 +163,7 @@ func TestIntegrationFailedInitialStartRetainsFilesWhenCleanupFails(t *testing.T)
 	root := t.TempDir()
 	installDir := filepath.Join(root, "install")
 	runner := &fakeRunner{failures: []string{
-		"docker compose --progress plain up -d",
+		"docker compose up -d",
 		"docker compose down --remove-orphans",
 	}}
 	options := DefaultOptions()
@@ -188,7 +188,7 @@ func TestIntegrationFailedInitialStartRetainsFilesWhenCleanupFails(t *testing.T)
 func TestIntegrationFailedInitialStartRollsBackAfterCleanup(t *testing.T) {
 	root := t.TempDir()
 	installDir := filepath.Join(root, "install")
-	runner := &fakeRunner{failOn: "docker compose --progress plain up -d"}
+	runner := &fakeRunner{failOn: "docker compose up -d"}
 	options := DefaultOptions()
 	options.InstallDir = installDir
 	options.BundleDir = makeTestBundle(t, "v1")

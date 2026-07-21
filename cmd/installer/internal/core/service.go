@@ -170,12 +170,12 @@ func (s Service) installOrUpgrade(ctx context.Context, operation Operation, opti
 	return result, nil
 }
 
+// compose deliberately passes no --progress flag. Forcing plain output kept the
+// TUI from having to cope with docker's cursor-driven redraws, but the flag
+// only exists on newer Compose plugins: on older ones every install and upgrade
+// failed outright at the pull step with "unknown flag: --progress".
 func (s Service) compose(ctx context.Context, dir string, args ...string) error {
-	command := []string{"compose"}
-	if len(args) > 0 && (args[0] == "pull" || args[0] == "up") {
-		command = append(command, "--progress", "plain")
-	}
-	return s.runner().Run(ctx, dir, "docker", append(command, args...)...)
+	return s.runner().Run(ctx, dir, "docker", append([]string{"compose"}, args...)...)
 }
 
 type installPlan struct {

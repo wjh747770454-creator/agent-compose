@@ -53,6 +53,7 @@ type model struct {
 	inputs        []textinput.Model
 	focus         int
 	spinner       spinner.Model
+	cancelling    bool
 	events        []string
 	result        core.Result
 	err           error
@@ -134,7 +135,12 @@ func (m *model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" && m.screen == screenRunning {
-			m.appendEvent(m.text("正在取消并回滚...", "Cancelling and rolling back..."))
+			// Repeated presses must not stack identical lines; cancellation is
+			// already under way and the log is the only feedback available.
+			if !m.cancelling {
+				m.cancelling = true
+				m.appendEvent(m.text("正在取消并回滚...", "Cancelling and rolling back..."))
+			}
 			m.cancel()
 			return m, nil
 		}

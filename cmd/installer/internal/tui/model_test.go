@@ -132,6 +132,14 @@ func TestModelCancelsRunningOperationBeforeExit(t *testing.T) {
 	if !strings.Contains(m.View(), "回滚") {
 		t.Fatalf("cancellation state missing from view:\n%s", m.View())
 	}
+
+	// Cancellation is not instant, so impatient repeats must not stack lines.
+	for range 5 {
+		m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	}
+	if count := strings.Count(m.View(), "正在取消并回滚"); count != 1 {
+		t.Fatalf("cancellation notice rendered %d times:\n%s", count, m.View())
+	}
 }
 
 func TestModelIgnoresKeysWhileOperationIsRunning(t *testing.T) {
