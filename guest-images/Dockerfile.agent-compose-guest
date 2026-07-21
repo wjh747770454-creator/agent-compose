@@ -1,4 +1,7 @@
 ARG REGISTRY_MIRROR=docker.io
+ARG GOPROXY=https://goproxy.cn,direct
+ARG GO_VERSION=1.26.4
+ARG GRPCURL_VERSION=v1.9.3
 ARG PYPI_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 ARG PYPI_TRUSTED_HOST=mirrors.tuna.tsinghua.edu.cn
 ARG NODE_MAJOR=22
@@ -6,6 +9,15 @@ ARG CODEX_VERSION=0.144.1
 ARG CLAUDE_CODE_VERSION=2.1.206
 ARG GEMINI_CLI_VERSION=0.50.0
 ARG OPENCODE_VERSION=1.17.18
+
+FROM ${REGISTRY_MIRROR}/library/golang:${GO_VERSION}-alpine AS grpcurl-builder
+ARG GOPROXY
+ARG GRPCURL_VERSION
+
+RUN CGO_ENABLED=0 \
+    GOBIN=/out \
+    GOPROXY="${GOPROXY}" \
+    go install github.com/fullstorydev/grpcurl/cmd/grpcurl@"${GRPCURL_VERSION}"
 
 FROM ${REGISTRY_MIRROR}/library/debian:bookworm-slim
 ARG PYPI_INDEX_URL
@@ -16,6 +28,8 @@ ARG CLAUDE_CODE_VERSION
 ARG GEMINI_CLI_VERSION
 ARG OPENCODE_VERSION
 ARG TARGETARCH
+
+COPY --from=grpcurl-builder /out/grpcurl /usr/local/bin/grpcurl
 
 RUN if [ -f /etc/apt/sources.list ]; then \
       sed -i -e 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list && \

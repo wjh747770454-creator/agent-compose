@@ -298,8 +298,19 @@ if [[ -f $GUEST_BUILDER ]]; then
 fi
 if [[ -f $GUEST_DOCKERFILE ]]; then
   guest_dockerfile_source=$(<"$GUEST_DOCKERFILE")
-  forbid_regex "$guest_dockerfile_source" 'golang|go-tools|go[[:space:]]+install|grpcurl|protoc-gen-go' \
-    'Go toolchain or Go-built tools in default guest image'
+  require_regex "$guest_dockerfile_source" 'FROM[^[:space:]]*[[:space:]]+[^[:space:]]*golang:\$\{GO_VERSION\}-alpine[[:space:]]+AS[[:space:]]+grpcurl-builder' \
+    'isolated grpcurl builder stage in default guest image'
+  require_regex "$guest_dockerfile_source" 'go[[:space:]]+install[[:space:]]+github\.com/fullstorydev/grpcurl/cmd/grpcurl@"\$\{GRPCURL_VERSION\}"' \
+    'versioned grpcurl build in isolated builder stage'
+  require_regex "$guest_dockerfile_source" 'COPY[[:space:]]+--from=grpcurl-builder[[:space:]]+/out/grpcurl[[:space:]]+/usr/local/bin/grpcurl' \
+    'standalone grpcurl binary copied into default guest image'
+  grpcurl_builder_copy_count=$(grep -Ec '^[[:space:]]*COPY[[:space:]]+--from=grpcurl-builder' <<<"$guest_dockerfile_source")
+  [[ $grpcurl_builder_copy_count -eq 1 ]] || \
+    fail 'only the standalone grpcurl binary copied from grpcurl builder stage'
+  forbid_regex "$guest_dockerfile_source" '/usr/local/go' \
+    'Go toolchain path in default guest image'
+  forbid_regex "$guest_dockerfile_source" 'protoc-gen-go' \
+    'protobuf Go generators in default guest image'
   forbid_regex "$guest_dockerfile_source" 'GOPATH=' \
     'Go workspace environment in default guest image'
   forbid_regex "$guest_dockerfile_source" 'PATH=[^[:space:]]*/usr/local/go/bin' \
@@ -363,7 +374,8 @@ run_guest_builder() { # remaining arguments are environment overrides
     FAKE_DOCKER_LOG="$FAKE_DOCKER_LOG" \
     GUEST_IMAGE_DOCKERFILE="$ROOT_DIR/guest-images/Dockerfile.agent-compose-guest" \
     IMAGE_TAG=agent-compose-guest:contract \
-    REGISTRY_MIRROR= PYPI_INDEX_URL= PYPI_TRUSTED_HOST= \
+    REGISTRY_MIRROR= GOPROXY= GO_VERSION= GRPCURL_VERSION= \
+    PYPI_INDEX_URL= PYPI_TRUSTED_HOST= \
     "$@" \
     "$GUEST_BUILDER" >/dev/null
 }
@@ -402,13 +414,16 @@ if ! run_guest_builder; then
   fail 'guest image helper default build invocation'
 else
   guest_log=$(<"$FAKE_DOCKER_LOG")
-  for omitted in REGISTRY_MIRROR PYPI_INDEX_URL PYPI_TRUSTED_HOST; do
+  for omitted in REGISTRY_MIRROR GOPROXY GO_VERSION GRPCURL_VERSION PYPI_INDEX_URL PYPI_TRUSTED_HOST; do
     forbid_regex "$guest_log" "^$omitted=" "empty guest $omitted build argument"
   done
 fi
 
 if ! run_guest_builder \
   REGISTRY_MIRROR=registry.example.invalid \
+  GOPROXY=https://go-proxy.example.invalid,direct \
+  GO_VERSION=1.26.4 \
+  GRPCURL_VERSION=v1.9.3 \
   PYPI_INDEX_URL=https://python.example.invalid/simple \
   PYPI_TRUSTED_HOST=python.example.invalid; then
   fail 'guest image helper override build invocation'
@@ -416,6 +431,9 @@ else
   guest_log=$(<"$FAKE_DOCKER_LOG")
   for forwarded in \
     'REGISTRY_MIRROR=registry.example.invalid' \
+    'GOPROXY=https://go-proxy.example.invalid,direct' \
+    'GO_VERSION=1.26.4' \
+    'GRPCURL_VERSION=v1.9.3' \
     'PYPI_INDEX_URL=https://python.example.invalid/simple' \
     'PYPI_TRUSTED_HOST=python.example.invalid'; do
     require_regex "$guest_log" "^$forwarded$" "guest $forwarded build argument"

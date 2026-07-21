@@ -99,7 +99,7 @@ docker_cmd run --rm \
     set -eu
     ! command -v go >/dev/null 2>&1
     test ! -e /usr/local/go/bin/go
-    ! command -v grpcurl >/dev/null 2>&1
+    command -v grpcurl >/dev/null 2>&1
     ! command -v protoc-gen-go >/dev/null 2>&1
     ! command -v protoc-gen-go-grpc >/dev/null 2>&1
   '

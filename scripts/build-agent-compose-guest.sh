@@ -20,6 +20,9 @@ append_build_arg() {
 }
 
 append_build_arg REGISTRY_MIRROR "${REGISTRY_MIRROR:-}"
+append_build_arg GOPROXY "${GOPROXY:-}"
+append_build_arg GO_VERSION "${GO_VERSION:-}"
+append_build_arg GRPCURL_VERSION "${GRPCURL_VERSION:-}"
 append_build_arg PYPI_INDEX_URL "${PYPI_INDEX_URL:-}"
 append_build_arg PYPI_TRUSTED_HOST "${PYPI_TRUSTED_HOST:-}"
 

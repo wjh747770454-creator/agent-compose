@@ -258,11 +258,13 @@ release-matched tarball only when workspace Node.js code needs to install
 ## 6. What Is Not Required
 
 The published default guest is a broad runtime environment, but it intentionally
-does not include the Go toolchain or Go-built utilities such as `grpcurl`,
-`protoc-gen-go`, and `protoc-gen-go-grpc`. The baseline ABI does not require a
-particular Linux distribution, `apt`, Go, a C/C++ compiler, those Go utilities,
-Git, curl, `tini`, every provider CLI, Jupyter, extra kernels, or the offline
-runtime SDK.
+does not include the Go toolchain or the `protoc-gen-go` and
+`protoc-gen-go-grpc` code generators. It retains the standalone `grpcurl`
+utility for gRPC diagnostics; although `grpcurl` is written in Go, the Go
+toolchain is not present in the final image. The baseline ABI does not require a
+particular Linux distribution, `apt`, Go, a C/C++ compiler, the protobuf Go code
+generators, Git, curl, `tini`, every provider CLI, Jupyter, extra kernels, or the
+offline runtime SDK.
 
 Some of these become workload requirements. For example, Git is usually useful
 to coding agents, CA certificates are needed for normal TLS access, and build
