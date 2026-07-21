@@ -422,8 +422,8 @@ fi
 if ! run_guest_builder \
   REGISTRY_MIRROR=registry.example.invalid \
   GOPROXY=https://go-proxy.example.invalid,direct \
-  GO_VERSION=1.26.4 \
-  GRPCURL_VERSION=v1.9.3 \
+  GO_VERSION=1.99.0 \
+  GRPCURL_VERSION=v9.9.1 \
   PYPI_INDEX_URL=https://python.example.invalid/simple \
   PYPI_TRUSTED_HOST=python.example.invalid; then
   fail 'guest image helper override build invocation'
@@ -432,8 +432,8 @@ else
   for forwarded in \
     'REGISTRY_MIRROR=registry.example.invalid' \
     'GOPROXY=https://go-proxy.example.invalid,direct' \
-    'GO_VERSION=1.26.4' \
-    'GRPCURL_VERSION=v1.9.3' \
+    'GO_VERSION=1.99.0' \
+    'GRPCURL_VERSION=v9.9.1' \
     'PYPI_INDEX_URL=https://python.example.invalid/simple' \
     'PYPI_TRUSTED_HOST=python.example.invalid'; do
     require_regex "$guest_log" "^$forwarded$" "guest $forwarded build argument"
