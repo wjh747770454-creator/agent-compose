@@ -52,7 +52,7 @@ type model struct {
 	focus         int
 	spinner       spinner.Model
 	cancelling    bool
-	events        []string
+	events        []logEntry
 	result        core.Result
 	err           error
 	width         int
@@ -368,33 +368,6 @@ func (m *model) renderDone(body *strings.Builder) {
 	if len(m.result.RetainedFiles) > 0 {
 		body.WriteString(m.text("保留的未知文件：", "Unknown files retained: ") + strings.Join(m.result.RetainedFiles, ", ") + "\n")
 	}
-}
-
-func (m *model) appendEvent(message string) {
-	if message == "" {
-		return
-	}
-	m.events = append(m.events, message)
-	if len(m.events) > 50 {
-		m.events = append([]string(nil), m.events[len(m.events)-50:]...)
-	}
-}
-
-func (m *model) visibleEvents() []string {
-	limit := m.height - 14
-	if m.width < 80 {
-		limit = m.height - 7
-	}
-	if limit < 3 {
-		limit = 3
-	}
-	if limit > 12 {
-		limit = 12
-	}
-	if len(m.events) <= limit {
-		return m.events
-	}
-	return m.events[len(m.events)-limit:]
 }
 
 func (m *model) yesNo(value bool) string {
