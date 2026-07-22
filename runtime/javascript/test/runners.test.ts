@@ -89,20 +89,98 @@ describe("CodexRunner", () => {
 
       expect(result.threadId).toBe("thread-1");
       expect(result.finalText).toBe("hello!");
+      expect(runner.transcript()).toBe("hello!");
       expect(stdio.stderr).toContain("hello");
-      expect(stdio.stderr).toContain("$ pwd");
-      expect(stdio.stderr).toContain("[file_change]");
-      expect(stdio.stderr).toContain("edit: a.ts");
-      expect(stdio.stderr).toContain("[mcp:srv/lookup]");
-      expect(stdio.stderr).toContain("\"query\": \"docs\"");
-      expect(stdio.stderr).toContain("mcp result");
-      expect(stdio.stderr).toContain("[mcp:srv/lookup]\n{\n  \"query\": \"docs\"\n}\nmcp result");
-      expect(stdio.stderr).toContain("mcp failed");
-      expect(stdio.stderr).toContain("[todo]");
-      expect(stdio.stderr).toContain("[x] one");
-      expect(stdio.stderr).toContain("item bad");
-      expect(stdio.stderr).toContain("[web_search] docs");
-      expect(stdio.stderr).not.toContain("[web_search] \n");
+      for (const hidden of [
+        "$ pwd",
+        "/work",
+        "[file_change]",
+        "edit: a.ts",
+        "[mcp:srv/lookup]",
+        "\"query\": \"docs\"",
+        "mcp result",
+        "mcp failed",
+        "[todo]",
+        "[x] one",
+        "item bad",
+        "[web_search] docs",
+      ]) {
+        expect(stdio.stderr).not.toContain(hidden);
+      }
+    });
+  });
+
+  it("keeps large Codex tool JSON out of the user transcript", async () => {
+    await withTempSession(async (root) => {
+      const runner = new CodexRunner(runnerOptions(root));
+      const result = {
+        provider: "codex" as const,
+        threadId: "",
+        stopReason: "completed",
+        finalText: "",
+        transcript: "",
+        stderr: "",
+      };
+      const rawLedger = JSON.stringify({
+        records: Array.from({ length: 20 }, (_, index) => ({
+          recordType: "activity",
+          recordJson: JSON.stringify({
+            operation: { method: "dingtalk.aitable.v1.AITableService/CreateKanbanRecord" },
+            target: { title: `record-${index}` },
+          }),
+        })),
+      });
+      const stdio = captureStdio();
+      try {
+        runner.handleEvent({
+          type: "item.completed",
+          item: { id: "cmd-ledger", type: "command_execution", command: "query-ledger", aggregated_output: rawLedger },
+        }, result);
+        runner.handleEvent({
+          type: "item.completed",
+          item: { id: "answer", type: "agent_message", text: "台账显示共有 7 条更新。" },
+        }, result);
+      } finally {
+        stdio.restore();
+      }
+
+      expect(result.finalText).toBe("台账显示共有 7 条更新。");
+      expect(runner.transcript()).toBe("台账显示共有 7 条更新。");
+      expect(stdio.stderr).toBe("台账显示共有 7 条更新。");
+      expect(stdio.stderr).not.toContain("recordJson");
+      expect(stdio.stderr).not.toContain("CreateKanbanRecord");
+    });
+  });
+
+  it("keeps a completed Codex answer when a late runtime failure arrives", async () => {
+    await withTempSession(async (root) => {
+      const runner = new CodexRunner(runnerOptions(root));
+      const result = {
+        provider: "codex" as const,
+        threadId: "",
+        stopReason: "completed",
+        finalText: "",
+        transcript: "",
+        stderr: "",
+      };
+      const stdio = captureStdio();
+      try {
+        runner.handleEvent({
+          type: "item.completed",
+          item: { id: "answer", type: "agent_message", text: "查询完成，结果可追溯。" },
+        }, result);
+        runner.handleEvent({
+          type: "turn.failed",
+          error: { message: "runtime failed" },
+        }, result);
+      } finally {
+        stdio.restore();
+      }
+
+      expect(result.finalText).toBe("查询完成，结果可追溯。");
+      expect(result.stopReason).toBe("completed_with_runtime_warning");
+      expect(result.stderr).toBe("runtime failed");
+      expect(runner.transcript()).toBe("查询完成，结果可追溯。");
     });
   });
 
@@ -131,13 +209,13 @@ describe("CodexRunner", () => {
         stdio.restore();
       }
 
-      expect(stdio.stderr.match(/\[file_change\]/g)).toHaveLength(1);
-      expect(stdio.stderr).toContain("[mcp:srv/tool]");
+      expect(stdio.stderr).toBe("");
+      expect(runner.transcript()).toBe("");
       expect(result.finalText).toBe("");
     });
   });
 
-  it("keeps the Codex web search marker when no query is exposed", async () => {
+  it("keeps Codex web search markers out of the user transcript", async () => {
     await withTempSession(async (root) => {
       const runner = new CodexRunner(runnerOptions(root));
       const result = {
@@ -156,7 +234,8 @@ describe("CodexRunner", () => {
         stdio.restore();
       }
 
-      expect(stdio.stderr).toBe("\n[web_search] \n");
+      expect(stdio.stderr).toBe("");
+      expect(runner.transcript()).toBe("");
     });
   });
 

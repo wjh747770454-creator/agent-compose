@@ -412,7 +412,7 @@ func (c *Controller) executeStartedProjectRun(ctx context.Context, coordinator *
 			RunID:     run.RunID,
 			SandboxID: sandboxResult.Sandbox.Summary.ID,
 			ExitCode:  1,
-			Error:     fmt.Sprintf("agent execution failed: %v", err),
+			Error:     agentExecutionFailedMessage(err.Error()),
 		})
 		if markErr != nil {
 			return domain.ProjectRunRecord{}, nil, markErr
@@ -427,7 +427,7 @@ func (c *Controller) executeStartedProjectRun(ctx context.Context, coordinator *
 			RunID:     run.RunID,
 			SandboxID: sandboxResult.Sandbox.Summary.ID,
 			ExitCode:  1,
-			Error:     fmt.Sprintf("agent execution failed: %v", err),
+			Error:     agentExecutionFailedMessage(err.Error()),
 		})
 		if markErr != nil {
 			return domain.ProjectRunRecord{}, nil, markErr
@@ -799,20 +799,20 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 	if c.store == nil || c.runtime == nil {
 		err := fmt.Errorf("prompt runtime dependencies are required")
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	appconfig.ApplyDefaultGuestPaths(c.config)
 	vmState, err := c.store.GetVMState(sandbox.Summary.ID)
 	if err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	runtime, err := c.runtime(sandbox)
 	if err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	interactionRuntime, ok := runtime.(InteractionRuntime)
@@ -824,19 +824,19 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 	}
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	run, err = markProjectRunInteractionArtifacts(ctx, coordinator, run, sandbox, logsPath, artifactsDir)
 	if err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	agentConfig, err := c.projectRunAgentConfig(ctx, run)
 	if err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	if agentConfig.Provider != "codex" && agentConfig.Provider != "claude" {
@@ -848,25 +848,25 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 	systemPrompt, err := c.projectRunAgentSystemPrompt(ctx, run)
 	if err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	if err := execution.WriteAgentSystemPromptFile(sandbox, systemPrompt); err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	schemaPath, err := execution.WriteAgentOutputSchemaFile(c.config, sandbox, agentConfig.Provider, req.OutputSchemaJSON)
 	if err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	env := execution.BuildSandboxExecEnv(c.config, sandbox, c.config.GuestHomePath)
 	managedEnv, err := c.ensurePromptAttachLLMFacadeEnv(ctx, sandbox, agentConfig, run.RunID)
 	if err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	if len(managedEnv) > 0 {
@@ -899,7 +899,7 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 	interaction, err := interactionRuntime.OpenInteraction(ctx, sandbox, vmState, spec)
 	if err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	interaction = driverpkg.GuardRuntimeInteractionInput(interaction)
@@ -908,7 +908,7 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 	input := &promptWrapperInput{interaction: interaction}
 	if err := input.Start(agentConfig, c.config, schemaPath); err != nil {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+		transition.Error = agentExecutionFailedMessage(err.Error())
 		return transition, err
 	}
 	inputCtx, cancelInput := context.WithCancel(ctx)
@@ -917,7 +917,7 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 	if prompt := strings.TrimSpace(req.Prompt); prompt != "" {
 		if err := input.HumanMessage(prompt); err != nil {
 			transition.ExitCode = 1
-			transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+			transition.Error = agentExecutionFailedMessage(err.Error())
 			return transition, err
 		}
 	} else {
@@ -932,13 +932,13 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 				result, waitErr := interaction.Wait()
 				if waitErr != nil {
 					transition.ExitCode = 1
-					transition.Error = fmt.Sprintf("agent execution failed: %v", waitErr)
+					transition.Error = agentExecutionFailedMessage(waitErr.Error())
 					return transition, waitErr
 				}
 				if promptTransition != nil {
 					if result.ExitCode != 0 || !result.Success {
 						promptTransition.ExitCode = execution.FirstNonZeroInt(result.ExitCode, promptTransition.ExitCode)
-						promptTransition.Error = firstNonEmpty(promptTransition.Error, result.Error, "agent execution failed")
+						promptTransition.Error = firstNonEmpty(promptTransition.Error, agentExecutionFailedMessage(result.Error))
 						return *promptTransition, errors.New(promptTransition.Error)
 					}
 					if promptTransition.ExitCode != 0 || strings.TrimSpace(promptTransition.Error) != "" {
@@ -949,7 +949,7 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 				return transitionFromPromptRuntimeResult(run, sandbox, logsPath, result, errorFromRuntimeResult(result)), errorFromRuntimeResult(result)
 			}
 			transition.ExitCode = 1
-			transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+			transition.Error = agentExecutionFailedMessage(err.Error())
 			_ = send(runAttachErrorResponse("runtime_recv_error", err.Error(), true))
 			return transition, err
 		}
@@ -957,7 +957,7 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 		case driverpkg.RuntimeOutputStarted:
 			if err := send(runAttachStartedResponse(run, sandbox, warningsFromRun(run), frame.StartedAt)); err != nil {
 				transition.ExitCode = 1
-				transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+				transition.Error = agentExecutionFailedMessage(err.Error())
 				return transition, err
 			}
 		case driverpkg.RuntimeOutputStdout:
@@ -965,13 +965,13 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 			if err != nil {
 				_ = send(runAttachErrorResponse("runtime_stream_decode_error", err.Error(), true))
 				transition.ExitCode = 1
-				transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+				transition.Error = agentExecutionFailedMessage(err.Error())
 				return transition, err
 			}
 			for _, resp := range responses {
 				if err := send(resp); err != nil {
 					transition.ExitCode = 1
-					transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+					transition.Error = agentExecutionFailedMessage(err.Error())
 					return transition, err
 				}
 				if resp.GetAgentTurnCompleted() != nil {
@@ -984,12 +984,12 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 		case driverpkg.RuntimeOutputStderr:
 			if err := projector.AppendStderr(string(frame.Data)); err != nil {
 				transition.ExitCode = 1
-				transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+				transition.Error = agentExecutionFailedMessage(err.Error())
 				return transition, err
 			}
 			if err := send(runAttachOutputResponse(frame.Data, agentcomposev2.StdioStream_STDIO_STREAM_STDERR, false)); err != nil {
 				transition.ExitCode = 1
-				transition.Error = fmt.Sprintf("agent execution failed: %v", err)
+				transition.Error = agentExecutionFailedMessage(err.Error())
 				return transition, err
 			}
 		case driverpkg.RuntimeOutputResult:
@@ -1000,7 +1000,7 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 			if promptTransition != nil {
 				if result.ExitCode != 0 || !result.Success {
 					promptTransition.ExitCode = execution.FirstNonZeroInt(result.ExitCode, promptTransition.ExitCode)
-					promptTransition.Error = firstNonEmpty(promptTransition.Error, result.Error, "agent execution failed")
+					promptTransition.Error = firstNonEmpty(promptTransition.Error, agentExecutionFailedMessage(result.Error))
 					return *promptTransition, errors.New(promptTransition.Error)
 				}
 				if promptTransition.ExitCode != 0 || strings.TrimSpace(promptTransition.Error) != "" {
@@ -1018,7 +1018,7 @@ func (c *Controller) runPromptInteraction(ctx context.Context, coordinator *Coor
 			}
 			_ = send(runAttachErrorResponse(code, message, true))
 			transition.ExitCode = 1
-			transition.Error = message
+			transition.Error = agentExecutionFailedMessage(message)
 			return transition, errors.New(message)
 		}
 	}
@@ -1231,13 +1231,13 @@ func transitionFromPromptWrapperResult(run domain.ProjectRunRecord, sandbox *dom
 	transition := TransitionRequest{
 		RunID:      run.RunID,
 		SandboxID:  sandbox.Summary.ID,
-		Output:     finalText,
+		Output:     agentDisplayOutput(finalText),
 		ResultJSON: string(payload),
 		LogsPath:   logsPath,
 	}
 	if strings.TrimSpace(message) != "" {
 		transition.ExitCode = 1
-		transition.Error = fmt.Sprintf("agent execution failed: %s", strings.TrimSpace(message))
+		transition.Error = agentExecutionFailedMessage(message)
 		return transition
 	}
 	if strings.EqualFold(strings.TrimSpace(stopReason), "cancelled") {
@@ -1253,11 +1253,13 @@ func transitionFromPromptRuntimeResult(run domain.ProjectRunRecord, sandbox *dom
 		SandboxID: sandbox.Summary.ID,
 		LogsPath:  logsPath,
 		ExitCode:  result.ExitCode,
-		Error:     result.Error,
+	}
+	if strings.TrimSpace(result.Error) != "" {
+		transition.Error = agentExecutionFailedMessage(result.Error)
 	}
 	if execErr != nil {
 		transition.ExitCode = execution.FirstNonZeroInt(transition.ExitCode, 1)
-		transition.Error = fmt.Sprintf("agent execution failed: %v", execErr)
+		transition.Error = agentExecutionFailedMessage(execErr.Error())
 	}
 	return transition
 }

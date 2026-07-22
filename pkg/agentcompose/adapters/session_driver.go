@@ -87,12 +87,24 @@ func (d *SandboxDriver) StartSandboxVM(ctx context.Context, session *domain.Sand
 
 	info, err := runtime.EnsureSandbox(ctx, session, vmState, proxyState)
 	if err != nil {
-		vmState.LastError = err.Error()
+		returnErr := normalizeSandboxResumeError(err, resuming)
+		vmState.LastError = returnErr.Error()
 		_ = d.Store.SaveVMState(session.Summary.ID, vmState)
-		return err
+		return returnErr
 	}
 
 	return d.saveSandboxStartInfo(session, vmState, proxyState, info)
+}
+
+func normalizeSandboxResumeError(err error, resuming bool) error {
+	if err == nil || !resuming {
+		return err
+	}
+	normalized := strings.ToLower(err.Error())
+	if strings.Contains(normalized, "runtime state for stopped sandbox") && strings.Contains(normalized, "refusing to recreate") {
+		return domain.ClassifyError(domain.ErrFailedPrecondition, "sandbox runtime is no longer resumable; start a new sandbox", nil)
+	}
+	return err
 }
 
 func (d *SandboxDriver) saveSandboxStartInfo(session *domain.Sandbox, vmState domain.VMState, proxyState domain.ProxyState, info domain.SandboxVMInfo) error {

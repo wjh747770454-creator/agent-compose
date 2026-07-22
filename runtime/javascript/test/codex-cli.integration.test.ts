@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("Codex CLI integration", () => {
-  it("surfaces MCP tool calls from the real Codex SDK subprocess path", async () => {
+  it("keeps MCP tool calls out of the user transcript on the real Codex SDK subprocess path", async () => {
     await withTempSession(async (root) => {
       const binDir = path.join(root, "bin");
       const fakeCodex = path.join(binDir, "codex");
@@ -66,14 +66,15 @@ process.stdout.write(JSON.stringify({
         stdio.restore();
       }
 
-      expect(stdio.stderr).toContain("[mcp:srv/lookup]");
-      expect(stdio.stderr).toContain("\"query\": \"docs\"");
-      expect(stdio.stderr).toContain("lookup result");
-      expect(stdio.stderr).toContain("done");
+      expect(stdio.stderr).toBe("done");
+      expect(stdio.stderr).not.toContain("[mcp:srv/lookup]");
+      expect(stdio.stderr).not.toContain("\"query\": \"docs\"");
+      expect(stdio.stderr).not.toContain("lookup result");
       expect(stdio.stderr).not.toContain("[tool:srv/lookup]");
       expect(stdio.stdout).toContain(`${RESULT_PREFIX}{`);
       expect(stdio.stdout).toContain("\"threadId\":\"codex-cli-thread\"");
       expect(stdio.stdout).toContain("\"finalText\":\"done\"");
+      expect(stdio.stdout).toContain("\"transcript\":\"done\"");
     });
   });
 });

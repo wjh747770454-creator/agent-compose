@@ -56,6 +56,23 @@ func TestNewConfigParsesEnvironment(t *testing.T) {
 	testNewConfigParsesEnvironment(t)
 }
 
+func TestNewConfigParsesCapabilityInvocationJournalPath(t *testing.T) {
+	root := t.TempDir()
+	journalPath := filepath.Join(root, "capability-invocations.jsonl")
+	t.Setenv("DATA_ROOT", filepath.Join(root, "data"))
+	t.Setenv("CAPABILITY_INVOCATION_JOURNAL_PATH", "  "+journalPath+"  ")
+
+	di := do.New()
+	do.ProvideValue(di, slog.Default())
+	config, err := NewConfig(di)
+	if err != nil {
+		t.Fatalf("NewConfig returned error: %v", err)
+	}
+	if config.CapabilityInvocationJournalPath != journalPath {
+		t.Fatalf("CapabilityInvocationJournalPath = %q, want %q", config.CapabilityInvocationJournalPath, journalPath)
+	}
+}
+
 func TestNewConfigNormalizesJupyterProxyBase(t *testing.T) {
 	for _, tc := range []struct {
 		name string

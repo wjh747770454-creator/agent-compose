@@ -2,7 +2,6 @@ import { resolveCodexPath } from "../codex-path.js";
 import { stringEnv } from "../env.js";
 import { uniqueDirectories } from "../paths.js";
 import { readStoredThread, writeStoredThread } from "../session-state.js";
-import { extractText, jsonString } from "../text.js";
 import { appendDelta, TranscriptWriter, type TextWriter } from "../transcript.js";
 import type { AgentResult, RunnerOptions } from "../types.js";
 
@@ -59,12 +58,7 @@ export class CodexRunner {
 
   emitCommand(item: Record<string, unknown> & { id: string }): void {
     const state = (this.itemState.get(item.id) || {}) as CodexItemState;
-    if (!state.commandStarted) {
-      this.writer.line(`\n$ ${item.command}`);
-      state.commandStarted = true;
-      this.itemState.set(item.id, state);
-    }
-    appendDelta(this.writer, this.itemState as Map<string, string>, `${item.id}:command`, String(item.aggregated_output || ""));
+    state.commandStarted = true;
     state.commandOutput = String(item.aggregated_output || "");
     this.itemState.set(item.id, state);
   }
@@ -75,39 +69,15 @@ export class CodexRunner {
       return;
     }
     const state = (this.itemState.get(item.id) || {}) as CodexItemState;
-    if (state.fileChangeEmitted) {
-      return;
-    }
-    this.writer.line("\n[file_change]");
-    for (const change of changes) {
-      const record = change as Record<string, unknown>;
-      this.writer.line(`${record.kind}: ${record.path}`);
-    }
     state.fileChangeEmitted = true;
     this.itemState.set(item.id, state);
   }
 
   emitMcp(item: Record<string, unknown> & { id: string }): void {
     const state = (this.itemState.get(item.id) || {}) as CodexItemState;
-    if (!state.mcpStarted) {
-      this.writer.line(`\n[mcp:${item.server}/${item.tool}]`);
-      if (item.arguments !== undefined) {
-        this.writer.line(jsonString(item.arguments));
-      }
-      state.mcpStarted = true;
-    }
-    const error = item.error as Record<string, unknown> | undefined;
-    if (item.status === "completed" && item.result && !state.mcpResultEmitted) {
-      const content = extractText(item.result);
-      if (content.trim()) {
-        this.writer.line(content);
-      }
-      state.mcpResultEmitted = true;
-    }
-    if (item.status === "failed" && typeof error?.message === "string" && !state.mcpErrorEmitted) {
-      this.writer.line(error.message);
-      state.mcpErrorEmitted = true;
-    }
+    state.mcpStarted = true;
+    state.mcpResultEmitted = item.status === "completed" || state.mcpResultEmitted;
+    state.mcpErrorEmitted = item.status === "failed" || state.mcpErrorEmitted;
     this.itemState.set(item.id, state);
   }
 
@@ -119,7 +89,7 @@ export class CodexRunner {
       })
       : [];
     const nextText = lines.length > 0 ? `\n[todo]\n${lines.join("\n")}\n` : "";
-    appendDelta(this.writer, this.itemState as Map<string, string>, item.id, nextText);
+    this.itemState.set(item.id, nextText);
   }
 
   emitWebSearch(item: Record<string, unknown> & { id: string }, eventType: unknown): void {
@@ -133,7 +103,6 @@ export class CodexRunner {
     if (!query && eventType !== "item.completed") {
       return;
     }
-    this.writer.line(`\n[web_search] ${query}`);
     state.webSearchEmitted = true;
     this.itemState.set(item.id, state);
   }
@@ -145,7 +114,13 @@ export class CodexRunner {
     }
     if (event.type === "turn.failed") {
       const error = event.error as Record<string, unknown> | undefined;
-      throw new Error(String(error?.message || "codex turn failed"));
+      const message = String(error?.message || "codex turn failed");
+      if (result.finalText.trim()) {
+        result.stopReason = "completed_with_runtime_warning";
+        result.stderr = message;
+        return;
+      }
+      throw new Error(message);
     }
     if (!event.item || typeof event.item !== "object") {
       return;
@@ -159,7 +134,7 @@ export class CodexRunner {
         }
         break;
       case "reasoning":
-        appendDelta(this.writer, this.itemState as Map<string, string>, item.id, String(item.text || ""));
+        this.itemState.set(item.id, String(item.text || ""));
         break;
       case "command_execution":
         this.emitCommand(item);
@@ -177,7 +152,7 @@ export class CodexRunner {
         this.emitTodo(item);
         break;
       case "error":
-        this.writer.line(String(item.message || "codex item error"));
+        this.itemState.set(item.id, String(item.message || "codex item error"));
         break;
       default:
         break;

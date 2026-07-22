@@ -15,7 +15,8 @@ type CapabilityGatewayStore interface {
 
 func NewCapProxyServer(config *appconfig.Config, gatewayStore CapabilityGatewayStore, sandboxes capproxy.SandboxResolver) *capproxy.Server {
 	return capproxy.NewServer(capproxy.Config{
-		Listen: strings.TrimSpace(config.CapGRPCListen),
+		Listen:                strings.TrimSpace(config.CapGRPCListen),
+		InvocationJournalPath: strings.TrimSpace(config.CapabilityInvocationJournalPath),
 		OctoBus: func(ctx context.Context) (string, string, bool) {
 			settings, err := gatewayStore.GetCapabilityGateway(ctx)
 			if err != nil || strings.TrimSpace(settings.Addr) == "" {

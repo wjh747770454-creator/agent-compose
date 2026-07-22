@@ -2,9 +2,7 @@ package runs
 
 import (
 	"encoding/json"
-	"fmt"
 	"path/filepath"
-	"strings"
 
 	"agent-compose/pkg/execution"
 	domain "agent-compose/pkg/model"
@@ -15,7 +13,7 @@ func TransitionFromAgentCell(run domain.ProjectRunRecord, sandbox *domain.Sandbo
 	req := TransitionRequest{
 		RunID:    run.RunID,
 		ExitCode: cell.ExitCode,
-		Output:   cell.Output,
+		Output:   agentDisplayOutput(cell.Output),
 	}
 	if sandbox != nil {
 		req.SandboxID = sandbox.Summary.ID
@@ -39,15 +37,12 @@ func TransitionFromAgentCell(run domain.ProjectRunRecord, sandbox *domain.Sandbo
 	}
 	if execErr != nil {
 		req.ExitCode = execution.FirstNonZeroInt(req.ExitCode, 1)
-		req.Error = fmt.Sprintf("agent execution failed: %v", execErr)
+		req.Error = agentExecutionFailedMessage(execErr.Error())
 		return req
 	}
 	if !cell.Success {
 		req.ExitCode = execution.FirstNonZeroInt(req.ExitCode, 1)
-		req.Error = "agent execution failed"
-		if detail := firstNonEmpty(cell.Stderr, cell.Output); strings.TrimSpace(detail) != "" {
-			req.Error += ": " + strings.TrimSpace(detail)
-		}
+		req.Error = agentExecutionFailedMessage(firstNonEmpty(cell.Stderr, cell.Output))
 	}
 	return req
 }

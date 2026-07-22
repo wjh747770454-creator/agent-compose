@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,6 +184,52 @@ func TestSandboxDriverStartSandboxVMSavesRuntimeState(t *testing.T) {
 	}
 	if vmState.BoxID != "container-1" || vmState.BootstrapRef != updatedProxyState.JupyterURL {
 		t.Fatalf("vm state = %+v, want box id and bootstrap ref from runtime", vmState)
+	}
+}
+
+func TestSandboxDriverStartSandboxVMRedactsNonResumableStoppedSandboxError(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	config := &appconfig.Config{
+		DataRoot:            root,
+		SandboxRoot:         filepath.Join(root, "sandboxes"),
+		RuntimeDriver:       driverpkg.RuntimeDriverBoxlite,
+		BoxliteHome:         filepath.Join(root, "boxlite"),
+		DefaultImage:        "guest:latest",
+		GuestWorkspacePath:  "/workspace",
+		SandboxStartTimeout: 2 * time.Second,
+	}
+	store, err := sessionstore.NewWithConfig(config)
+	if err != nil {
+		t.Fatalf("NewWithConfig returned error: %v", err)
+	}
+	session, err := store.CreateSandbox(ctx, "adapter session", "", driverpkg.RuntimeDriverBoxlite, "guest:latest", "", domain.SandboxTypeManual, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSandbox returned error: %v", err)
+	}
+	if err := store.SaveVMState(session.Summary.ID, domain.VMState{
+		Driver:    driverpkg.RuntimeDriverBoxlite,
+		Image:     "guest:latest",
+		StoppedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("SaveVMState returned error: %v", err)
+	}
+	runtimeErr := errors.New("docker runtime state for stopped sandbox abc is missing; refusing to recreate it during resume: only canonical legacy UUID sandboxes may be reconstructed")
+	driver := NewSandboxDriver(config, store, nil, fakeRuntimeProvider{runtime: fakeSessionRuntime{ensureErr: runtimeErr}})
+
+	err = driver.StartSandboxVM(ctx, session)
+	if !errors.Is(err, domain.ErrFailedPrecondition) {
+		t.Fatalf("StartSandboxVM error = %v, want failed precondition", err)
+	}
+	if got := err.Error(); strings.Contains(got, "docker runtime state") || strings.Contains(got, "canonical legacy UUID") {
+		t.Fatalf("StartSandboxVM leaked runtime internals: %q", got)
+	}
+	vmState, err := store.GetVMState(session.Summary.ID)
+	if err != nil {
+		t.Fatalf("GetVMState returned error: %v", err)
+	}
+	if vmState.LastError != "sandbox runtime is no longer resumable; start a new sandbox" {
+		t.Fatalf("LastError = %q", vmState.LastError)
 	}
 }
 
