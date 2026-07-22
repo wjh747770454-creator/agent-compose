@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -528,7 +527,7 @@ func registerRuntimeLLMFacadeRoutes(app *echo.Echo, di do.Injector) {
 		ResolveTarget: func(ctx context.Context, requestedModel, providerID string) (llms.ResolvedTarget, error) {
 			return llms.ResolveRuntimeLLMTarget(ctx, config, configDB, requestedModel, providerID)
 		},
-		Client: &http.Client{Timeout: config.LLMTimeout},
+		Client: proxy.NewRuntimeLLMHTTPClient(config.LLMTimeout),
 	})
 }
 
