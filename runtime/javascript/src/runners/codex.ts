@@ -159,6 +159,20 @@ export class CodexRunner {
     }
   }
 
+  async consumeEvents(events: AsyncIterable<unknown>, result: AgentResult): Promise<void> {
+    try {
+      for await (const event of events) {
+        this.handleEvent(event as Record<string, unknown>, result);
+      }
+    } catch (error) {
+      if (!result.finalText.trim()) {
+        throw error;
+      }
+      result.stopReason = "completed_with_runtime_warning";
+      result.stderr = error instanceof Error ? error.message : String(error);
+    }
+  }
+
   async runPrompt(promptText: string): Promise<AgentResult> {
     const { Codex } = await import("@openai/codex-sdk");
     const stored = await readStoredThread(this.options.stateRoot, "codex");
@@ -189,9 +203,7 @@ export class CodexRunner {
       promptText,
       this.options.outputSchema ? { outputSchema: this.options.outputSchema } : undefined,
     );
-    for await (const event of events) {
-      this.handleEvent(event as Record<string, unknown>, result);
-    }
+    await this.consumeEvents(events, result);
     result.threadId = thread.id || result.threadId;
     result.transcript = this.writer.transcript();
     if (!result.finalText && result.transcript) {

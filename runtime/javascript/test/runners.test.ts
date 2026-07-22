@@ -184,6 +184,52 @@ describe("CodexRunner", () => {
     });
   });
 
+  it("keeps a completed Codex answer when the event stream disconnects late", async () => {
+    await withTempSession(async (root) => {
+      const runner = new CodexRunner(runnerOptions(root));
+      const result = {
+        provider: "codex" as const,
+        threadId: "",
+        stopReason: "completed",
+        finalText: "",
+        transcript: "",
+        stderr: "",
+      };
+      async function* events(): AsyncGenerator<unknown> {
+        yield { type: "item.completed", item: { id: "answer", type: "agent_message", text: '{"ok":true}' } };
+        throw new Error("stream disconnected before completion: stream closed before response.completed");
+      }
+
+      await runner.consumeEvents(events(), result);
+
+      expect(result.finalText).toBe('{"ok":true}');
+      expect(result.stopReason).toBe("completed_with_runtime_warning");
+      expect(result.stderr).toContain("stream disconnected before completion");
+      expect(runner.transcript()).toBe('{"ok":true}');
+    });
+  });
+
+  it("rejects a disconnected Codex event stream without a completed answer", async () => {
+    await withTempSession(async (root) => {
+      const runner = new CodexRunner(runnerOptions(root));
+      const result = {
+        provider: "codex" as const,
+        threadId: "",
+        stopReason: "completed",
+        finalText: "",
+        transcript: "",
+        stderr: "",
+      };
+      async function* events(): AsyncGenerator<unknown> {
+        yield { type: "item.updated", item: { id: "answer", type: "agent_message", text: "partial" } };
+        throw new Error("stream disconnected before completion: stream closed before response.completed");
+      }
+
+      await expect(runner.consumeEvents(events(), result)).rejects.toThrow("stream disconnected before completion");
+      expect(result.finalText).toBe("");
+    });
+  });
+
   it("skips duplicate and empty Codex event payloads", async () => {
     await withTempSession(async (root) => {
       const runner = new CodexRunner(runnerOptions(root));
