@@ -114,6 +114,13 @@ func (h runtimeDelegationHandler) handle(c echo.Context) error {
 	if request.TargetAgent == "" || request.Prompt == "" {
 		return c.JSON(http.StatusBadRequest, runtimeDelegationResponse{Error: newDelegationError("invalid_request", "targetAgent and prompt are required")})
 	}
+	request.OutputSchemaJSON = strings.TrimSpace(request.OutputSchemaJSON)
+	if request.OutputSchemaJSON != "" {
+		if !json.Valid([]byte(request.OutputSchemaJSON)) {
+			return c.JSON(http.StatusBadRequest, runtimeDelegationResponse{Error: newDelegationError("invalid_request", "outputSchemaJson must be valid JSON")})
+		}
+		request.Prompt = delegationPromptWithSchema(request.Prompt, request.OutputSchemaJSON)
+	}
 	delegationID := strings.TrimSpace(request.IdempotencyKey)
 	if delegationID == "" {
 		delegationID = uuid.NewString()
@@ -218,7 +225,10 @@ func (h runtimeDelegationHandler) executeDelegation(ctx context.Context, parent 
 			ProjectID: parent.ProjectID, AgentName: request.TargetAgent, ParentRunID: parent.RunID, RootRunID: rootRunID,
 			DelegationID: delegationID, DelegationAttempt: attempt, DelegationReason: strings.TrimSpace(request.Reason),
 			Prompt: request.Prompt, Source: domain.ProjectRunSourceAPI, ClientRequestID: clientRequestID,
-			OutputSchemaJSON: strings.TrimSpace(request.OutputSchemaJSON),
+			// Delegated runs carry their schema in the prompt. Some OpenAI-compatible
+			// facades close provider-native structured streams before response.completed.
+			// The proxy extracts and validates JSON before accepting the child result.
+			OutputSchemaJSON: "",
 			CleanupPolicy:    agentcomposev2.RunSandboxCleanupPolicy_RUN_SANDBOX_CLEANUP_POLICY_REMOVE_ON_COMPLETION,
 		}, nil)
 		runID := child.RunID
@@ -226,6 +236,14 @@ func (h runtimeDelegationHandler) executeDelegation(ctx context.Context, parent 
 			runID = predictedRunID
 		}
 		attemptRunIDs = append(attemptRunIDs, runID)
+		if runErr == nil && execErr == nil && child.Status == domain.ProjectRunStatusSucceeded && request.OutputSchemaJSON != "" {
+			var normalized string
+			normalized, execErr = extractDelegationStructuredResult(child.Output)
+			if execErr == nil {
+				child.Output = normalized
+				child.StructuredResultJSON = normalized
+			}
+		}
 		classification = classifyDelegationFailure(child, execErr, runErr)
 		if runErr == nil && execErr == nil && child.Status == domain.ProjectRunStatusSucceeded {
 			h.appendDelegationEvent(ctx, parent, "delegation.succeeded", request.TargetAgent, delegationID, rootRunID, attempt, runID, "", true)
@@ -239,6 +257,40 @@ func (h runtimeDelegationHandler) executeDelegation(ctx context.Context, parent 
 		return child, execErr, runErr, classification, attempt, attemptRunIDs
 	}
 	return child, execErr, runErr, classification, 2, attemptRunIDs
+}
+
+func delegationPromptWithSchema(prompt, schema string) string {
+	return strings.TrimSpace(prompt) + `
+
+## Structured output contract (not business evidence)
+Return exactly one JSON object. The first non-whitespace character must be "{" and the last must be "}".
+Do not add Markdown fences, commentary, progress text, or fields not allowed by this JSON Schema:
+` + strings.TrimSpace(schema)
+}
+
+func extractDelegationStructuredResult(output string) (string, error) {
+	value := strings.TrimSpace(output)
+	if value == "" {
+		return "", errors.New("delegated structured output is empty")
+	}
+	starts := []int{0}
+	for index, char := range value {
+		if char == '{' && index != 0 {
+			starts = append(starts, index)
+		}
+	}
+	for _, start := range starts {
+		decoder := json.NewDecoder(strings.NewReader(value[start:]))
+		var result map[string]any
+		if err := decoder.Decode(&result); err != nil || result == nil {
+			continue
+		}
+		normalized, err := json.Marshal(result)
+		if err == nil {
+			return string(normalized), nil
+		}
+	}
+	return "", errors.New("delegated structured output is missing or invalid JSON")
 }
 
 func classifyDelegationFailure(child domain.ProjectRunRecord, execErr, runErr error) string {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -96,6 +97,60 @@ func TestRuntimeDelegationDerivesTrustedLineage(t *testing.T) {
 	}
 	if runner.request.AgentName != "project-intelligence" || runner.request.ClientRequestID != "delegation-1:1" || runner.request.DelegationAttempt != 1 {
 		t.Fatalf("delegation request = %#v", runner.request)
+	}
+}
+
+func TestRuntimeDelegationUsesPromptSchemaCompatibilityMode(t *testing.T) {
+	parent := domain.ProjectRunRecord{RunID: "parent-1", RootRunID: "parent-1", ProjectID: "project-1", SandboxID: "sandbox-1", Status: domain.ProjectRunStatusRunning}
+	runner := &delegationRunnerFake{run: domain.ProjectRunRecord{
+		RunID: "child-1", Status: domain.ProjectRunStatusSucceeded,
+		Output: "analysis complete\n{\"project\":\"mobile\"}",
+	}}
+	app := echo.New()
+	RegisterRuntimeDelegationRoutes(app, RuntimeDelegationOptions{
+		Sandboxes: delegationSandboxResolverFake{binding: capproxy.SandboxBinding{SandboxID: "sandbox-1"}},
+		Runs:      delegationRunStoreFake{runs: []domain.ProjectRunRecord{parent}},
+		Runner:    runner,
+	})
+	body, _ := json.Marshal(runtimeDelegationRequest{
+		TargetAgent:      "project-intelligence",
+		Prompt:           "analyze",
+		OutputSchemaJSON: `{"type":"object","required":["project"]}`,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/delegations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(capproxy.SandboxTokenMetadata, "cap-token")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte(`"structuredResult":{"project":"mobile"}`)) {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if runner.request.OutputSchemaJSON != "" || !strings.Contains(runner.request.Prompt, "Structured output contract") || !strings.Contains(runner.request.Prompt, `"required":["project"]`) {
+		t.Fatalf("compatibility request = %#v", runner.request)
+	}
+}
+
+func TestRuntimeDelegationRejectsInvalidPromptStructuredOutput(t *testing.T) {
+	parent := domain.ProjectRunRecord{RunID: "parent-1", RootRunID: "parent-1", ProjectID: "project-1", SandboxID: "sandbox-1", Status: domain.ProjectRunStatusRunning}
+	runner := &delegationRunnerFake{run: domain.ProjectRunRecord{RunID: "child-1", Status: domain.ProjectRunStatusSucceeded, Output: "not json"}}
+	auditor := &delegationAuditorFake{}
+	app := echo.New()
+	RegisterRuntimeDelegationRoutes(app, RuntimeDelegationOptions{
+		Sandboxes: delegationSandboxResolverFake{binding: capproxy.SandboxBinding{SandboxID: "sandbox-1"}},
+		Runs:      delegationRunStoreFake{runs: []domain.ProjectRunRecord{parent}},
+		Runner:    runner,
+		Auditor:   auditor,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/runtime/sandboxes/sandbox-1/delegations", bytes.NewBufferString(`{"targetAgent":"worker","prompt":"work","outputSchemaJson":"{\"type\":\"object\"}"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(capproxy.SandboxTokenMetadata, "cap-token")
+	recorder := httptest.NewRecorder()
+	app.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusBadGateway || !bytes.Contains(recorder.Body.Bytes(), []byte(`"classification":"validation"`)) {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(auditor.events) < 3 || auditor.events[len(auditor.events)-1].Name != "delegation.failed" {
+		t.Fatalf("events=%#v", auditor.events)
 	}
 }
 
